@@ -6,8 +6,10 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
     proxy: {
-      '/cells': 'http://localhost:8000',
-      '/sorties': 'http://localhost:8000',
+      '/api': {
+        target: 'http://localhost:8000',
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
       '/ws': { target: 'ws://localhost:8000', ws: true },
     },
   },

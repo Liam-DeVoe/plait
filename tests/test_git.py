@@ -54,7 +54,7 @@ async def test_is_behind_main_when_behind(git_env):
     assert await git.is_behind_main(wt_path)
 
 
-async def test_rebase_onto_main_clean(git_env):
+async def test_merge_from_main_clean(git_env):
     # Create a branch with its own commit
     git_env.create_branch("feature")
     git_env.add_commit("feature.txt", "feature", "add feature")
@@ -68,8 +68,8 @@ async def test_rebase_onto_main_clean(git_env):
     # Create worktree from the feature branch
     wt_path = await git.create_worktree(git_env.repo_name, "feature", "cell-6")
 
-    # Rebase should succeed (no conflicts)
-    success, output = await git.rebase_onto_main(wt_path)
+    # Merge should succeed (no conflicts)
+    success, output = await git.merge_from_main(wt_path)
     assert success
 
     # Verify the worktree has both files
@@ -77,7 +77,7 @@ async def test_rebase_onto_main_clean(git_env):
     assert (Path(wt_path) / "main_change.txt").exists()
 
 
-async def test_rebase_onto_main_with_conflict(git_env):
+async def test_merge_from_main_with_conflict(git_env):
     # Create a branch that edits README.md
     git_env.create_branch("conflicting")
     git_env.add_commit("README.md", "branch version", "edit readme on branch")
@@ -91,17 +91,17 @@ async def test_rebase_onto_main_with_conflict(git_env):
     # Create worktree from the conflicting branch
     wt_path = await git.create_worktree(git_env.repo_name, "conflicting", "cell-7")
 
-    # Rebase should fail (conflict on README.md)
-    success, output = await git.rebase_onto_main(wt_path)
+    # Merge should fail (conflict on README.md)
+    success, output = await git.merge_from_main(wt_path)
     assert not success
     assert "conflicts" in output.lower()
 
-    # Verify rebase was aborted (working tree is clean)
+    # Verify merge was aborted (working tree is clean)
     rc, out, err = await git.run("git", "status", "--porcelain", cwd=wt_path)
     assert out.strip() == ""
 
 
-async def test_force_push(git_env):
+async def test_push(git_env):
     # Create a branch and worktree
     git_env.create_branch("push-test")
     git_env.add_commit("file.txt", "v1", "initial")
@@ -115,6 +115,6 @@ async def test_force_push(git_env):
     await git.run("git", "add", "file.txt", cwd=wt_path)
     await git.run("git", "commit", "-m", "update", cwd=wt_path)
 
-    # Force push
-    success, output = await git.force_push(wt_path, "push-test")
+    # Push
+    success, output = await git.push(wt_path, "push-test")
     assert success

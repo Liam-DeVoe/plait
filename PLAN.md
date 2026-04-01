@@ -2,7 +2,7 @@
 
 ## Phase 1: Core (MVP)
 
-The smallest thing that solves the immediate pain: auto-rebase with conflict resolution, cell management, and a basic web UI.
+The smallest thing that solves the immediate pain: auto-merge with conflict resolution, cell management, and a basic web UI.
 
 ### 1.1 Project scaffold
 - [x] Python backend with FastAPI, SQLite
@@ -17,30 +17,30 @@ The smallest thing that solves the immediate pain: auto-rebase with conflict res
 ### 1.3 Git/worktree operations
 - [x] Create worktree for a cell (from existing PR or fresh branch)
 - [x] Delete/clean up worktrees on archive
-- [x] Rebase a worktree branch onto origin/main
+- [x] Merge origin/main into a worktree branch
 - [x] Detect and report conflicts
 
 ### 1.4 Cell management API
 - [x] `POST /cells` — create cell (from PR URL or repo + branch)
 - [x] `GET /cells` — list all cells with status
-- [x] `GET /cells/:id` — cell detail (sessions, CI status, rebase status)
+- [x] `GET /cells/:id` — cell detail (sessions, CI status, sync status)
 - [x] `POST /cells/:id/archive` — archive cell, clean up worktree
 - [x] `POST /cells/:id/reopen` — re-open archived cell
-- [x] `POST /cells/:id/rebase` — manually trigger rebase
+- [x] `POST /cells/:id/sync` — manually trigger sync
 - [x] `DELETE /cells/:id` — hard delete
 
-### 1.5 Daemon (rebase loop)
+### 1.5 Daemon (sync loop)
 - [x] Background async task on a timer (configurable, default 5 min)
-- [x] For each active cell: fetch, check if behind main, rebase
+- [x] For each active cell: fetch, check if behind main, merge
 - [x] On conflict: spawn `claude -p` in the worktree to resolve
-- [x] Force-push after successful resolution
+- [x] Push after successful resolution
 - [x] Record daemon sessions in the database
 
 ### 1.6 Web UI MVP
-- [x] Cell list view with status indicators (CI, rebase status)
+- [x] Cell list view with status indicators (CI, sync status)
 - [x] Cell detail view showing sessions and metadata
 - [x] "Open in VS Code" button (launches `code <worktree_path>`)
-- [x] Manual rebase trigger button
+- [x] Manual sync trigger button
 - [x] Create cell form (paste PR URL or pick repo + branch)
 - [x] WebSocket for live status updates
 
@@ -77,6 +77,6 @@ The smallest thing that solves the immediate pain: auto-rebase with conflict res
 - [ ] Archive view in UI
 - [x] Re-open archived cells (recreate worktree from branch)
 
-### 3.4 Event-driven rebase
+### 3.4 Event-driven sync
 - [ ] GitHub webhook listener for pushes to main
-- [ ] Trigger rebase immediately instead of waiting for poll
+- [ ] Trigger merge immediately instead of waiting for poll

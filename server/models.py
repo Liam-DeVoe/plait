@@ -18,9 +18,9 @@ class CIStatus(str, Enum):
     failing = "failing"
 
 
-class RebaseStatus(str, Enum):
+class SyncStatus(str, Enum):
     current = "current"
-    rebasing = "rebasing"
+    syncing = "syncing"
     conflict = "conflict"
     failed = "failed"
 
@@ -51,7 +51,7 @@ class Cell:
     pr_number: int | None = None
     pr_url: str | None = None
     ci_status: CIStatus = CIStatus.unknown
-    rebase_status: RebaseStatus = RebaseStatus.current
+    sync_status: SyncStatus = SyncStatus.current
     status: CellStatus = CellStatus.active
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()

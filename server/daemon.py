@@ -9,11 +9,11 @@ from server.models import (
     Cell,
     CellStatus,
     CIStatus,
-    RebaseStatus,
     Session,
     SessionRole,
     SessionStatus,
     Sortie,
+    SyncStatus,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ async def _should_attempt(cell_id: str, trigger: str, *, force: bool = False) ->
 
 
 async def process_cell(cell: Cell, *, force: bool = False) -> None:
-    """Process a single cell: check rebase status, CI status."""
+    """Process a single cell: check sync status, CI status."""
     try:
         # Fetch latest from origin
         await git.fetch_origin(cell.repo)
@@ -60,40 +60,36 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
         # Check if behind main
         if await git.is_behind_main(cell.worktree_path):
             logger.info(
-                f"Cell {cell.id} ({cell.repo}:{cell.branch}) is behind main, rebasing"
+                f"Cell {cell.id} ({cell.repo}:{cell.branch}) is behind main, merging"
             )
-            await db.update_cell(cell.id, rebase_status=RebaseStatus.rebasing)
-            await notify("cell_updated", {"id": cell.id, "rebase_status": "rebasing"})
+            await db.update_cell(cell.id, sync_status=SyncStatus.syncing)
+            await notify("cell_updated", {"id": cell.id, "sync_status": "syncing"})
 
-            success, output = await git.rebase_onto_main(cell.worktree_path)
+            success, output = await git.merge_from_main(cell.worktree_path)
 
             if success:
-                # Clean rebase, force push
-                push_ok, push_out = await git.force_push(
-                    cell.worktree_path, cell.branch
-                )
+                # Clean merge, push
+                push_ok, push_out = await git.push(cell.worktree_path, cell.branch)
                 if push_ok:
-                    await db.update_cell(cell.id, rebase_status=RebaseStatus.current)
+                    await db.update_cell(cell.id, sync_status=SyncStatus.current)
                     await notify(
-                        "cell_updated", {"id": cell.id, "rebase_status": "current"}
+                        "cell_updated", {"id": cell.id, "sync_status": "current"}
                     )
-                    logger.info(f"Cell {cell.id} rebased and pushed successfully")
+                    logger.info(f"Cell {cell.id} merged and pushed successfully")
                 else:
-                    await db.update_cell(cell.id, rebase_status=RebaseStatus.failed)
+                    await db.update_cell(cell.id, sync_status=SyncStatus.failed)
                     await notify(
-                        "cell_updated", {"id": cell.id, "rebase_status": "failed"}
+                        "cell_updated", {"id": cell.id, "sync_status": "failed"}
                     )
                     logger.error(f"Cell {cell.id} push failed: {push_out}")
             else:
                 # Conflicts — use Claude to resolve
-                await db.update_cell(cell.id, rebase_status=RebaseStatus.conflict)
-                await notify(
-                    "cell_updated", {"id": cell.id, "rebase_status": "conflict"}
-                )
+                await db.update_cell(cell.id, sync_status=SyncStatus.conflict)
+                await notify("cell_updated", {"id": cell.id, "sync_status": "conflict"})
 
-                if not await _should_attempt(cell.id, "rebase", force=force):
+                if not await _should_attempt(cell.id, "merge", force=force):
                     logger.info(
-                        f"Cell {cell.id}: skipping rebase (limit reached or in progress)"
+                        f"Cell {cell.id}: skipping merge (limit reached or in progress)"
                     )
                     return
 
@@ -103,7 +99,7 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
                 session = Session(
                     cell_id=cell.id,
                     role=SessionRole.daemon,
-                    trigger="rebase",
+                    trigger="merge",
                     status=SessionStatus.running,
                 )
                 await db.create_session(session)
@@ -113,20 +109,16 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
                 )
 
                 if claude_ok:
-                    push_ok, push_out = await git.force_push(
-                        cell.worktree_path, cell.branch
-                    )
+                    push_ok, push_out = await git.push(cell.worktree_path, cell.branch)
                     if push_ok:
-                        await db.update_cell(
-                            cell.id, rebase_status=RebaseStatus.current
-                        )
+                        await db.update_cell(cell.id, sync_status=SyncStatus.current)
                         await notify(
-                            "cell_updated", {"id": cell.id, "rebase_status": "current"}
+                            "cell_updated", {"id": cell.id, "sync_status": "current"}
                         )
                     else:
-                        await db.update_cell(cell.id, rebase_status=RebaseStatus.failed)
+                        await db.update_cell(cell.id, sync_status=SyncStatus.failed)
                         await notify(
-                            "cell_updated", {"id": cell.id, "rebase_status": "failed"}
+                            "cell_updated", {"id": cell.id, "sync_status": "failed"}
                         )
 
                     await db.update_session(
@@ -136,9 +128,9 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
                         ended_at=datetime.now(timezone.utc).isoformat(),
                     )
                 else:
-                    await db.update_cell(cell.id, rebase_status=RebaseStatus.failed)
+                    await db.update_cell(cell.id, sync_status=SyncStatus.failed)
                     await notify(
-                        "cell_updated", {"id": cell.id, "rebase_status": "failed"}
+                        "cell_updated", {"id": cell.id, "sync_status": "failed"}
                     )
                     await db.update_session(
                         session.id,
@@ -205,7 +197,7 @@ async def _fix_ci(cell: Cell, *, force: bool = False) -> None:
     ended_at = datetime.now(timezone.utc).isoformat()
 
     if ok:
-        push_ok, _ = await git.force_push(cell.worktree_path, cell.branch)
+        push_ok, _ = await git.push(cell.worktree_path, cell.branch)
         await db.update_session(
             session.id,
             status=SessionStatus.completed.value,
@@ -258,7 +250,7 @@ async def spawn_sortie_cell(sortie: Sortie, repo: str) -> None:
 
     if ok:
         # Push and create PR
-        push_ok, _ = await git.force_push(cell.worktree_path, branch)
+        push_ok, _ = await git.push(cell.worktree_path, branch)
         if push_ok:
             try:
                 pr_info = await git.create_pr(

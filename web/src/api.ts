@@ -7,7 +7,7 @@ export interface Cell {
   pr_number: number | null;
   pr_url: string | null;
   ci_status: "unknown" | "pending" | "passing" | "failing";
-  rebase_status: "current" | "rebasing" | "conflict" | "failed";
+  sync_status: "current" | "syncing" | "conflict" | "failed";
   status: "active" | "archived";
   created_at: string;
   archived_at: string | null;
@@ -34,7 +34,7 @@ export interface Sortie {
   cells?: Cell[];
 }
 
-const BASE = "";
+const BASE = "/api";
 
 export async function fetchCells(status?: string): Promise<Cell[]> {
   const params = status ? `?status=${status}` : "";
@@ -70,8 +70,8 @@ export async function reopenCell(id: string): Promise<Cell> {
   return res.json();
 }
 
-export async function triggerRebase(id: string): Promise<void> {
-  await fetch(`${BASE}/cells/${id}/rebase`, { method: "POST" });
+export async function triggerSync(id: string): Promise<void> {
+  await fetch(`${BASE}/cells/${id}/sync`, { method: "POST" });
 }
 
 export async function deleteCell(id: string): Promise<void> {

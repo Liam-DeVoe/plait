@@ -2,12 +2,12 @@ from server.models import (
     Cell,
     CellStatus,
     CIStatus,
-    RebaseStatus,
     Session,
     SessionRole,
     SessionStatus,
     Sortie,
     SortieStatus,
+    SyncStatus,
 )
 
 
@@ -16,7 +16,7 @@ def test_cell_defaults():
     assert cell.id  # non-empty UUID
     assert cell.status == CellStatus.active
     assert cell.ci_status == CIStatus.unknown
-    assert cell.rebase_status == RebaseStatus.current
+    assert cell.sync_status == SyncStatus.current
     assert cell.sortie_id is None
     assert cell.pr_number is None
     assert cell.pr_url is None
@@ -46,7 +46,7 @@ def test_enum_values():
     assert CellStatus.active.value == "active"
     assert CellStatus.archived.value == "archived"
     assert CIStatus.passing.value == "passing"
-    assert RebaseStatus.conflict.value == "conflict"
+    assert SyncStatus.conflict.value == "conflict"
     assert SessionRole.daemon.value == "daemon"
     assert SessionStatus.failed.value == "failed"
 

@@ -113,27 +113,27 @@ async def is_behind_main(worktree_path: str) -> bool:
     return int(out.strip()) > 0
 
 
-async def rebase_onto_main(worktree_path: str) -> tuple[bool, str]:
-    """Attempt to rebase the worktree branch onto origin/main.
+async def merge_from_main(worktree_path: str) -> tuple[bool, str]:
+    """Attempt to merge origin/main into the worktree branch.
     Returns (success, output)."""
     # Fetch latest main
     rc, out, err = await run("git", "fetch", "origin", "main", cwd=worktree_path)
     if rc != 0:
         return False, f"fetch failed: {err}"
 
-    rc, out, err = await run("git", "rebase", "origin/main", cwd=worktree_path)
+    rc, out, err = await run(
+        "git", "merge", "origin/main", "--no-edit", cwd=worktree_path
+    )
     if rc == 0:
         return True, out
 
-    # Rebase had conflicts — abort it so Claude can try
-    await run("git", "rebase", "--abort", cwd=worktree_path)
+    # Merge had conflicts — abort it so Claude can try
+    await run("git", "merge", "--abort", cwd=worktree_path)
     return False, f"conflicts: {err}"
 
 
-async def force_push(worktree_path: str, branch: str) -> tuple[bool, str]:
-    rc, out, err = await run(
-        "git", "push", "--force-with-lease", "origin", branch, cwd=worktree_path
-    )
+async def push(worktree_path: str, branch: str) -> tuple[bool, str]:
+    rc, out, err = await run("git", "push", "origin", branch, cwd=worktree_path)
     if rc == 0:
         return True, out
     return False, err

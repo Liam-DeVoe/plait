@@ -24,13 +24,13 @@ async def run_claude_headless(
 
 
 async def resolve_conflicts(worktree_path: str, branch: str) -> tuple[bool, str]:
-    """Use Claude to rebase onto main and resolve any conflicts."""
+    """Use Claude to merge origin/main and resolve any conflicts."""
     prompt = (
-        f"Rebase the current branch ({branch}) onto origin/main. "
+        f"Merge origin/main into the current branch ({branch}). "
         "Resolve any merge conflicts to the best of your ability, "
         "preserving the intent of both sides. After resolving, "
         "make sure the code compiles/passes basic checks. "
-        "Do NOT push — just complete the rebase locally."
+        "Do NOT push — just complete the merge locally."
     )
     return await run_claude_headless(prompt, cwd=worktree_path)
 

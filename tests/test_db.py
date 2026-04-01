@@ -7,12 +7,12 @@ from server.models import (
     Cell,
     CellStatus,
     CIStatus,
-    RebaseStatus,
     Session,
     SessionRole,
     SessionStatus,
     Sortie,
     SortieStatus,
+    SyncStatus,
 )
 
 # --- Hand-written CRUD tests ---
@@ -58,11 +58,11 @@ async def test_update_cell(init_db):
     updated = await db.update_cell(
         cell.id,
         ci_status=CIStatus.passing,
-        rebase_status=RebaseStatus.current,
+        sync_status=SyncStatus.current,
     )
     assert updated is not None
     assert updated.ci_status == CIStatus.passing
-    assert updated.rebase_status == RebaseStatus.current
+    assert updated.sync_status == SyncStatus.current
 
 
 async def test_delete_cell(init_db):
@@ -85,7 +85,7 @@ async def test_create_and_list_sessions(init_db):
     cell = Cell(repo="org/repo", branch="main", worktree_path="/tmp/wt")
     await db.create_cell(cell)
 
-    s1 = Session(cell_id=cell.id, role=SessionRole.daemon, trigger="rebase")
+    s1 = Session(cell_id=cell.id, role=SessionRole.daemon, trigger="merge")
     s2 = Session(cell_id=cell.id, role=SessionRole.user)
     await db.create_session(s1)
     await db.create_session(s2)
@@ -164,7 +164,7 @@ async def test_list_cells_by_sortie(init_db):
 
 st_cell_status = st.sampled_from(list(CellStatus))
 st_ci_status = st.sampled_from(list(CIStatus))
-st_rebase_status = st.sampled_from(list(RebaseStatus))
+st_sync_status = st.sampled_from(list(SyncStatus))
 st_session_status = st.sampled_from(list(SessionStatus))
 st_session_role = st.sampled_from(list(SessionRole))
 st_sortie_status = st.sampled_from(list(SortieStatus))
@@ -180,7 +180,7 @@ def st_cell(draw):
         pr_number=draw(st.none() | st.integers(min_value=1, max_value=99999)),
         pr_url=draw(st.none() | st.text(min_size=1, max_size=200)),
         ci_status=draw(st_ci_status),
-        rebase_status=draw(st_rebase_status),
+        sync_status=draw(st_sync_status),
         status=draw(st_cell_status),
         archived_at=draw(st.none() | st.text(min_size=1, max_size=30)),
     )
@@ -222,7 +222,7 @@ async def test_cell_roundtrip(cell: Cell):
     assert fetched.pr_number == cell.pr_number
     assert fetched.pr_url == cell.pr_url
     assert fetched.ci_status == cell.ci_status
-    assert fetched.rebase_status == cell.rebase_status
+    assert fetched.sync_status == cell.sync_status
     assert fetched.status == cell.status
     assert fetched.archived_at == cell.archived_at
 

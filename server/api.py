@@ -173,15 +173,15 @@ async def reopen_cell(cell_id: str):
     return asdict(updated)
 
 
-@app.post("/cells/{cell_id}/rebase")
-async def trigger_rebase(cell_id: str):
+@app.post("/cells/{cell_id}/sync")
+async def trigger_sync(cell_id: str):
     cell = await db.get_cell(cell_id)
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
 
-    # Run rebase in background, bypassing retry limits
+    # Run merge in background, bypassing retry limits
     asyncio.create_task(daemon.process_cell(cell, force=True))
-    return {"status": "rebase triggered"}
+    return {"status": "sync triggered"}
 
 
 @app.delete("/cells/{cell_id}")

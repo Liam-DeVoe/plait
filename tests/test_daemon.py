@@ -8,11 +8,11 @@ from server.daemon import process_cell, run_user_session, spawn_sortie_cell
 from server.models import (
     Cell,
     CIStatus,
-    RebaseStatus,
     Session,
     SessionRole,
     SessionStatus,
     Sortie,
+    SyncStatus,
 )
 
 
@@ -36,11 +36,11 @@ async def test_cell_current_no_action(git_env, init_db):
     await process_cell(cell)
 
     fetched = await db.get_cell(cell.id)
-    assert fetched.rebase_status == RebaseStatus.current
+    assert fetched.sync_status == SyncStatus.current
 
 
-async def test_cell_clean_rebase(git_env, init_db):
-    """If cell is behind main and rebase is clean, it should rebase and push."""
+async def test_cell_clean_merge(git_env, init_db):
+    """If cell is behind main and merge is clean, it should merge and push."""
     # Create branch with its own commit
     git_env.create_branch("feature")
     git_env.add_commit("feature.txt", "feature work", "add feature")
@@ -56,7 +56,7 @@ async def test_cell_clean_rebase(git_env, init_db):
     await process_cell(cell)
 
     fetched = await db.get_cell(cell.id)
-    assert fetched.rebase_status == RebaseStatus.current
+    assert fetched.sync_status == SyncStatus.current
 
     # Verify the worktree has both files
     assert (Path(cell.worktree_path) / "feature.txt").exists()
@@ -64,7 +64,7 @@ async def test_cell_clean_rebase(git_env, init_db):
 
 
 async def test_cell_conflict_claude_resolves(git_env, init_db, mock_claude):
-    """If rebase has conflicts, Claude should be invoked to resolve them."""
+    """If merge has conflicts, Claude should be invoked to resolve them."""
     # Create a branch that edits README.md
     git_env.create_branch("conflict-branch")
     git_env.add_commit("README.md", "branch version", "edit on branch")
@@ -77,11 +77,16 @@ async def test_cell_conflict_claude_resolves(git_env, init_db, mock_claude):
 
     cell = await _create_cell_in_db(git_env, "conflict-branch", "daemon-3")
 
-    # Mock Claude to actually resolve the conflict by doing a real rebase
+    # Mock Claude to actually resolve the conflict by doing a real merge
     async def fake_claude(prompt, cwd):
-        # Simulate Claude resolving: just do a rebase accepting theirs
+        # Simulate Claude resolving: just do a merge accepting theirs
         await git.run(
-            "git", "rebase", "origin/main", "--strategy-option=theirs", cwd=cwd
+            "git",
+            "merge",
+            "origin/main",
+            "--strategy-option=theirs",
+            "--no-edit",
+            cwd=cwd,
         )
         return True, "resolved"
 
@@ -90,12 +95,12 @@ async def test_cell_conflict_claude_resolves(git_env, init_db, mock_claude):
     await process_cell(cell)
 
     fetched = await db.get_cell(cell.id)
-    assert fetched.rebase_status == RebaseStatus.current
+    assert fetched.sync_status == SyncStatus.current
 
     # Verify a daemon session was created
     sessions = await db.list_sessions(cell.id)
     assert len(sessions) == 1
-    assert sessions[0].trigger == "rebase"
+    assert sessions[0].trigger == "merge"
     assert sessions[0].status == SessionStatus.completed
 
 
@@ -118,7 +123,7 @@ async def test_cell_conflict_claude_fails(git_env, init_db, mock_claude):
     await process_cell(cell)
 
     fetched = await db.get_cell(cell.id)
-    assert fetched.rebase_status == RebaseStatus.failed
+    assert fetched.sync_status == SyncStatus.failed
 
     # Verify a failed daemon session was created
     sessions = await db.list_sessions(cell.id)
@@ -216,7 +221,7 @@ async def test_spawn_sortie_cell(git_env, init_db, mock_claude, mock_gh):
     # Mock Claude to succeed
     mock_claude.return_value = (True, "Added tests")
 
-    # Mock PR creation (force_push will work against test git env)
+    # Mock PR creation (push will work against test git env)
     mock_gh.set_response(
         "pr create",
         0,
@@ -256,12 +261,12 @@ async def test_daemon_stops_after_max_failures(git_env, init_db, mock_claude):
 
     cell = await _create_cell_in_db(git_env, "limit-branch", "daemon-limit")
 
-    # Pre-fill MAX_DAEMON_ATTEMPTS failed rebase sessions
+    # Pre-fill MAX_DAEMON_ATTEMPTS failed merge sessions
     for _ in range(MAX_DAEMON_ATTEMPTS):
         s = Session(
             cell_id=cell.id,
             role=SessionRole.daemon,
-            trigger="rebase",
+            trigger="merge",
             status=SessionStatus.failed,
         )
         await db.create_session(s)
@@ -276,8 +281,8 @@ async def test_daemon_stops_after_max_failures(git_env, init_db, mock_claude):
     mock_claude.assert_not_called()
 
 
-async def test_manual_rebase_bypasses_limit(git_env, init_db, mock_claude):
-    """Manual rebase (force=True) should bypass the failure limit."""
+async def test_manual_sync_bypasses_limit(git_env, init_db, mock_claude):
+    """Manual sync (force=True) should bypass the failure limit."""
     from server.daemon import MAX_DAEMON_ATTEMPTS
 
     git_env.create_branch("force-branch")
@@ -295,7 +300,7 @@ async def test_manual_rebase_bypasses_limit(git_env, init_db, mock_claude):
         s = Session(
             cell_id=cell.id,
             role=SessionRole.daemon,
-            trigger="rebase",
+            trigger="merge",
             status=SessionStatus.failed,
         )
         await db.create_session(s)
@@ -303,7 +308,12 @@ async def test_manual_rebase_bypasses_limit(git_env, init_db, mock_claude):
     # With force=True, Claude should still be invoked
     async def fake_claude(prompt, cwd):
         await git.run(
-            "git", "rebase", "origin/main", "--strategy-option=theirs", cwd=cwd
+            "git",
+            "merge",
+            "origin/main",
+            "--strategy-option=theirs",
+            "--no-edit",
+            cwd=cwd,
         )
         return True, "resolved"
 

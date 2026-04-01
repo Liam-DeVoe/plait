@@ -10,12 +10,12 @@ from server.models import (
     Cell,
     CellStatus,
     CIStatus,
-    RebaseStatus,
     Session,
     SessionRole,
     SessionStatus,
     Sortie,
     SortieStatus,
+    SyncStatus,
 )
 
 DB_PATH: str | Path = Path(__file__).parent.parent / "orrery.db"
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS cells (
     pr_number INTEGER,
     pr_url TEXT,
     ci_status TEXT NOT NULL DEFAULT 'unknown',
-    rebase_status TEXT NOT NULL DEFAULT 'current',
+    sync_status TEXT NOT NULL DEFAULT 'current',
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL,
     archived_at TEXT,
@@ -67,6 +67,17 @@ async def get_db() -> aiosqlite.Connection:
 
 
 async def init_db() -> None:
+    conn = await aiosqlite.connect(DB_PATH)
+    # Migrate rebase_status → sync_status for existing databases
+    try:
+        await conn.execute(
+            "ALTER TABLE cells RENAME COLUMN rebase_status TO sync_status"
+        )
+        await conn.commit()
+    except Exception:
+        pass
+    await conn.close()
+
     db = await get_db()
     await db.close()
 
@@ -79,7 +90,7 @@ async def create_cell(cell: Cell) -> Cell:
     try:
         await db.execute(
             """INSERT INTO cells (id, sortie_id, repo, branch, worktree_path,
-               pr_number, pr_url, ci_status, rebase_status, status, created_at, archived_at)
+               pr_number, pr_url, ci_status, sync_status, status, created_at, archived_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 cell.id,
@@ -90,7 +101,7 @@ async def create_cell(cell: Cell) -> Cell:
                 cell.pr_number,
                 cell.pr_url,
                 cell.ci_status.value,
-                cell.rebase_status.value,
+                cell.sync_status.value,
                 cell.status.value,
                 cell.created_at,
                 cell.archived_at,
@@ -169,7 +180,7 @@ def _row_to_cell(row: aiosqlite.Row) -> Cell:
         pr_number=row["pr_number"],
         pr_url=row["pr_url"],
         ci_status=CIStatus(row["ci_status"]),
-        rebase_status=RebaseStatus(row["rebase_status"]),
+        sync_status=SyncStatus(row["sync_status"]),
         status=CellStatus(row["status"]),
         created_at=row["created_at"],
         archived_at=row["archived_at"],
