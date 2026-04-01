@@ -204,26 +204,22 @@ function CellDetail({
 }
 
 function CreateCellForm({ onCreated }: { onCreated: () => void }) {
-  const [repo, setRepo] = useState("");
-  const [branch, setBranch] = useState("");
   const [prUrl, setPrUrl] = useState("");
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
     try {
-      await createCell({
-        repo,
-        branch,
-        pr_url: prUrl || undefined,
-      });
-      setRepo("");
-      setBranch("");
+      await createCell(prUrl);
       setPrUrl("");
       setOpen(false);
       onCreated();
+    } catch (err: any) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -245,29 +241,19 @@ function CreateCellForm({ onCreated }: { onCreated: () => void }) {
       onSubmit={handleSubmit}
       className="bg-white rounded-lg shadow p-4 mb-6 space-y-3"
     >
-      <div className="grid grid-cols-3 gap-3">
+      {error && (
+        <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded">
+          {error}
+        </div>
+      )}
+      <div className="flex gap-3">
         <input
           type="text"
-          placeholder="hegeldev/hegel-rust"
-          value={repo}
-          onChange={(e) => setRepo(e.target.value)}
-          required
-          className="px-3 py-2 border rounded text-sm"
-        />
-        <input
-          type="text"
-          placeholder="branch-name"
-          value={branch}
-          onChange={(e) => setBranch(e.target.value)}
-          required
-          className="px-3 py-2 border rounded text-sm"
-        />
-        <input
-          type="text"
-          placeholder="PR URL (optional)"
+          placeholder="https://github.com/hegeldev/hegel-rust/pull/42"
           value={prUrl}
           onChange={(e) => setPrUrl(e.target.value)}
-          className="px-3 py-2 border rounded text-sm"
+          required
+          className="flex-1 px-3 py-2 border rounded text-sm"
         />
       </div>
       <div className="flex gap-2">
@@ -280,7 +266,7 @@ function CreateCellForm({ onCreated }: { onCreated: () => void }) {
         </button>
         <button
           type="button"
-          onClick={() => setOpen(false)}
+          onClick={() => { setOpen(false); setError(null); }}
           className="px-4 py-2 bg-gray-100 rounded hover:bg-gray-200 text-sm"
         >
           Cancel

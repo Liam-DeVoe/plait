@@ -136,23 +136,32 @@ async def force_push(worktree_path: str, branch: str) -> tuple[bool, str]:
     return False, err
 
 
-async def get_pr_info(repo: str, branch: str) -> dict | None:
-    """Get PR info for a branch using gh CLI."""
+async def get_pr_info_from_url(pr_url: str) -> dict:
+    """Get PR details from a GitHub PR URL using gh CLI.
+    Returns dict with keys: repo, number, url, branch."""
+    import json
+    import re
+
+    # Parse owner/repo from URL (more reliable than gh's nameWithOwner)
+    m = re.match(r"https://github\.com/([^/]+/[^/]+)/pull/\d+", pr_url)
+    if not m:
+        raise RuntimeError(f"Could not parse repo from URL: {pr_url}")
+    repo = m.group(1)
+
     rc, out, err = await run(
         "gh",
         "pr",
         "view",
-        branch,
-        "--repo",
-        repo,
+        pr_url,
         "--json",
-        "number,url,state,statusCheckRollup",
+        "number,url,headRefName",
     )
     if rc != 0:
-        return None
-    import json
-
-    return json.loads(out)
+        raise RuntimeError(f"Failed to fetch PR info from {pr_url}: {err}")
+    data = json.loads(out)
+    data["repo"] = repo
+    data["branch"] = data.pop("headRefName")
+    return data
 
 
 async def get_ci_status(repo: str, pr_number: int) -> str:

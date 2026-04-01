@@ -47,16 +47,16 @@ export async function fetchCell(id: string): Promise<Cell & { sessions: Session[
   return res.json();
 }
 
-export async function createCell(data: {
-  repo: string;
-  branch: string;
-  pr_url?: string;
-}): Promise<Cell> {
+export async function createCell(prUrl: string): Promise<Cell> {
   const res = await fetch(`${BASE}/cells`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
+    body: JSON.stringify({ pr_url: prUrl }),
   });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to create cell");
+  }
   return res.json();
 }
 

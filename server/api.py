@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import subprocess
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -72,38 +71,31 @@ async def websocket_endpoint(ws: WebSocket):
 
 
 class CreateCellRequest(BaseModel):
-    repo: str
-    branch: str
-    pr_url: str | None = None
-    sortie_id: str | None = None
-
-
-class UpdateCellRequest(BaseModel):
-    ci_status: str | None = None
-    rebase_status: str | None = None
-    pr_url: str | None = None
-    pr_number: int | None = None
+    pr_url: str
 
 
 @app.post("/cells")
 async def create_cell(req: CreateCellRequest):
-    pr_number = None
-    if req.pr_url:
-        m = re.search(r"/pull/(\d+)", req.pr_url)
-        if m:
-            pr_number = int(m.group(1))
+    try:
+        pr_info = await git.get_pr_info_from_url(req.pr_url)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    repo = pr_info["repo"]
+    branch = pr_info["branch"]
+    pr_number = pr_info["number"]
+    pr_url = pr_info["url"]
 
     cell = Cell(
-        repo=req.repo,
-        branch=req.branch,
-        worktree_path="",  # set below
+        repo=repo,
+        branch=branch,
+        worktree_path="",
         pr_number=pr_number,
-        pr_url=req.pr_url,
-        sortie_id=req.sortie_id,
+        pr_url=pr_url,
     )
 
     try:
-        cell.worktree_path = await git.create_worktree(req.repo, req.branch, cell.id)
+        cell.worktree_path = await git.create_worktree(repo, branch, cell.id)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 

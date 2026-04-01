@@ -8,6 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 *.pyc
+orrery.db
 
 node_modules
 dist

@@ -50,6 +50,10 @@ npm install
 npm run dev
 ```
 
+## Code Style
+
+After making changes to Python files, run `just format` to format them with `shed`.
+
 ## Design Principles
 
 - Cells are independent — a cell can exist without a sortie
