@@ -12,7 +12,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from server import daemon, db, git
-from server.models import Cell, CellStatus, Sortie
+from server.models import (
+    Cell,
+    CellStatus,
+    Session,
+    SessionRole,
+    SessionStatus,
+    Sortie,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +217,27 @@ async def list_sessions(cell_id: str):
     return [asdict(s) for s in sessions]
 
 
+class CreateSessionRequest(BaseModel):
+    prompt: str
+
+
+@app.post("/cells/{cell_id}/sessions")
+async def create_session_endpoint(cell_id: str, req: CreateSessionRequest):
+    cell = await db.get_cell(cell_id)
+    if not cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+
+    session = Session(
+        cell_id=cell.id,
+        role=SessionRole.user,
+        status=SessionStatus.running,
+    )
+    await db.create_session(session)
+
+    asyncio.create_task(daemon.run_user_session(cell, session, req.prompt))
+    return asdict(session)
+
+
 # --- Sortie endpoints ---
 
 
@@ -222,13 +250,36 @@ class CreateSortieRequest(BaseModel):
 async def create_sortie(req: CreateSortieRequest):
     sortie = Sortie(prompt=req.prompt, repos=req.repos)
     await db.create_sortie(sortie)
+
+    # Spawn a cell per repo in the background
+    for repo in req.repos:
+        asyncio.create_task(daemon.spawn_sortie_cell(sortie, repo))
+
     return asdict(sortie)
+
+
+def _derive_sortie_status(sortie: Sortie, cells: list[Cell]) -> str:
+    """Compute sortie status from child cells."""
+    if (
+        len(cells) >= len(sortie.repos)
+        and cells
+        and all(c.status == CellStatus.archived for c in cells)
+    ):
+        return "completed"
+    return "active"
 
 
 @app.get("/sorties")
 async def list_sorties():
     sorties = await db.list_sorties()
-    return [asdict(s) for s in sorties]
+    result = []
+    for s in sorties:
+        d = asdict(s)
+        cells = await db.list_cells_by_sortie(s.id)
+        d["status"] = _derive_sortie_status(s, cells)
+        d["cell_count"] = len(cells)
+        result.append(d)
+    return result
 
 
 @app.get("/sorties/{sortie_id}")
@@ -236,9 +287,8 @@ async def get_sortie(sortie_id: str):
     sortie = await db.get_sortie(sortie_id)
     if not sortie:
         raise HTTPException(status_code=404, detail="Sortie not found")
-    # Get child cells
-    all_cells = await db.list_cells()
-    child_cells = [c for c in all_cells if c.sortie_id == sortie_id]
+    child_cells = await db.list_cells_by_sortie(sortie_id)
     result = asdict(sortie)
     result["cells"] = [asdict(c) for c in child_cells]
+    result["status"] = _derive_sortie_status(sortie, child_cells)
     return result

@@ -134,6 +134,31 @@ async def test_sortie_empty_repos(init_db):
     assert fetched.repos == []
 
 
+async def test_update_sortie(init_db):
+    sortie = Sortie(prompt="test", repos=["a"])
+    await db.create_sortie(sortie)
+
+    updated = await db.update_sortie(sortie.id, status=SortieStatus.completed)
+    assert updated is not None
+    assert updated.status == SortieStatus.completed
+
+
+async def test_list_cells_by_sortie(init_db):
+    sortie = Sortie(prompt="test", repos=["a", "b"])
+    await db.create_sortie(sortie)
+
+    c1 = Cell(repo="org/a", branch="b1", worktree_path="/tmp/a", sortie_id=sortie.id)
+    c2 = Cell(repo="org/b", branch="b2", worktree_path="/tmp/b", sortie_id=sortie.id)
+    c3 = Cell(repo="org/c", branch="b3", worktree_path="/tmp/c")  # no sortie
+    await db.create_cell(c1)
+    await db.create_cell(c2)
+    await db.create_cell(c3)
+
+    cells = await db.list_cells_by_sortie(sortie.id)
+    assert len(cells) == 2
+    assert {c.id for c in cells} == {c1.id, c2.id}
+
+
 # --- Hypothesis round-trip tests ---
 
 

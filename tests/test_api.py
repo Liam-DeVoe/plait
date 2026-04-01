@@ -170,4 +170,52 @@ async def test_list_sorties(client):
     await c.post("/sorties", json={"prompt": "first", "repos": ["a"]})
     resp = await c.get("/sorties")
     assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert "cell_count" in data[0]
+    assert "status" in data[0]
+
+
+async def test_sortie_derived_status(client):
+    """Sortie status should be derived from child cell statuses."""
+    c, git_env, mock_gh = client
+
+    # Create a sortie — status should be active (no cells archived yet)
+    resp = await c.post(
+        "/sorties",
+        json={"prompt": "update", "repos": [git_env.repo_name]},
+    )
+    sortie_id = resp.json()["id"]
+
+    resp = await c.get(f"/sorties/{sortie_id}")
+    assert resp.json()["status"] == "active"
+
+
+async def test_create_user_session(client):
+    """POST /cells/:id/sessions should create a running session."""
+    create_resp = await _create_cell_via_api(client)
+    cell_id = create_resp.json()["id"]
+    c, _, _ = client
+
+    resp = await c.post(
+        f"/cells/{cell_id}/sessions",
+        json={"prompt": "fix the tests"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["cell_id"] == cell_id
+    assert data["role"] == "user"
+    assert data["status"] == "running"
+
+    # Verify it shows up in cell sessions
+    resp = await c.get(f"/cells/{cell_id}/sessions")
     assert len(resp.json()) == 1
+
+
+async def test_create_session_cell_not_found(client):
+    c, _, _ = client
+    resp = await c.post(
+        "/cells/nonexistent/sessions",
+        json={"prompt": "hello"},
+    )
+    assert resp.status_code == 404

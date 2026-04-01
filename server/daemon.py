@@ -13,6 +13,7 @@ from server.models import (
     Session,
     SessionRole,
     SessionStatus,
+    Sortie,
 )
 
 logger = logging.getLogger(__name__)
@@ -128,6 +129,10 @@ async def process_cell(cell: Cell) -> None:
                 await db.update_cell(cell.id, ci_status=ci_status)
                 await notify("cell_updated", {"id": cell.id, "ci_status": ci})
 
+                # If CI just started failing, try to fix
+                if ci_status == CIStatus.failing:
+                    await _fix_ci(cell)
+
     except Exception:
         logger.exception(f"Error processing cell {cell.id}")
 
@@ -147,3 +152,122 @@ async def daemon_loop() -> None:
             logger.exception("Daemon loop error")
 
         await asyncio.sleep(POLL_INTERVAL)
+
+
+async def _fix_ci(cell: Cell) -> None:
+    """Spawn Claude to diagnose and fix a CI failure."""
+    logger.info(f"Cell {cell.id} CI is failing, invoking Claude to fix")
+
+    ci_logs = await git.get_ci_failure_logs(cell.repo, cell.branch)
+
+    session = Session(
+        cell_id=cell.id,
+        role=SessionRole.daemon,
+        trigger="ci_fix",
+        status=SessionStatus.running,
+    )
+    await db.create_session(session)
+
+    ok, output = await claude.fix_ci(cell.worktree_path, cell.branch, ci_logs)
+    ended_at = datetime.now(timezone.utc).isoformat()
+
+    if ok:
+        push_ok, _ = await git.force_push(cell.worktree_path, cell.branch)
+        await db.update_session(
+            session.id,
+            status=SessionStatus.completed.value,
+            transcript=output,
+            ended_at=ended_at,
+        )
+        if push_ok:
+            logger.info(f"Claude fixed CI for cell {cell.id}, pushed")
+        await notify("cell_updated", {"id": cell.id})
+    else:
+        await db.update_session(
+            session.id,
+            status=SessionStatus.failed.value,
+            transcript=output,
+            ended_at=ended_at,
+        )
+        logger.error(f"Claude failed to fix CI for cell {cell.id}")
+
+
+async def spawn_sortie_cell(sortie: Sortie, repo: str) -> None:
+    """Create a cell for a sortie repo and run Claude with the sortie prompt."""
+    branch = f"sortie/{sortie.id[:8]}"
+
+    cell = Cell(
+        sortie_id=sortie.id,
+        repo=repo,
+        branch=branch,
+        worktree_path="",
+    )
+
+    try:
+        cell.worktree_path = await git.create_worktree(repo, branch, cell.id)
+    except RuntimeError:
+        logger.exception(f"Failed to create worktree for sortie cell {repo}")
+        return
+
+    await db.create_cell(cell)
+    await notify("cell_updated", {"id": cell.id, "status": "active"})
+
+    session = Session(
+        cell_id=cell.id,
+        role=SessionRole.daemon,
+        trigger="sortie",
+        status=SessionStatus.running,
+    )
+    await db.create_session(session)
+
+    ok, output = await claude.run_claude_headless(sortie.prompt, cwd=cell.worktree_path)
+    ended_at = datetime.now(timezone.utc).isoformat()
+
+    if ok:
+        # Push and create PR
+        push_ok, _ = await git.force_push(cell.worktree_path, branch)
+        if push_ok:
+            try:
+                pr_info = await git.create_pr(
+                    cell.worktree_path,
+                    repo,
+                    title=sortie.prompt[:60],
+                    body=sortie.prompt,
+                )
+                await db.update_cell(
+                    cell.id,
+                    pr_number=pr_info["number"],
+                    pr_url=pr_info["url"],
+                )
+            except RuntimeError:
+                logger.exception(f"Failed to create PR for sortie cell {cell.id}")
+
+        await db.update_session(
+            session.id,
+            status=SessionStatus.completed.value,
+            transcript=output,
+            ended_at=ended_at,
+        )
+    else:
+        await db.update_session(
+            session.id,
+            status=SessionStatus.failed.value,
+            transcript=output,
+            ended_at=ended_at,
+        )
+
+    await notify("cell_updated", {"id": cell.id})
+
+
+async def run_user_session(cell: Cell, session: Session, prompt: str) -> None:
+    """Run a user-initiated Claude session in a cell's worktree."""
+    ok, output = await claude.run_claude_headless(prompt, cwd=cell.worktree_path)
+    ended_at = datetime.now(timezone.utc).isoformat()
+
+    await db.update_session(
+        session.id,
+        status=SessionStatus.completed.value if ok else SessionStatus.failed.value,
+        transcript=output,
+        ended_at=ended_at,
+    )
+    await notify("cell_updated", {"id": cell.id})

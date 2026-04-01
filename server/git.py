@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 from pathlib import Path
 
 WORKTREE_ROOT = Path(__file__).parent.parent / "worktrees"
@@ -140,8 +142,6 @@ async def force_push(worktree_path: str, branch: str) -> tuple[bool, str]:
 async def get_pr_info_from_url(pr_url: str) -> dict:
     """Get PR details from a GitHub PR URL using gh CLI.
     Returns dict with keys: repo, number, url, branch."""
-    import json
-    import re
 
     # Parse owner/repo from URL (more reliable than gh's nameWithOwner)
     m = re.match(r"https://github\.com/([^/]+/[^/]+)/pull/\d+", pr_url)
@@ -185,3 +185,72 @@ async def get_ci_status(repo: str, pr_number: int) -> str:
     if "pass" in out.lower():
         return "passing"
     return "unknown"
+
+
+async def get_ci_failure_logs(repo: str, branch: str) -> str:
+    """Get CI failure logs for the most recent failing run on a branch."""
+    rc, out, err = await run(
+        "gh",
+        "run",
+        "list",
+        "--branch",
+        branch,
+        "--status",
+        "failure",
+        "--limit",
+        "1",
+        "--json",
+        "databaseId",
+        "--repo",
+        repo,
+    )
+    if rc != 0 or not out.strip():
+        return "Could not retrieve CI failure information"
+
+    runs = json.loads(out)
+    if not runs:
+        return "No failed runs found"
+
+    run_id = str(runs[0]["databaseId"])
+
+    rc, out, err = await run(
+        "gh",
+        "run",
+        "view",
+        run_id,
+        "--log-failed",
+        "--repo",
+        repo,
+    )
+    if rc != 0:
+        return f"Could not retrieve logs for run {run_id}: {err}"
+
+    # Truncate if too long
+    if len(out) > 10000:
+        out = out[:10000] + "\n\n... (truncated)"
+
+    return out
+
+
+async def create_pr(worktree_path: str, repo: str, title: str, body: str) -> dict:
+    """Create a PR from the current branch. Returns dict with number and url."""
+    rc, out, err = await run(
+        "gh",
+        "pr",
+        "create",
+        "--title",
+        title,
+        "--body",
+        body,
+        "--repo",
+        repo,
+        cwd=worktree_path,
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to create PR: {err}")
+
+    pr_url = out.strip()
+    m = re.search(r"/pull/(\d+)", pr_url)
+    number = int(m.group(1)) if m else None
+
+    return {"number": number, "url": pr_url}

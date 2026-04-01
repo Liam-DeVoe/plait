@@ -82,6 +82,42 @@ export async function openInVSCode(id: string): Promise<void> {
   await fetch(`${BASE}/cells/${id}/vscode`, { method: "POST" });
 }
 
+export async function fetchSorties(): Promise<(Sortie & { cell_count: number })[]> {
+  const res = await fetch(`${BASE}/sorties`);
+  return res.json();
+}
+
+export async function fetchSortie(id: string): Promise<Sortie & { cells: Cell[] }> {
+  const res = await fetch(`${BASE}/sorties/${id}`);
+  return res.json();
+}
+
+export async function createSortie(prompt: string, repos: string[]): Promise<Sortie> {
+  const res = await fetch(`${BASE}/sorties`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt, repos }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to create sortie");
+  }
+  return res.json();
+}
+
+export async function createSession(cellId: string, prompt: string): Promise<Session> {
+  const res = await fetch(`${BASE}/cells/${cellId}/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prompt }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to create session");
+  }
+  return res.json();
+}
+
 export function connectWebSocket(onMessage: (data: any) => void): WebSocket {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);

@@ -303,3 +303,37 @@ def _row_to_sortie(row: aiosqlite.Row) -> Sortie:
         status=SortieStatus(row["status"]),
         created_at=row["created_at"],
     )
+
+
+async def update_sortie(sortie_id: str, **kwargs: object) -> Sortie | None:
+    conn = await get_db()
+    try:
+        sets = []
+        values = []
+        for key, value in kwargs.items():
+            if isinstance(value, Enum):
+                value = value.value
+            sets.append(f"{key} = ?")
+            values.append(value)
+        values.append(sortie_id)
+        await conn.execute(
+            f"UPDATE sorties SET {', '.join(sets)} WHERE id = ?",
+            values,
+        )
+        await conn.commit()
+        return await get_sortie(sortie_id)
+    finally:
+        await conn.close()
+
+
+async def list_cells_by_sortie(sortie_id: str) -> list[Cell]:
+    conn = await get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT * FROM cells WHERE sortie_id = ? ORDER BY created_at DESC",
+            (sortie_id,),
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_cell(row) for row in rows]
+    finally:
+        await conn.close()
