@@ -548,16 +548,28 @@ export default function App() {
     setSorties(data);
   }, []);
 
-  const selectCell = async (id: string) => {
+  const showCell = async (id: string) => {
     const data = await fetchCell(id);
     setSelectedCell(data);
     setView("cells");
     setSelectedSortie(null);
   };
 
-  const selectSortie = async (id: string) => {
+  const showSortie = async (id: string) => {
     const data = await fetchSortie(id);
     setSelectedSortie(data);
+    setView("sorties");
+    setSelectedCell(null);
+  };
+
+  const selectCell = async (id: string) => {
+    await showCell(id);
+    history.pushState({ type: "cell", id }, "");
+  };
+
+  const selectSortie = async (id: string) => {
+    await showSortie(id);
+    history.pushState({ type: "sortie", id }, "");
   };
 
   const refreshSelectedCell = async () => {
@@ -568,6 +580,32 @@ export default function App() {
   };
 
   useEffect(() => {
+    history.replaceState({ type: "list", view: "cells" }, "");
+    const handlePopState = async (e: PopStateEvent) => {
+      const state = e.state;
+      if (!state || state.type === "list") {
+        setView(state?.view || "cells");
+        setSelectedCell(null);
+        setSelectedSortie(null);
+        return;
+      }
+      if (state.type === "cell") {
+        const data = await fetchCell(state.id);
+        setSelectedCell(data);
+        setView("cells");
+        setSelectedSortie(null);
+      } else if (state.type === "sortie") {
+        const data = await fetchSortie(state.id);
+        setSelectedSortie(data);
+        setView("sorties");
+        setSelectedCell(null);
+      }
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
     loadCells();
     loadSorties();
     const ws = connectWebSocket((msg) => {
@@ -575,10 +613,10 @@ export default function App() {
         loadCells();
         loadSorties();
         if (selectedCell && msg.data.id === selectedCell.id) {
-          selectCell(selectedCell.id);
+          showCell(selectedCell.id);
         }
         if (selectedSortie) {
-          selectSortie(selectedSortie.id);
+          showSortie(selectedSortie.id);
         }
       }
     });
@@ -600,6 +638,8 @@ export default function App() {
               onClick={() => {
                 setView("cells");
                 setSelectedCell(null);
+                setSelectedSortie(null);
+                history.pushState({ type: "list", view: "cells" }, "");
               }}
               className={`px-4 py-2 text-sm rounded-md ${
                 view === "cells"
@@ -612,7 +652,9 @@ export default function App() {
             <button
               onClick={() => {
                 setView("sorties");
+                setSelectedCell(null);
                 setSelectedSortie(null);
+                history.pushState({ type: "list", view: "sorties" }, "");
               }}
               className={`px-4 py-2 text-sm rounded-md ${
                 view === "sorties"
@@ -632,7 +674,7 @@ export default function App() {
             <CellDetail
               cell={selectedCell}
               sessions={selectedCell.sessions}
-              onBack={() => setSelectedCell(null)}
+              onBack={() => history.back()}
               onRefresh={refreshSelectedCell}
             />
           ) : (
@@ -700,7 +742,7 @@ export default function App() {
           (selectedSortie ? (
             <SortieDetail
               sortie={selectedSortie}
-              onBack={() => setSelectedSortie(null)}
+              onBack={() => history.back()}
               onSelectCell={(id) => selectCell(id)}
             />
           ) : (

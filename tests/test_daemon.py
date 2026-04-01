@@ -241,6 +241,82 @@ async def test_spawn_sortie_cell(git_env, init_db, mock_claude, mock_gh):
     assert sessions[0].status == SessionStatus.completed
 
 
+async def test_daemon_stops_after_max_failures(git_env, init_db, mock_claude):
+    """After MAX_DAEMON_ATTEMPTS failed sessions, daemon should stop retrying."""
+    from server.daemon import MAX_DAEMON_ATTEMPTS
+
+    # Create a branch that conflicts with main
+    git_env.create_branch("limit-branch")
+    git_env.add_commit("README.md", "branch version", "edit on branch")
+    git_env.push("limit-branch")
+    git_env.checkout("main")
+
+    git_env.add_commit("README.md", "main version", "edit on main")
+    git_env.push("main")
+
+    cell = await _create_cell_in_db(git_env, "limit-branch", "daemon-limit")
+
+    # Pre-fill MAX_DAEMON_ATTEMPTS failed rebase sessions
+    for _ in range(MAX_DAEMON_ATTEMPTS):
+        s = Session(
+            cell_id=cell.id,
+            role=SessionRole.daemon,
+            trigger="rebase",
+            status=SessionStatus.failed,
+        )
+        await db.create_session(s)
+
+    # process_cell should NOT invoke Claude
+    mock_claude.return_value = (False, "should not be called")
+    await process_cell(cell)
+
+    # No new sessions should have been created
+    sessions = await db.list_sessions(cell.id)
+    assert len(sessions) == MAX_DAEMON_ATTEMPTS
+    mock_claude.assert_not_called()
+
+
+async def test_manual_rebase_bypasses_limit(git_env, init_db, mock_claude):
+    """Manual rebase (force=True) should bypass the failure limit."""
+    from server.daemon import MAX_DAEMON_ATTEMPTS
+
+    git_env.create_branch("force-branch")
+    git_env.add_commit("README.md", "branch version", "edit on branch")
+    git_env.push("force-branch")
+    git_env.checkout("main")
+
+    git_env.add_commit("README.md", "main version", "edit on main")
+    git_env.push("main")
+
+    cell = await _create_cell_in_db(git_env, "force-branch", "daemon-force")
+
+    # Pre-fill MAX_DAEMON_ATTEMPTS failed sessions
+    for _ in range(MAX_DAEMON_ATTEMPTS):
+        s = Session(
+            cell_id=cell.id,
+            role=SessionRole.daemon,
+            trigger="rebase",
+            status=SessionStatus.failed,
+        )
+        await db.create_session(s)
+
+    # With force=True, Claude should still be invoked
+    async def fake_claude(prompt, cwd):
+        await git.run(
+            "git", "rebase", "origin/main", "--strategy-option=theirs", cwd=cwd
+        )
+        return True, "resolved"
+
+    mock_claude.side_effect = fake_claude
+
+    await process_cell(cell, force=True)
+
+    sessions = await db.list_sessions(cell.id)
+    # Should have MAX_DAEMON_ATTEMPTS + 1 sessions (the new one)
+    assert len(sessions) == MAX_DAEMON_ATTEMPTS + 1
+    assert sessions[0].status == SessionStatus.completed
+
+
 async def test_run_user_session(git_env, init_db, mock_claude):
     """run_user_session should run Claude and record transcript."""
     cell = await _create_cell_in_db(git_env, "user-session-branch", "daemon-8")

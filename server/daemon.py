@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 notify_callback: asyncio.Queue | None = None
 
 POLL_INTERVAL = 300  # seconds (5 minutes)
+MAX_DAEMON_ATTEMPTS = 3
 
 
 async def notify(event: str, data: dict) -> None:
@@ -29,7 +30,28 @@ async def notify(event: str, data: dict) -> None:
         await notify_callback.put({"event": event, "data": data})
 
 
-async def process_cell(cell: Cell) -> None:
+async def _should_attempt(cell_id: str, trigger: str, *, force: bool = False) -> bool:
+    """Check if we should attempt a daemon action on this cell.
+
+    Always blocks if a session with the same trigger is already running.
+    Blocks after MAX_DAEMON_ATTEMPTS failures unless force=True (manual trigger).
+    """
+    sessions = await db.list_sessions(cell_id)
+    trigger_sessions = [s for s in sessions if s.trigger == trigger]
+
+    # Never start if one is already running
+    if any(s.status == SessionStatus.running for s in trigger_sessions):
+        return False
+
+    # Skip retry limit if forced (manual trigger)
+    if force:
+        return True
+
+    failed = sum(1 for s in trigger_sessions if s.status == SessionStatus.failed)
+    return failed < MAX_DAEMON_ATTEMPTS
+
+
+async def process_cell(cell: Cell, *, force: bool = False) -> None:
     """Process a single cell: check rebase status, CI status."""
     try:
         # Fetch latest from origin
@@ -64,11 +86,18 @@ async def process_cell(cell: Cell) -> None:
                     logger.error(f"Cell {cell.id} push failed: {push_out}")
             else:
                 # Conflicts — use Claude to resolve
-                logger.info(f"Cell {cell.id} has conflicts, invoking Claude")
                 await db.update_cell(cell.id, rebase_status=RebaseStatus.conflict)
                 await notify(
                     "cell_updated", {"id": cell.id, "rebase_status": "conflict"}
                 )
+
+                if not await _should_attempt(cell.id, "rebase", force=force):
+                    logger.info(
+                        f"Cell {cell.id}: skipping rebase (limit reached or in progress)"
+                    )
+                    return
+
+                logger.info(f"Cell {cell.id} has conflicts, invoking Claude")
 
                 # Create a daemon session record
                 session = Session(
@@ -131,7 +160,7 @@ async def process_cell(cell: Cell) -> None:
 
                 # If CI just started failing, try to fix
                 if ci_status == CIStatus.failing:
-                    await _fix_ci(cell)
+                    await _fix_ci(cell, force=force)
 
     except Exception:
         logger.exception(f"Error processing cell {cell.id}")
@@ -154,8 +183,12 @@ async def daemon_loop() -> None:
         await asyncio.sleep(POLL_INTERVAL)
 
 
-async def _fix_ci(cell: Cell) -> None:
+async def _fix_ci(cell: Cell, *, force: bool = False) -> None:
     """Spawn Claude to diagnose and fix a CI failure."""
+    if not await _should_attempt(cell.id, "ci_fix", force=force):
+        logger.info(f"Cell {cell.id}: skipping CI fix (limit reached or in progress)")
+        return
+
     logger.info(f"Cell {cell.id} CI is failing, invoking Claude to fix")
 
     ci_logs = await git.get_ci_failure_logs(cell.repo, cell.branch)

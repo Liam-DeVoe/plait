@@ -179,8 +179,8 @@ async def trigger_rebase(cell_id: str):
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
 
-    # Run rebase in background
-    asyncio.create_task(daemon.process_cell(cell))
+    # Run rebase in background, bypassing retry limits
+    asyncio.create_task(daemon.process_cell(cell, force=True))
     return {"status": "rebase triggered"}
 
 
