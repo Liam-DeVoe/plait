@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from enum import Enum
 from pathlib import Path
 
 import aiosqlite
@@ -17,7 +18,7 @@ from server.models import (
     SortieStatus,
 )
 
-DB_PATH = Path(__file__).parent.parent / "orrery.db"
+DB_PATH: str | Path = Path(__file__).parent.parent / "orrery.db"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS cells (

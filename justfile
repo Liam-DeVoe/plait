@@ -7,6 +7,9 @@ web:
 dev:
     @echo "Run 'just server' and 'just web' in separate terminals"
 
+test *args:
+    uv run pytest tests/ {{ args }}
+
 format:
     uv run shed
 

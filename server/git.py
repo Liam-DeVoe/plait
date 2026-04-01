@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 
 WORKTREE_ROOT = Path(__file__).parent.parent / "worktrees"
+REPO_ROOT = Path(__file__).parent.parent.parent
 
 
 async def run(*args: str, cwd: str | Path | None = None) -> tuple[int, str, str]:
@@ -21,7 +22,7 @@ def repo_path(repo: str) -> Path:
     """Path to the main clone of a repo. Expects repos to be siblings of
     the coordination directory, e.g. ../hegel-rust for hegeldev/hegel-rust."""
     name = repo.split("/")[-1]
-    return Path(__file__).parent.parent.parent / name
+    return REPO_ROOT / name
 
 
 async def ensure_repo_cloned(repo: str) -> Path:

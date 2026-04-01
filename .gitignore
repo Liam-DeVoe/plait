@@ -9,6 +9,7 @@ lerna-debug.log*
 
 *.pyc
 orrery.db
+.hypothesis
 
 node_modules
 dist
