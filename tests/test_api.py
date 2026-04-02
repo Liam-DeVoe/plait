@@ -233,20 +233,6 @@ async def test_list_sorties(client):
     data = resp.json()
     assert len(data) == 1
     assert "cell_count" in data[0]
-    assert "status" in data[0]
-
-
-async def test_sortie_derived_status(client):
-    """Sortie status should be active when session hasn't been created yet."""
-    c, git_env, mock_gh = client
-
-    resp = await c.post(
-        "/sorties",
-    )
-    sortie_id = resp.json()["id"]
-
-    resp = await c.get(f"/sorties/{sortie_id}")
-    assert resp.json()["status"] == "active"
 
 
 async def test_hook_create_sortie_cell(client):

@@ -901,9 +901,6 @@ function SortieRow({ sortie }: { sortie: Sortie & { cell_count: number } }) {
       <td className="table__cell sortie-row__meta">
         {sortie.cell_count} cell{sortie.cell_count !== 1 && "s"}
       </td>
-      <td className="table__cell">
-        <StatusBadge status={sortie.status} label={sortie.status} />
-      </td>
       <td className="table__cell sortie-row__date">
         {new Date(sortie.created_at).toLocaleDateString()}
       </td>
@@ -959,7 +956,6 @@ function SortiesPage() {
             <thead className="table__head">
               <tr>
                 <th className="table__header-cell">Cells</th>
-                <th className="table__header-cell">Status</th>
                 <th className="table__header-cell">Created</th>
               </tr>
             </thead>
@@ -1002,7 +998,6 @@ function SortieDetailPage() {
       <div className="card sortie-detail__card">
         <div className="sortie-detail__header">
           <div className="sortie-detail__title">Sortie</div>
-          <StatusBadge status={sortie.status} label={sortie.status} />
         </div>
         <div className="sortie-detail__info">
           <div>

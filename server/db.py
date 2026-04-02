@@ -13,7 +13,6 @@ from server.models import (
     Session,
     SessionRole,
     Sortie,
-    SortieStatus,
     SyncStatus,
 )
 
@@ -41,7 +40,6 @@ CREATE TABLE IF NOT EXISTS cells (
 CREATE TABLE IF NOT EXISTS sorties (
     id TEXT PRIMARY KEY,
     session_id TEXT,
-    status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL
 );
 
@@ -83,6 +81,7 @@ async def init_db() -> None:
         "ALTER TABLE sessions ADD COLUMN sortie_id TEXT",
         "ALTER TABLE sorties ADD COLUMN session_id TEXT",
         "ALTER TABLE cells ADD COLUMN pr_reaction_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE sorties DROP COLUMN status",
     ]:
         try:
             await db.execute(migration)
@@ -310,12 +309,11 @@ async def create_sortie(sortie: Sortie) -> Sortie:
     db = await get_db()
     try:
         await db.execute(
-            """INSERT INTO sorties (id, session_id, status, created_at)
-               VALUES (?, ?, ?, ?)""",
+            """INSERT INTO sorties (id, session_id, created_at)
+               VALUES (?, ?, ?)""",
             (
                 sortie.id,
                 sortie.session_id,
-                sortie.status.value,
                 sortie.created_at,
             ),
         )
@@ -349,7 +347,6 @@ def _row_to_sortie(row: aiosqlite.Row) -> Sortie:
     return Sortie(
         id=row["id"],
         session_id=row["session_id"],
-        status=SortieStatus(row["status"]),
         created_at=row["created_at"],
     )
 

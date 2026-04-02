@@ -10,7 +10,6 @@ from server.models import (
     Session,
     SessionRole,
     Sortie,
-    SortieStatus,
     SyncStatus,
 )
 
@@ -188,7 +187,6 @@ st_cell_status = st.sampled_from(list(CellStatus))
 st_ci_status = st.sampled_from(list(CIStatus))
 st_sync_status = st.sampled_from(list(SyncStatus))
 st_session_role = st.sampled_from(list(SessionRole))
-st_sortie_status = st.sampled_from(list(SortieStatus))
 
 
 @st.composite
@@ -224,7 +222,6 @@ def st_session(draw):
 def st_sortie(draw):
     return Sortie(
         session_id=draw(st.none() | st.text(min_size=1, max_size=36)),
-        status=draw(st_sortie_status),
     )
 
 
@@ -273,4 +270,3 @@ async def test_sortie_roundtrip(sortie: Sortie):
     assert fetched is not None
     assert fetched.id == sortie.id
     assert fetched.session_id == sortie.session_id
-    assert fetched.status == sortie.status

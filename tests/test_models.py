@@ -5,7 +5,6 @@ from server.models import (
     Session,
     SessionRole,
     Sortie,
-    SortieStatus,
     SyncStatus,
 )
 
@@ -36,7 +35,6 @@ def test_session_defaults():
 def test_sortie_defaults():
     sortie = Sortie()
     assert sortie.id
-    assert sortie.status == SortieStatus.active
     assert sortie.session_id is None
 
 

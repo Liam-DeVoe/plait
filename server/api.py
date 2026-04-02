@@ -558,24 +558,6 @@ async def create_sortie():
     return result
 
 
-async def _derive_sortie_status(sortie: Sortie, cells: list[Cell]) -> str:
-    """Compute sortie status from child cells and orchestrator session."""
-    if sortie.session_id:
-        session = await db.get_session(sortie.session_id)
-        if session and session.ended_at is None:
-            return "active"
-    # Session ended (or doesn't exist yet)
-    if not cells:
-        # No cells and session done → completed (nothing to do)
-        if sortie.session_id:
-            return "completed"
-        # Session not created yet → still active
-        return "active"
-    if all(c.status == CellStatus.archived for c in cells):
-        return "completed"
-    return "active"
-
-
 @app.get("/sorties")
 async def list_sorties():
     sorties = await db.list_sorties()
@@ -583,7 +565,6 @@ async def list_sorties():
     for s in sorties:
         d = asdict(s)
         cells = await db.list_cells_by_sortie(s.id)
-        d["status"] = await _derive_sortie_status(s, cells)
         d["cell_count"] = len(cells)
         result.append(d)
     return result
@@ -597,7 +578,6 @@ async def get_sortie(sortie_id: str):
     child_cells = await db.list_cells_by_sortie(sortie_id)
     result = asdict(sortie)
     result["cells"] = [asdict(c) for c in child_cells]
-    result["status"] = await _derive_sortie_status(sortie, child_cells)
     # Include the orchestrator session if it exists
     if sortie.session_id:
         session = await db.get_session(sortie.session_id)

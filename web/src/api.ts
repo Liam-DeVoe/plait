@@ -29,7 +29,6 @@ export interface Session {
 export interface Sortie {
   id: string;
   session_id: string | null;
-  status: "active" | "completed";
   created_at: string;
   cells?: Cell[];
   session?: Session;
