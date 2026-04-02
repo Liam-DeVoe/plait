@@ -739,7 +739,6 @@ function CreateSortieForm({
     <div className="card form">
       {error && <div className="error-banner">{error}</div>}
       <textarea
-        placeholder="Describe the change to make across repos..."
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         rows={3}
