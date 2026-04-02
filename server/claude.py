@@ -23,7 +23,7 @@ async def run_claude_headless(
     """
     worktree = str(Path(cwd).resolve())
     allowed = [t.format(worktree=worktree) for t in DAEMON_ALLOWED_TOOLS]
-    args = ["claude", "-p", prompt, "--allowedTools", *allowed]
+    args = ["claude", "-p", prompt, "--verbose", "--allowedTools", *allowed]
     if session_id:
         args.extend(["--session-id", session_id])
     proc = await asyncio.create_subprocess_exec(
