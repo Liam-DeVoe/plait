@@ -661,22 +661,24 @@ function CollapsibleSession({
         <span className="collapsible-session__time">
           {new Date(session.started_at).toLocaleString()}
         </span>
-        <div
-          onClick={(e) => {
-            e.stopPropagation();
-            onResume();
-          }}
-          className="btn btn--xs btn--soft-blue collapsible-session__resume"
-        >
-          Resume
-        </div>
+        {!session.alive && (
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              onResume();
+            }}
+            className="btn btn--xs btn--soft-blue collapsible-session__resume"
+          >
+            Resume
+          </div>
+        )}
       </div>
       {expanded && (
         <div className="collapsible-session__body">
           <Terminal
             sessionId={session.id}
             cellId={cellId}
-            alive={false}
+            alive={session.alive}
             onResume={async () => onResume()}
           />
         </div>
