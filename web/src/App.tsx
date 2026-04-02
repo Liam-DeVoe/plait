@@ -30,32 +30,18 @@ import {
   type Sortie,
 } from "./api";
 import Terminal from "./Terminal";
+import "./App.css";
 
 // --- Shared Components ---
 
-function StatusBadge({ status, label }: { status: string; label: string }) {
-  const colors: Record<string, string> = {
-    passing: "bg-green-100 text-green-800",
-    current: "bg-green-100 text-green-800",
-    active: "bg-blue-100 text-blue-800",
-    pending: "bg-yellow-100 text-yellow-800",
-    syncing: "bg-yellow-100 text-yellow-800",
-    running: "bg-yellow-100 text-yellow-800",
-    failing: "bg-red-100 text-red-800",
-    failed: "bg-red-100 text-red-800",
-    conflict: "bg-red-100 text-red-800",
-    unknown: "bg-gray-100 text-gray-800",
-    archived: "bg-gray-100 text-gray-800",
-    completed: "bg-green-100 text-green-800",
-  };
+const BADGE_STATUSES = new Set([
+  "passing", "current", "active", "pending", "syncing", "running",
+  "failing", "failed", "conflict", "unknown", "archived", "completed",
+]);
 
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${colors[status] ?? colors.unknown}`}
-    >
-      {label}
-    </span>
-  );
+function StatusBadge({ status, label }: { status: string; label: string }) {
+  const modifier = BADGE_STATUSES.has(status) ? status : "unknown";
+  return <span className={`badge badge--${modifier}`}>{label}</span>;
 }
 
 function OverflowMenu({
@@ -77,13 +63,10 @@ function OverflowMenu({
   }, [open]);
 
   return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen(!open)}
-        className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded text-gray-600 flex items-center"
-      >
+    <div className="overflow-menu" ref={ref}>
+      <div className="overflow-menu__toggle" onClick={() => setOpen(!open)}>
         <svg
-          className={`w-4 h-4 transition-transform ${open ? "rotate-180" : ""}`}
+          className={`overflow-menu__icon${open ? " overflow-menu__icon--open" : ""}`}
           viewBox="0 0 20 20"
           fill="currentColor"
         >
@@ -93,22 +76,20 @@ function OverflowMenu({
             clipRule="evenodd"
           />
         </svg>
-      </button>
+      </div>
       {open && (
-        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg py-1 z-10 min-w-[100px]">
+        <div className="overflow-menu__dropdown">
           {items.map((item) => (
-            <button
+            <div
               key={item.label}
               onClick={() => {
                 item.onClick();
                 setOpen(false);
               }}
-              className={`block w-full text-left px-3 py-1.5 text-sm hover:bg-gray-50 ${
-                item.danger ? "text-red-600" : "text-gray-700"
-              }`}
+              className={`overflow-menu__item${item.danger ? " overflow-menu__item--danger" : ""}`}
             >
               {item.label}
-            </button>
+            </div>
           ))}
         </div>
       )}
@@ -128,24 +109,17 @@ function Layout() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b border-gray-200 px-6 py-4">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <NavLink
-            to="/"
-            className="text-2xl font-bold text-gray-900 hover:text-gray-700"
-          >
+    <div className="layout">
+      <div className="layout__header">
+        <div className="layout__header-inner">
+          <NavLink to="/" className="layout__logo">
             Orrery
           </NavLink>
-          <nav className="flex gap-1 bg-gray-100 rounded-lg p-1">
+          <div className="layout__nav">
             <NavLink
               to="/cells"
               className={({ isActive }) =>
-                `px-4 py-2 text-sm rounded-md ${
-                  isActive
-                    ? "bg-white shadow font-medium text-gray-900"
-                    : "text-gray-600 hover:text-gray-900"
-                }`
+                `layout__nav-link${isActive ? " layout__nav-link--active" : ""}`
               }
             >
               Cells
@@ -153,21 +127,17 @@ function Layout() {
             <NavLink
               to="/sorties"
               className={({ isActive }) =>
-                `px-4 py-2 text-sm rounded-md ${
-                  isActive
-                    ? "bg-white shadow font-medium text-gray-900"
-                    : "text-gray-600 hover:text-gray-900"
-                }`
+                `layout__nav-link${isActive ? " layout__nav-link--active" : ""}`
               }
             >
               Sorties
             </NavLink>
-          </nav>
+          </div>
         </div>
-      </header>
-      <main className="max-w-6xl mx-auto px-6 py-6">
+      </div>
+      <div className="layout__main">
         <Outlet context={{ tick } satisfies LayoutContext} />
-      </main>
+      </div>
     </div>
   );
 }
@@ -195,53 +165,48 @@ function CellRow({
 
   return (
     <tr
-      className={`border-b border-gray-200 hover:bg-gray-50 cursor-pointer ${
-        needsAttention ? "border-l-2 border-l-red-400" : ""
-      }`}
+      className={`cell-row${needsAttention ? " cell-row--attention" : ""}`}
       onClick={() => navigate(`/cells/${cell.id}`)}
     >
-      <td className="px-4 py-3">
-        <div className="font-medium text-gray-900">{cell.branch}</div>
+      <td className="table__cell">
+        <div className="cell-row__branch">{cell.branch}</div>
       </td>
-      <td className="px-4 py-3">
+      <td className="table__cell">
         {cell.pr_url ? (
           <a
             href={cell.pr_url}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-blue-600 hover:underline text-sm"
+            className="link"
             onClick={(e) => e.stopPropagation()}
           >
             #{cell.pr_number}
           </a>
         ) : (
-          <span className="text-gray-400 text-sm">no PR</span>
+          <span className="cell-row__no-pr">no PR</span>
         )}
       </td>
-      <td className="px-4 py-3">
+      <td className="table__cell">
         <StatusBadge status={cell.ci_status} label={`CI: ${cell.ci_status}`} />
       </td>
-      <td className="px-4 py-3">
+      <td className="table__cell">
         <StatusBadge
           status={cell.sync_status}
           label={`Sync: ${cell.sync_status}`}
         />
       </td>
-      <td className="px-4 py-3">
-        <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-          <button
+      <td className="table__cell">
+        <div className="cell-row__actions" onClick={(e) => e.stopPropagation()}>
+          <div
+            className="btn btn--sm btn--gray"
             onClick={onVSCode}
-            className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded"
             title="Open in VS Code"
           >
             VS Code
-          </button>
-          <button
-            onClick={onSync}
-            className="px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 rounded"
-          >
+          </div>
+          <div className="btn btn--sm btn--soft-blue" onClick={onSync}>
             Sync
-          </button>
+          </div>
           <OverflowMenu
             items={[
               { label: "Archive", onClick: onArchive },
@@ -260,8 +225,8 @@ function CreateCellForm({ onCreated }: { onCreated: () => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async () => {
+    if (!prUrl.trim()) return;
     setLoading(true);
     setError(null);
     try {
@@ -278,55 +243,45 @@ function CreateCellForm({ onCreated }: { onCreated: () => void }) {
 
   if (!open) {
     return (
-      <button
-        onClick={() => setOpen(true)}
-        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
-      >
+      <div className="btn btn--blue" onClick={() => setOpen(true)}>
         New Cell
-      </button>
+      </div>
     );
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="bg-white rounded-lg shadow p-4 mb-6 space-y-3"
-    >
-      {error && (
-        <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded">
-          {error}
-        </div>
-      )}
-      <div className="flex gap-3">
+    <div className="card form">
+      {error && <div className="error-banner">{error}</div>}
+      <div className="form__row">
         <input
           type="text"
           placeholder="https://github.com/owner/repo/pull/42"
           value={prUrl}
           onChange={(e) => setPrUrl(e.target.value)}
-          required
-          className="flex-1 px-3 py-2 border rounded text-sm"
+          className="form__input form__input--flex"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleSubmit();
+          }}
         />
       </div>
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={loading}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50"
+      <div className="form__actions">
+        <div
+          className={`btn btn--blue${loading ? " btn--disabled" : ""}`}
+          onClick={handleSubmit}
         >
           {loading ? "Creating..." : "Create"}
-        </button>
-        <button
-          type="button"
+        </div>
+        <div
+          className="btn btn--gray"
           onClick={() => {
             setOpen(false);
             setError(null);
           }}
-          className="px-4 py-2 bg-gray-100 rounded hover:bg-gray-200 text-sm"
         >
           Cancel
-        </button>
+        </div>
       </div>
-    </form>
+    </div>
   );
 }
 
@@ -352,45 +307,32 @@ function CellsPage() {
 
   return (
     <>
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-lg font-semibold text-gray-900">Cells</h2>
+      <div className="page-header">
+        <div className="page-title">Cells</div>
         <CreateCellForm onCreated={loadCells} />
       </div>
 
       {cells.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
-          <p>No cells yet. Create one to get started.</p>
+        <div className="empty-state">
+          <div>No cells yet. Create one to get started.</div>
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="cells-page__groups">
           {[...grouped.entries()].map(([repo, repoCells]) => (
-            <div
-              key={repo}
-              className="bg-white rounded-lg shadow overflow-hidden"
-            >
-              <div className="bg-gray-50 border-b border-gray-200 px-4 py-2">
-                <h3 className="text-sm font-semibold text-gray-700">
+            <div key={repo} className="card card--clipped">
+              <div className="cells-page__group-header">
+                <div className="cells-page__group-title">
                   {repo.split("/").pop()}
-                </h3>
+                </div>
               </div>
-              <table className="w-full">
-                <thead className="border-b border-gray-100">
+              <table className="table">
+                <thead className="table__head">
                   <tr>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                      Branch
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                      PR
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                      CI
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                      Sync
-                    </th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                      Actions
-                    </th>
+                    <th className="table__header-cell">Branch</th>
+                    <th className="table__header-cell">PR</th>
+                    <th className="table__header-cell">CI</th>
+                    <th className="table__header-cell">Sync</th>
+                    <th className="table__header-cell">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -470,22 +412,19 @@ function CellDetailPage() {
 
   return (
     <div>
-      <button
-        onClick={() => navigate(-1)}
-        className="mb-4 text-sm text-gray-500 hover:text-gray-700"
-      >
+      <div className="back-link" onClick={() => navigate(-1)}>
         &larr; Back
-      </button>
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <div className="flex items-center justify-between">
+      </div>
+      <div className="card cell-detail__card">
+        <div className="cell-detail__header">
           <div>
-            <h2 className="text-xl font-semibold mb-2">
+            <div className="cell-detail__title">
               {cell.repo.split("/").pop()}{" "}
-              <span className="text-gray-400 font-normal">
+              <span className="cell-detail__title-branch">
                 / {cell.branch}
               </span>
-            </h2>
-            <div className="flex gap-3 mb-3">
+            </div>
+            <div className="cell-detail__badges">
               <StatusBadge
                 status={cell.ci_status}
                 label={`CI: ${cell.ci_status}`}
@@ -496,31 +435,31 @@ function CellDetailPage() {
               />
             </div>
             {cell.pr_url && (
-              <div className="text-sm text-gray-600">
+              <div className="cell-detail__pr">
                 <a
                   href={cell.pr_url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-600 hover:underline"
+                  className="link"
                 >
                   PR #{cell.pr_number} ↗
                 </a>
               </div>
             )}
           </div>
-          <div className="flex items-center gap-2 self-start">
-            <button
+          <div className="cell-detail__actions">
+            <div
+              className="btn btn--md btn--gray"
               onClick={() => openInVSCode(cell.id)}
-              className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded"
             >
               VS Code
-            </button>
-            <button
+            </div>
+            <div
+              className="btn btn--md btn--soft-blue"
               onClick={() => triggerSync(cell.id)}
-              className="px-3 py-1.5 text-sm bg-blue-100 hover:bg-blue-200 text-blue-800 rounded"
             >
               Sync
-            </button>
+            </div>
             <OverflowMenu
               items={[
                 {
@@ -544,39 +483,38 @@ function CellDetailPage() {
         </div>
       </div>
 
-      <div className="flex justify-between items-center mb-3">
-        <h3 className="text-lg font-semibold">Sessions</h3>
-        <button
+      <div className="cell-detail__sessions-header">
+        <div className="cell-detail__sessions-title">Sessions</div>
+        <div
+          className={`btn btn--blue${launching ? " btn--disabled" : ""}`}
           onClick={handleLaunchSession}
-          disabled={launching}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50"
         >
           {launching ? "Launching..." : "New Session"}
-        </button>
+        </div>
       </div>
 
       {aliveSessions.length === 0 && deadSessions.length === 0 ? (
-        <p className="text-gray-500 text-sm">
+        <div className="muted">
           No sessions yet. Start one to open a Claude terminal in this worktree.
-        </p>
+        </div>
       ) : (
-        <div className="space-y-3">
+        <div className="cell-detail__sessions-list">
           {aliveSessions.map((s) => (
-            <div key={s.id} className="bg-white rounded-lg shadow p-4">
-              <div className="flex items-center gap-3 mb-2">
+            <div key={s.id} className="card cell-detail__session-card">
+              <div className="cell-detail__session-meta">
                 <StatusBadge status="running" label="alive" />
-                <span className="text-xs text-gray-500">
+                <span className="cell-detail__session-role">
                   {s.role} {s.trigger ? `(${s.trigger})` : ""}
                 </span>
-                <span className="text-xs text-gray-400">
+                <span className="cell-detail__session-time">
                   {new Date(s.started_at).toLocaleString()}
                 </span>
-                <button
+                <div
+                  className="btn btn--sm btn--soft-red cell-detail__stop-btn"
                   onClick={() => handleStopSession(s.id)}
-                  className="ml-auto px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-800 rounded"
                 >
                   Stop
-                </button>
+                </div>
               </div>
               <Terminal
                 sessionId={s.id}
@@ -590,10 +528,8 @@ function CellDetailPage() {
 
           {deadSessions.length > 0 && (
             <div>
-              <h4 className="text-sm font-medium text-gray-500 mb-2">
-                Previous sessions
-              </h4>
-              <div className="space-y-2">
+              <div className="cell-detail__dead-title">Previous sessions</div>
+              <div className="cell-detail__dead-list">
                 {deadSessions.map((s) => (
                   <CollapsibleSession
                     key={s.id}
@@ -626,30 +562,30 @@ function CollapsibleSession({
     <div>
       <div
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 px-3 py-2 bg-white rounded-lg shadow-sm cursor-pointer hover:bg-gray-50"
+        className="collapsible-session__header"
       >
-        <span className="text-xs text-gray-400">
+        <span className="collapsible-session__arrow">
           {expanded ? "▾" : "▸"}
         </span>
-        <span className="text-xs font-medium text-gray-600">
+        <span className="collapsible-session__role">
           {session.role}
           {session.trigger ? ` (${session.trigger})` : ""}
         </span>
-        <span className="text-xs text-gray-400">
+        <span className="collapsible-session__time">
           {new Date(session.started_at).toLocaleString()}
         </span>
-        <button
+        <div
           onClick={(e) => {
             e.stopPropagation();
             onResume();
           }}
-          className="ml-auto px-2 py-0.5 text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 rounded"
+          className="btn btn--xs btn--soft-blue collapsible-session__resume"
         >
           Resume
-        </button>
+        </div>
       </div>
       {expanded && (
-        <div className="mt-1">
+        <div className="collapsible-session__body">
           <Terminal
             sessionId={session.id}
             cellId={cellId}
@@ -671,8 +607,8 @@ function CreateSortieForm({ onCreated }: { onCreated: () => void }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async () => {
+    if (!prompt.trim()) return;
     const repos = reposText
       .split(",")
       .map((r) => r.trim())
@@ -698,61 +634,50 @@ function CreateSortieForm({ onCreated }: { onCreated: () => void }) {
 
   if (!open) {
     return (
-      <button
-        onClick={() => setOpen(true)}
-        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm"
-      >
+      <div className="btn btn--blue" onClick={() => setOpen(true)}>
         New Sortie
-      </button>
+      </div>
     );
   }
 
   return (
-    <form
-      onSubmit={handleSubmit}
-      className="bg-white rounded-lg shadow p-4 mb-6 space-y-3"
-    >
-      {error && (
-        <div className="text-sm text-red-600 bg-red-50 px-3 py-2 rounded">
-          {error}
-        </div>
-      )}
+    <div className="card form">
+      {error && <div className="error-banner">{error}</div>}
       <textarea
         placeholder="Describe the change to make across repos..."
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
-        required
         rows={3}
-        className="w-full px-3 py-2 border rounded text-sm resize-y"
+        className="form__textarea"
       />
       <input
         type="text"
         placeholder="owner/repo-one, owner/repo-two, ..."
         value={reposText}
         onChange={(e) => setReposText(e.target.value)}
-        required
-        className="w-full px-3 py-2 border rounded text-sm"
+        className="form__input form__input--full"
+        onKeyDown={(e) => {
+          if (e.key === "Enter") handleSubmit();
+        }}
       />
-      <div className="flex gap-2">
-        <button
-          type="submit"
-          disabled={loading}
-          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50"
+      <div className="form__actions">
+        <div
+          className={`btn btn--blue${loading ? " btn--disabled" : ""}`}
+          onClick={handleSubmit}
         >
           {loading ? "Creating..." : "Create"}
-        </button>
-        <button
-          type="button"
+        </div>
+        <div
+          className="btn btn--gray"
           onClick={() => {
             setOpen(false);
             setError(null);
           }}
-          className="px-4 py-2 bg-gray-100 rounded hover:bg-gray-200 text-sm"
         >
           Cancel
-        </button>
+        </div>
       </div>
-    </form>
+    </div>
   );
 }
 
@@ -760,24 +685,22 @@ function SortieRow({ sortie }: { sortie: Sortie & { cell_count: number } }) {
   const navigate = useNavigate();
   return (
     <tr
-      className="border-b border-gray-200 hover:bg-gray-50 cursor-pointer"
+      className="sortie-row"
       onClick={() => navigate(`/sorties/${sortie.id}`)}
     >
-      <td className="px-4 py-3">
-        <div className="text-sm text-gray-900 truncate max-w-xs">
-          {sortie.prompt}
-        </div>
+      <td className="table__cell">
+        <div className="sortie-row__prompt">{sortie.prompt}</div>
       </td>
-      <td className="px-4 py-3 text-sm text-gray-600">
+      <td className="table__cell sortie-row__meta">
         {sortie.repos.length} repo{sortie.repos.length !== 1 && "s"}
       </td>
-      <td className="px-4 py-3 text-sm text-gray-600">
+      <td className="table__cell sortie-row__meta">
         {sortie.cell_count} / {sortie.repos.length}
       </td>
-      <td className="px-4 py-3">
+      <td className="table__cell">
         <StatusBadge status={sortie.status} label={sortie.status} />
       </td>
-      <td className="px-4 py-3 text-sm text-gray-500">
+      <td className="table__cell sortie-row__date">
         {new Date(sortie.created_at).toLocaleDateString()}
       </td>
     </tr>
@@ -800,35 +723,25 @@ function SortiesPage() {
 
   return (
     <>
-      <div className="flex justify-between items-center mb-6">
-        <h2 className="text-lg font-semibold text-gray-900">Sorties</h2>
+      <div className="page-header">
+        <div className="page-title">Sorties</div>
         <CreateSortieForm onCreated={loadSorties} />
       </div>
 
       {sorties.length === 0 ? (
-        <div className="text-center py-12 text-gray-500">
-          <p>No sorties yet.</p>
+        <div className="empty-state">
+          <div>No sorties yet.</div>
         </div>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+        <div className="card card--clipped">
+          <table className="table">
+            <thead className="table__head">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Prompt
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Repos
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Cells
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Status
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Created
-                </th>
+                <th className="table__header-cell">Prompt</th>
+                <th className="table__header-cell">Repos</th>
+                <th className="table__header-cell">Cells</th>
+                <th className="table__header-cell">Status</th>
+                <th className="table__header-cell">Created</th>
               </tr>
             </thead>
             <tbody>
@@ -864,92 +777,83 @@ function SortieDetailPage() {
 
   return (
     <div>
-      <button
-        onClick={() => navigate(-1)}
-        className="mb-4 text-sm text-gray-500 hover:text-gray-700"
-      >
+      <div className="back-link" onClick={() => navigate(-1)}>
         &larr; Back to sorties
-      </button>
-      <div className="bg-white rounded-lg shadow p-6 mb-6">
-        <div className="flex items-center gap-3 mb-3">
-          <h2 className="text-xl font-semibold">Sortie</h2>
+      </div>
+      <div className="card sortie-detail__card">
+        <div className="sortie-detail__header">
+          <div className="sortie-detail__title">Sortie</div>
           <StatusBadge status={sortie.status} label={sortie.status} />
         </div>
-        <div className="text-sm text-gray-600 space-y-2">
+        <div className="sortie-detail__info">
           <div>
-            <span className="font-medium">Prompt:</span>
-            <p className="mt-1 bg-gray-50 p-3 rounded">{sortie.prompt}</p>
+            <span className="sortie-detail__label">Prompt:</span>
+            <div className="sortie-detail__prompt-box">{sortie.prompt}</div>
           </div>
           <div>
-            <span className="font-medium">Repos:</span>{" "}
+            <span className="sortie-detail__label">Repos:</span>{" "}
             {sortie.repos.join(", ")}
           </div>
           <div>
-            <span className="font-medium">Created:</span>{" "}
+            <span className="sortie-detail__label">Created:</span>{" "}
             {new Date(sortie.created_at).toLocaleString()}
           </div>
         </div>
       </div>
 
-      <h3 className="text-lg font-semibold mb-3">
+      <div className="sortie-detail__cells-header">
         Cells ({sortie.cells.length} / {sortie.repos.length})
-      </h3>
+      </div>
       {sortie.cells.length === 0 ? (
-        <p className="text-gray-500 text-sm">Cells are being created...</p>
+        <div className="muted">Cells are being created...</div>
       ) : (
-        <div className="bg-white rounded-lg shadow overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+        <div className="card card--clipped">
+          <table className="table">
+            <thead className="table__head">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Repo / Branch
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  PR
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  CI
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Status
-                </th>
+                <th className="table__header-cell">Repo / Branch</th>
+                <th className="table__header-cell">PR</th>
+                <th className="table__header-cell">CI</th>
+                <th className="table__header-cell">Status</th>
               </tr>
             </thead>
             <tbody>
               {sortie.cells.map((cell) => (
                 <tr
                   key={cell.id}
-                  className="border-b border-gray-200 hover:bg-gray-50 cursor-pointer"
+                  className="sortie-detail__cell-row"
                   onClick={() => navigate(`/cells/${cell.id}`)}
                 >
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900">
+                  <td className="table__cell">
+                    <div className="sortie-detail__cell-repo">
                       {cell.repo.split("/").pop()}
                     </div>
-                    <div className="text-sm text-gray-500">{cell.branch}</div>
+                    <div className="sortie-detail__cell-branch">
+                      {cell.branch}
+                    </div>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="table__cell">
                     {cell.pr_url ? (
                       <a
                         href={cell.pr_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline text-sm"
+                        className="link"
                         onClick={(e) => e.stopPropagation()}
                       >
                         #{cell.pr_number}
                       </a>
                     ) : (
-                      <span className="text-gray-400 text-sm">pending</span>
+                      <span className="cell-row__no-pr">pending</span>
                     )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="table__cell">
                     <StatusBadge
                       status={cell.ci_status}
                       label={`CI: ${cell.ci_status}`}
                     />
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="table__cell">
                     <StatusBadge status={cell.status} label={cell.status} />
                   </td>
                 </tr>

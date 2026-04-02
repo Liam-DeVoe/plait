@@ -193,7 +193,7 @@ export default function Terminal({ sessionId, cellId, alive, autoFocus, onResume
     <div
       ref={containerRef}
       style={{ height: "400px", width: "100%", padding: "10px", background: "#252525", boxSizing: "border-box" }}
-      className="rounded overflow-hidden"
+      className="terminal__container"
     />
   );
 }
