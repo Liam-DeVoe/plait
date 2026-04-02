@@ -284,6 +284,10 @@ async def _watch_pty(session_id: str) -> None:
             await db.update_session(session_id, transcript=transcript)
         await asyncio.sleep(flush_interval)
 
+    # If stop_session already handled cleanup, skip final flush
+    if pty_manager.get(session_id) is None:
+        return
+
     # Final flush
     transcript = pty_manager.get_transcript(session_id)
     xterm_state = pty_manager.get_raw_output(session_id)
@@ -343,20 +347,31 @@ async def stop_session(cell_id: str, session_id: str):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    if not pty_manager.is_alive(session_id):
-        raise HTTPException(status_code=400, detail="Session is not alive")
+    if pty_manager.is_alive(session_id):
+        transcript = pty_manager.get_transcript(session_id)
+        xterm_state = pty_manager.get_raw_output(session_id)
+        await pty_manager.terminate(session_id)
+    else:
+        # Process already exited but _watch_pty hasn't finalized yet.
+        # Grab whatever state is left and clean up.
+        transcript = pty_manager.get_transcript(session_id)
+        xterm_state = pty_manager.get_raw_output(session_id)
+        pty_manager.remove(session_id)
 
-    transcript = pty_manager.get_transcript(session_id)
-    xterm_state = pty_manager.get_raw_output(session_id)
-    await pty_manager.terminate(session_id)
-    pty_manager.remove(session_id)
+    # Only overwrite DB fields if we got fresh data from the PTY buffer;
+    # otherwise _watch_pty (or a previous stop) may have already saved it.
+    update_kwargs: dict[str, object] = {}
+    if not session.ended_at:
+        update_kwargs["ended_at"] = datetime.now(timezone.utc).isoformat()
+    if transcript:
+        update_kwargs["transcript"] = transcript
+    if xterm_state:
+        update_kwargs["xterm_state"] = xterm_state
 
-    updated = await db.update_session(
-        session_id,
-        transcript=transcript,
-        xterm_state=xterm_state,
-        ended_at=datetime.now(timezone.utc).isoformat(),
-    )
+    if update_kwargs:
+        updated = await db.update_session(session_id, **update_kwargs)
+    else:
+        updated = session
     return _session_dict(updated) if updated else {}
 
 

@@ -138,9 +138,9 @@ export default function Terminal({ sessionId, cellId, alive, onResume }: Termina
       };
     } else {
       // --- REPLAY MODE ---
-      fetchXtermState(cellId, sessionId).then((buffer) => {
-        term.write(new Uint8Array(buffer));
-      });
+      fetchXtermState(cellId, sessionId)
+        .then((buffer) => term.write(new Uint8Array(buffer)))
+        .catch(() => {});
 
       const doResume = async () => {
         if (resumingRef.current) return;

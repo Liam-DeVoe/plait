@@ -192,6 +192,7 @@ def mock_pty():
     mock_manager.spawn.side_effect = _spawn
     mock_manager.is_alive.side_effect = lambda sid: sid in alive_sessions
     mock_manager.get_transcript.return_value = ""
+    mock_manager.get_raw_output.return_value = b""
     mock_manager.get.return_value = None
     mock_manager.remove.side_effect = lambda sid: alive_sessions.discard(sid)
 

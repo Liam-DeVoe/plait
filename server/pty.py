@@ -134,20 +134,32 @@ class PtyManager:
             return
 
         try:
-            os.killpg(os.getpgid(pty_session.pid), signal.SIGHUP)
+            pgid = os.getpgid(pty_session.pid)
         except (OSError, ProcessLookupError):
-            pass
+            pgid = None
 
-        # Wait briefly for process to exit
-        for _ in range(20):
-            try:
-                pid, _ = os.waitpid(pty_session.pid, os.WNOHANG)
-                if pid != 0:
-                    break
-            except ChildProcessError:
-                break
-            await asyncio.sleep(0.1)
+        # SIGHUP first, then escalate to SIGTERM/SIGKILL
+        for sig in [signal.SIGHUP, signal.SIGTERM, signal.SIGKILL]:
+            if pgid is not None:
+                try:
+                    os.killpg(pgid, sig)
+                except (OSError, ProcessLookupError):
+                    pass
 
+            for _ in range(10):
+                try:
+                    pid, _ = os.waitpid(pty_session.pid, os.WNOHANG)
+                    if pid != 0:
+                        self._cleanup(session_id)
+                        self._sessions.pop(session_id, None)
+                        return
+                except ChildProcessError:
+                    self._cleanup(session_id)
+                    self._sessions.pop(session_id, None)
+                    return
+                await asyncio.sleep(0.1)
+
+        # Process refused even SIGKILL (shouldn't happen); clean up anyway
         self._cleanup(session_id)
         self._sessions.pop(session_id, None)
 
