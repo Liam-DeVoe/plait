@@ -68,9 +68,6 @@ function Layout() {
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Orrery</h1>
-            <p className="text-sm text-gray-500">
-              PR coordination across hegel repositories
-            </p>
           </div>
           <nav className="flex gap-1 bg-gray-100 rounded-lg p-1">
             <NavLink

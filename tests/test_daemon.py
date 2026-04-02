@@ -78,7 +78,7 @@ async def test_cell_conflict_claude_resolves(git_env, init_db, mock_claude):
     cell = await _create_cell_in_db(git_env, "conflict-branch", "daemon-3")
 
     # Mock Claude to actually resolve the conflict by doing a real merge
-    async def fake_claude(prompt, cwd):
+    async def fake_claude(prompt, cwd, **kwargs):
         # Simulate Claude resolving: just do a merge accepting theirs
         await git.run(
             "git",
@@ -306,7 +306,7 @@ async def test_manual_sync_bypasses_limit(git_env, init_db, mock_claude):
         await db.create_session(s)
 
     # With force=True, Claude should still be invoked
-    async def fake_claude(prompt, cwd):
+    async def fake_claude(prompt, cwd, **kwargs):
         await git.run(
             "git",
             "merge",
@@ -346,3 +346,24 @@ async def test_run_user_session(git_env, init_db, mock_claude):
     assert updated.status == SessionStatus.completed
     assert updated.transcript == "Done! Made the changes."
     assert updated.ended_at is not None
+
+
+async def test_claude_receives_output_callback(git_env, init_db, mock_claude):
+    """All Claude calls should receive an on_output streaming callback."""
+    cell = await _create_cell_in_db(git_env, "callback-branch", "daemon-cb")
+
+    session = Session(
+        cell_id=cell.id,
+        role=SessionRole.user,
+        status=SessionStatus.running,
+    )
+    await db.create_session(session)
+
+    mock_claude.return_value = (True, "done")
+
+    await run_user_session(cell, session, "test prompt")
+
+    mock_claude.assert_called_once()
+    _, kwargs = mock_claude.call_args
+    assert "on_output" in kwargs
+    assert kwargs["on_output"] is not None

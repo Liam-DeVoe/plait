@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timezone
 
 from server import claude, db, git
@@ -28,6 +29,22 @@ MAX_DAEMON_ATTEMPTS = 3
 async def notify(event: str, data: dict) -> None:
     if notify_callback is not None:
         await notify_callback.put({"event": event, "data": data})
+
+
+def _make_output_callback(session_id: str, cell_id: str):
+    """Create a throttled callback for streaming Claude output to DB + WebSocket."""
+    last_update = 0.0
+
+    async def callback(transcript: str) -> None:
+        nonlocal last_update
+        now = time.monotonic()
+        if now - last_update < 1.0:
+            return
+        last_update = now
+        await db.update_session(session_id, transcript=transcript)
+        await notify("session_output", {"session_id": session_id, "cell_id": cell_id})
+
+    return callback
 
 
 async def _should_attempt(cell_id: str, trigger: str, *, force: bool = False) -> bool:
@@ -104,8 +121,9 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
                 )
                 await db.create_session(session)
 
+                on_output = _make_output_callback(session.id, cell.id)
                 claude_ok, claude_out = await claude.resolve_conflicts(
-                    cell.worktree_path, cell.branch
+                    cell.worktree_path, cell.branch, on_output=on_output
                 )
 
                 if claude_ok:
@@ -193,7 +211,10 @@ async def _fix_ci(cell: Cell, *, force: bool = False) -> None:
     )
     await db.create_session(session)
 
-    ok, output = await claude.fix_ci(cell.worktree_path, cell.branch, ci_logs)
+    on_output = _make_output_callback(session.id, cell.id)
+    ok, output = await claude.fix_ci(
+        cell.worktree_path, cell.branch, ci_logs, on_output=on_output
+    )
     ended_at = datetime.now(timezone.utc).isoformat()
 
     if ok:
@@ -245,7 +266,10 @@ async def spawn_sortie_cell(sortie: Sortie, repo: str) -> None:
     )
     await db.create_session(session)
 
-    ok, output = await claude.run_claude_headless(sortie.prompt, cwd=cell.worktree_path)
+    on_output = _make_output_callback(session.id, cell.id)
+    ok, output = await claude.run_claude_headless(
+        sortie.prompt, cwd=cell.worktree_path, on_output=on_output
+    )
     ended_at = datetime.now(timezone.utc).isoformat()
 
     if ok:
@@ -286,7 +310,10 @@ async def spawn_sortie_cell(sortie: Sortie, repo: str) -> None:
 
 async def run_user_session(cell: Cell, session: Session, prompt: str) -> None:
     """Run a user-initiated Claude session in a cell's worktree."""
-    ok, output = await claude.run_claude_headless(prompt, cwd=cell.worktree_path)
+    on_output = _make_output_callback(session.id, cell.id)
+    ok, output = await claude.run_claude_headless(
+        prompt, cwd=cell.worktree_path, on_output=on_output
+    )
     ended_at = datetime.now(timezone.utc).isoformat()
 
     await db.update_session(
