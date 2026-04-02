@@ -28,7 +28,6 @@ export interface Session {
 
 export interface Sortie {
   id: string;
-  prompt: string;
   session_id: string | null;
   status: "active" | "completed";
   created_at: string;
@@ -147,12 +146,8 @@ export async function fetchSortie(id: string): Promise<Sortie & { cells: Cell[] 
   return res.json();
 }
 
-export async function createSortie(prompt: string): Promise<Sortie> {
-  const res = await fetch(`${BASE}/sorties`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt }),
-  });
+export async function createSortie(): Promise<Sortie> {
+  const res = await fetch(`${BASE}/sorties`, { method: "POST" });
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || "Failed to create sortie");

@@ -106,25 +106,24 @@ async def test_update_session(init_db):
 
 
 async def test_create_and_get_sortie(init_db):
-    sortie = Sortie(prompt="update all repos")
+    sortie = Sortie()
     await db.create_sortie(sortie)
 
     fetched = await db.get_sortie(sortie.id)
     assert fetched is not None
-    assert fetched.prompt == "update all repos"
     assert fetched.session_id is None
 
 
 async def test_list_sorties(init_db):
-    await db.create_sortie(Sortie(prompt="first"))
-    await db.create_sortie(Sortie(prompt="second"))
+    await db.create_sortie(Sortie())
+    await db.create_sortie(Sortie())
 
     sorties = await db.list_sorties()
     assert len(sorties) == 2
 
 
 async def test_sortie_session_id(init_db):
-    sortie = Sortie(prompt="test", session_id="sess-123")
+    sortie = Sortie(session_id="sess-123")
     await db.create_sortie(sortie)
     fetched = await db.get_sortie(sortie.id)
     assert fetched is not None
@@ -132,7 +131,7 @@ async def test_sortie_session_id(init_db):
 
 
 async def test_update_sortie(init_db):
-    sortie = Sortie(prompt="test")
+    sortie = Sortie()
     await db.create_sortie(sortie)
 
     updated = await db.update_sortie(sortie.id, session_id="sess-456")
@@ -155,7 +154,7 @@ async def test_get_session(init_db):
 
 
 async def test_session_with_sortie_id(init_db):
-    sortie = Sortie(prompt="test")
+    sortie = Sortie()
     await db.create_sortie(sortie)
     session = Session(sortie_id=sortie.id, role=SessionRole.daemon, trigger="sortie")
     await db.create_session(session)
@@ -167,7 +166,7 @@ async def test_session_with_sortie_id(init_db):
 
 
 async def test_list_cells_by_sortie(init_db):
-    sortie = Sortie(prompt="test")
+    sortie = Sortie()
     await db.create_sortie(sortie)
 
     c1 = Cell(repo="org/a", branch="b1", worktree_path="/tmp/a", sortie_id=sortie.id)
@@ -224,7 +223,6 @@ def st_session(draw):
 @st.composite
 def st_sortie(draw):
     return Sortie(
-        prompt=draw(st.text(min_size=0, max_size=200)),
         session_id=draw(st.none() | st.text(min_size=1, max_size=36)),
         status=draw(st_sortie_status),
     )
@@ -274,6 +272,5 @@ async def test_sortie_roundtrip(sortie: Sortie):
     fetched = await db.get_sortie(sortie.id)
     assert fetched is not None
     assert fetched.id == sortie.id
-    assert fetched.prompt == sortie.prompt
     assert fetched.session_id == sortie.session_id
     assert fetched.status == sortie.status

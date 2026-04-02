@@ -12,8 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from server import claude, db
-from server.daemon_config import DAEMON_ALLOWED_TOOLS, SORTIE_ALLOWED_TOOLS
-from server.models import Cell, Sortie
+from server.daemon_config import DAEMON_ALLOWED_TOOLS
+from server.models import Cell
 from server.pty import pty_manager
 
 logger = logging.getLogger(__name__)
@@ -38,36 +38,6 @@ def tend_cmd(session_id: str, cell: Cell) -> tuple[list[str], str]:
         "--allowedTools",
         *allowed_tools,
     ], cell.worktree_path
-
-
-def daemon_sortie_cmd(
-    session_id: str,
-    sortie: Sortie,
-    exploration_dir: str,
-    repo_worktrees: dict[str, str],
-) -> tuple[list[str], str]:
-    """Daemon headless session to orchestrate a sortie."""
-    from server import git
-
-    worktree_root = str(git.WORKTREE_ROOT.resolve())
-    allowed_tools = [
-        t.format(worktree_root=worktree_root) for t in SORTIE_ALLOWED_TOOLS
-    ]
-    system_prompt = claude.sortie_system_prompt(
-        sortie.id, exploration_dir, repo_worktrees
-    )
-    return [
-        "claude",
-        "-p",
-        sortie.prompt,
-        "--verbose",
-        "--session-id",
-        session_id,
-        "--system-prompt",
-        system_prompt,
-        "--allowedTools",
-        *allowed_tools,
-    ], exploration_dir
 
 
 def user_cell_cmd(session_id: str, cell: Cell) -> tuple[list[str], str]:

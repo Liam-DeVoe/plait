@@ -217,17 +217,17 @@ async def test_create_sortie(client):
     c, git_env, _ = client
     resp = await c.post(
         "/sorties",
-        json={"prompt": "update everything"},
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["prompt"] == "update everything"
     assert data["session_id"] is not None  # session created inline with PTY
 
 
 async def test_list_sorties(client):
     c, git_env, _ = client
-    await c.post("/sorties", json={"prompt": "first"})
+    await c.post(
+        "/sorties",
+    )
     resp = await c.get("/sorties")
     assert resp.status_code == 200
     data = resp.json()
@@ -242,7 +242,6 @@ async def test_sortie_derived_status(client):
 
     resp = await c.post(
         "/sorties",
-        json={"prompt": "update"},
     )
     sortie_id = resp.json()["id"]
 
@@ -253,7 +252,9 @@ async def test_sortie_derived_status(client):
 async def test_hook_create_sortie_cell(client):
     """Sortie create-cell hook should create a cell linked to the sortie."""
     c, git_env, _ = client
-    resp = await c.post("/sorties", json={"prompt": "test"})
+    resp = await c.post(
+        "/sorties",
+    )
     sortie_id = resp.json()["id"]
 
     resp = await c.post(
@@ -274,7 +275,9 @@ async def test_hook_create_sortie_cell(client):
 async def test_hook_create_sortie_cell_duplicate(client):
     """Creating a duplicate cell for the same repo in a sortie should fail."""
     c, git_env, _ = client
-    resp = await c.post("/sorties", json={"prompt": "test"})
+    resp = await c.post(
+        "/sorties",
+    )
     sortie_id = resp.json()["id"]
 
     await c.post(
@@ -290,7 +293,9 @@ async def test_hook_create_sortie_cell_duplicate(client):
 
 async def test_hook_create_sortie_cell_bad_repo(client):
     c, _, _ = client
-    resp = await c.post("/sorties", json={"prompt": "test"})
+    resp = await c.post(
+        "/sorties",
+    )
     sortie_id = resp.json()["id"]
 
     resp = await c.post(

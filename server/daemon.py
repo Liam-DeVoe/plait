@@ -12,10 +12,9 @@ from server.models import (
     CIStatus,
     Session,
     SessionRole,
-    Sortie,
     SyncStatus,
 )
-from server.sessions import daemon_sortie_cmd, spawn_session, tend_cmd
+from server.sessions import spawn_session, tend_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -274,38 +273,3 @@ async def daemon_loop() -> None:
             logger.exception("Daemon loop error")
 
         await asyncio.sleep(POLL_INTERVAL)
-
-
-async def spawn_sortie_session(sortie: Sortie) -> None:
-    """Spawn the single orchestrator Claude session for a sortie."""
-    try:
-        repo_worktrees = await git.create_sortie_worktrees(sortie.id)
-    except RuntimeError:
-        logger.exception(f"Failed to create sortie worktrees for {sortie.id}")
-        return
-
-    exploration_dir = str(git.WORKTREE_ROOT / f"sortie-{sortie.id}")
-
-    session = Session(
-        sortie_id=sortie.id,
-        role=SessionRole.daemon,
-        trigger="sortie",
-    )
-    await db.create_session(session)
-    await db.update_sortie(sortie.id, session_id=session.id)
-    await notify("sortie_updated", {"id": sortie.id})
-
-    cmd, cwd = daemon_sortie_cmd(session.id, sortie, exploration_dir, repo_worktrees)
-    task = spawn_session(session.id, cmd, cwd, idle_timeout=SESSION_IDLE_TIMEOUT)
-    exit_code = await task
-    ok = exit_code == 0
-
-    await db.update_session(session.id, succeeded=1 if ok else 0)
-
-    # Clean up exploration worktrees (cell worktrees persist)
-    try:
-        await git.remove_sortie_worktrees(sortie.id)
-    except Exception:
-        logger.exception(f"Failed to clean up sortie worktrees for {sortie.id}")
-
-    await notify("sortie_updated", {"id": sortie.id})

@@ -4,14 +4,13 @@ import json
 from pathlib import Path
 
 from server import daemon, db, git
-from server.daemon import process_cell, spawn_sortie_session
+from server.daemon import process_cell
 from server.models import (
     Cell,
     CellStatus,
     CIStatus,
     Session,
     SessionRole,
-    Sortie,
     SyncStatus,
 )
 
@@ -240,33 +239,6 @@ async def test_ci_fix_retried_after_previous_failure(
 
     # Claude SHOULD have been called — previous session ended
     mock_claude.assert_called_once()
-
-
-async def test_spawn_sortie_session(git_env, init_db, mock_claude):
-    """spawn_sortie_session should create exploration worktrees and run Claude."""
-    sortie = Sortie(prompt="add tests")
-    await db.create_sortie(sortie)
-
-    # Mock Claude to succeed
-    mock_claude.return_value = 0
-
-    await spawn_sortie_session(sortie)
-
-    # Verify sortie was updated with session_id
-    fetched_sortie = await db.get_sortie(sortie.id)
-    assert fetched_sortie.session_id is not None
-
-    # Verify session was created and completed
-    session = await db.get_session(fetched_sortie.session_id)
-    assert session is not None
-    assert session.sortie_id == sortie.id
-    assert session.cell_id is None
-    assert session.trigger == "sortie"
-    assert session.succeeded is True
-
-    # Exploration worktrees should be cleaned up after session ends
-    sortie_dir = git.WORKTREE_ROOT / f"sortie-{sortie.id}"
-    assert not sortie_dir.exists()
 
 
 async def test_merge_retried_after_previous_failure(git_env, init_db, mock_claude):

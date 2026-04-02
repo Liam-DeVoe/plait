@@ -40,7 +40,6 @@ CREATE TABLE IF NOT EXISTS cells (
 
 CREATE TABLE IF NOT EXISTS sorties (
     id TEXT PRIMARY KEY,
-    prompt TEXT NOT NULL,
     session_id TEXT,
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL
@@ -311,11 +310,10 @@ async def create_sortie(sortie: Sortie) -> Sortie:
     db = await get_db()
     try:
         await db.execute(
-            """INSERT INTO sorties (id, prompt, session_id, status, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
+            """INSERT INTO sorties (id, session_id, status, created_at)
+               VALUES (?, ?, ?, ?)""",
             (
                 sortie.id,
-                sortie.prompt,
                 sortie.session_id,
                 sortie.status.value,
                 sortie.created_at,
@@ -350,7 +348,6 @@ async def get_sortie(sortie_id: str) -> Sortie | None:
 def _row_to_sortie(row: aiosqlite.Row) -> Sortie:
     return Sortie(
         id=row["id"],
-        prompt=row["prompt"],
         session_id=row["session_id"],
         status=SortieStatus(row["status"]),
         created_at=row["created_at"],

@@ -38,8 +38,7 @@ async def create_sortie_worktrees(sortie_id: str) -> dict[str, str]:
     sortie_dir = WORKTREE_ROOT / f"sortie-{sortie_id}"
     sortie_dir.mkdir(parents=True, exist_ok=True)
 
-    result: dict[str, str] = {}
-    for repo_id, repo in config.get_repos().items():
+    async def _create_one(repo_id: str, repo: config.Repo) -> tuple[str, str]:
         await fetch_origin(repo_id)
         wt_dir = sortie_dir / repo_id
         rc, out, err = await run(
@@ -53,8 +52,12 @@ async def create_sortie_worktrees(sortie_id: str) -> dict[str, str]:
         )
         if rc != 0:
             raise RuntimeError(f"Failed to create sortie worktree for {repo_id}: {err}")
-        result[repo_id] = str(wt_dir)
-    return result
+        return repo_id, str(wt_dir)
+
+    pairs = await asyncio.gather(
+        *[_create_one(rid, r) for rid, r in config.get_repos().items()]
+    )
+    return dict(pairs)
 
 
 async def remove_sortie_worktrees(sortie_id: str) -> None:

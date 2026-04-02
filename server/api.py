@@ -530,13 +530,9 @@ async def _cleanup_stale_sessions() -> None:
 # --- Sortie endpoints ---
 
 
-class CreateSortieRequest(BaseModel):
-    prompt: str
-
-
 @app.post("/sorties")
-async def create_sortie(req: CreateSortieRequest):
-    sortie = Sortie(prompt=req.prompt)
+async def create_sortie():
+    sortie = Sortie()
     await db.create_sortie(sortie)
 
     try:
@@ -555,7 +551,7 @@ async def create_sortie(req: CreateSortieRequest):
     await db.update_sortie(sortie.id, session_id=session.id)
 
     cmd, cwd = user_sortie_cmd(session.id, sortie.id, exploration_dir, repo_worktrees)
-    spawn_session(session.id, cmd, cwd, initial_input=req.prompt)
+    spawn_session(session.id, cmd, cwd)
 
     result = asdict(sortie)
     result["session_id"] = session.id

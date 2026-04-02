@@ -58,7 +58,6 @@ class Cell:
 @dataclass
 class Sortie:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    prompt: str = ""
     session_id: str | None = None
     status: SortieStatus = SortieStatus.active
     created_at: str = field(

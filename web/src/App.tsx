@@ -891,68 +891,6 @@ function CollapsibleSession({
 
 // --- Sorties ---
 
-function CreateSortieForm({
-  open,
-  onClose,
-  onCreated,
-}: {
-  open: boolean;
-  onClose: () => void;
-  onCreated: () => void;
-}) {
-  const [prompt, setPrompt] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleSubmit = async () => {
-    if (!prompt.trim()) return;
-    setLoading(true);
-    setError(null);
-    try {
-      await createSortie(prompt);
-      setPrompt("");
-      onClose();
-      onCreated();
-    } catch (err: any) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (!open) return null;
-
-  return (
-    <div className="card form">
-      {error && <div className="error-banner">{error}</div>}
-      <textarea
-        value={prompt}
-        onChange={(e) => setPrompt(e.target.value)}
-        rows={3}
-        className="form__textarea"
-        autoFocus
-      />
-      <div className="form__actions">
-        <div
-          className={`btn btn--blue${loading ? " btn--disabled" : ""}`}
-          onClick={handleSubmit}
-        >
-          {loading ? "Creating..." : "Create"}
-        </div>
-        <div
-          className="btn btn--gray"
-          onClick={() => {
-            onClose();
-            setError(null);
-          }}
-        >
-          Cancel
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function SortieRow({ sortie }: { sortie: Sortie & { cell_count: number } }) {
   const navigate = useNavigate();
   return (
@@ -960,9 +898,6 @@ function SortieRow({ sortie }: { sortie: Sortie & { cell_count: number } }) {
       className="sortie-row"
       onClick={() => navigate(`/sorties/${sortie.id}`)}
     >
-      <td className="table__cell">
-        <div className="sortie-row__prompt">{sortie.prompt}</div>
-      </td>
       <td className="table__cell sortie-row__meta">
         {sortie.cell_count} cell{sortie.cell_count !== 1 && "s"}
       </td>
@@ -977,11 +912,12 @@ function SortieRow({ sortie }: { sortie: Sortie & { cell_count: number } }) {
 }
 
 function SortiesPage() {
+  const navigate = useNavigate();
   const { run } = useOutletContext<LayoutContext>();
   const [sorties, setSorties] = useState<(Sortie & { cell_count: number })[]>(
     [],
   );
-  const [formOpen, setFormOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const loadSorties = useCallback(async () => {
     setSorties(await fetchSorties());
@@ -991,21 +927,27 @@ function SortiesPage() {
     loadSorties();
   }, [loadSorties, run]);
 
+  const handleNewSortie = async () => {
+    setCreating(true);
+    try {
+      const sortie = await createSortie();
+      navigate(`/sorties/${sortie.id}`);
+    } finally {
+      setCreating(false);
+    }
+  };
+
   return (
     <>
       <div className="page-header">
         <div className="page-title">Sorties</div>
-        {!formOpen && (
-          <div className="btn btn--blue" onClick={() => setFormOpen(true)}>
-            New Sortie
-          </div>
-        )}
+        <div
+          className={`btn btn--blue${creating ? " btn--disabled" : ""}`}
+          onClick={creating ? undefined : handleNewSortie}
+        >
+          {creating ? "Creating..." : "New Sortie"}
+        </div>
       </div>
-      <CreateSortieForm
-        open={formOpen}
-        onClose={() => setFormOpen(false)}
-        onCreated={loadSorties}
-      />
 
       {sorties.length === 0 ? (
         <div className="empty-state">
@@ -1016,7 +958,6 @@ function SortiesPage() {
           <table className="table">
             <thead className="table__head">
               <tr>
-                <th className="table__header-cell">Prompt</th>
                 <th className="table__header-cell">Cells</th>
                 <th className="table__header-cell">Status</th>
                 <th className="table__header-cell">Created</th>
@@ -1064,10 +1005,6 @@ function SortieDetailPage() {
           <StatusBadge status={sortie.status} label={sortie.status} />
         </div>
         <div className="sortie-detail__info">
-          <div>
-            <span className="sortie-detail__label">Prompt:</span>
-            <div className="sortie-detail__prompt-box">{sortie.prompt}</div>
-          </div>
           <div>
             <span className="sortie-detail__label">Created:</span>{" "}
             {new Date(sortie.created_at).toLocaleString()}

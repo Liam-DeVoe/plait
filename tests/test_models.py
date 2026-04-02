@@ -38,7 +38,6 @@ def test_sortie_defaults():
     assert sortie.id
     assert sortie.status == SortieStatus.active
     assert sortie.session_id is None
-    assert sortie.prompt == ""
 
 
 def test_session_sortie_id():
