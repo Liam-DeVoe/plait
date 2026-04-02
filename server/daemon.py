@@ -123,20 +123,25 @@ async def _process_cell(cell: Cell) -> dict:
                 await db.update_cell(cell.id, ci_status=ci_status)
                 await notify("cell_updated", {"id": cell.id, "ci_status": ci})
             if ci_status == CIStatus.failing:
-                if "ci_failing" not in reasons:
-                    reasons.append("ci_failing")
+                ci_detail = f"ci: {cell.ci_status.value}\u2192{ci_status.value}"
+                if ci_detail not in reasons:
+                    reasons.append(ci_detail)
                 needs_tend = True
 
             comment_count = await git.get_pr_comment_count(cell.repo, cell.pr_number)
             if comment_count != cell.pr_comment_count:
+                reasons.append(
+                    f"comments: {cell.pr_comment_count}\u2192{comment_count}"
+                )
                 await db.update_cell(cell.id, pr_comment_count=comment_count)
-                reasons.append("new_comments")
                 needs_tend = True
 
             reaction_count = await git.get_pr_reaction_count(cell.repo, cell.pr_number)
             if reaction_count != cell.pr_reaction_count:
+                reasons.append(
+                    f"reactions: {cell.pr_reaction_count}\u2192{reaction_count}"
+                )
                 await db.update_cell(cell.id, pr_reaction_count=reaction_count)
-                reasons.append("new_reactions")
                 needs_tend = True
 
         # --- Spawn a tend session if anything changed ---

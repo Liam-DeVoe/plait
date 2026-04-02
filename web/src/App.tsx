@@ -305,7 +305,6 @@ function timeAgo(iso: string): string {
 }
 
 function runSummary(run: DaemonRun): string {
-  const total = run.results.length;
   const tended = run.results.filter((r) => r.decision === "tended");
   const skipped = run.results.filter((r) => r.decision === "skipped").length;
   const errored = run.results.filter((r) => r.decision === "error").length;
@@ -358,9 +357,13 @@ function DaemonLog({ runs }: { runs: DaemonRun[] }) {
               <div className="daemon-log__run-details">
                 {run.results.map((r) => (
                   <div key={r.cell_id} className="daemon-log__cell-result">
-                    <span className="daemon-log__cell-name">
+                    <NavLink
+                      to={`/cells/${r.cell_id}`}
+                      className="daemon-log__cell-name"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {r.repo}:{r.branch}
-                    </span>
+                    </NavLink>
                     <span
                       className={`badge badge--${
                         r.decision === "tended"

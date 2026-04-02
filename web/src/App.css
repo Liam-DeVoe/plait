@@ -850,8 +850,13 @@
 }
 
 .daemon-log__cell-name {
-  color: #374151;
+  color: #2563eb;
   font-weight: 500;
+  text-decoration: none;
+}
+
+.daemon-log__cell-name:hover {
+  text-decoration: underline;
 }
 
 .daemon-log__reasons {
