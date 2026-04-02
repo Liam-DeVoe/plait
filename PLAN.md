@@ -64,10 +64,6 @@ The smallest thing that solves the immediate pain: auto-merge with conflict reso
 
 ## Phase 3: Polish
 
-### 3.1 Interactive sessions upgrade
-- [ ] Investigate Claude Code SDK/headless mode
-- [ ] Build native chat UI if feasible, replacing embedded terminal
-
 ### 3.2 Chrome extension
 - [ ] "Open in Orrery" button on GitHub PR pages
 - [ ] Creates cell if one doesn't exist, navigates to it in UI
