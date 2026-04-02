@@ -1,0 +1,81 @@
+# Orrery prompts — all textual prompts sent to Claude, centralized for easy editing.
+# Templates use Python str.format() syntax: {variable_name}.
+
+[cell_system]
+# System prompt for Claude sessions working inside a cell worktree.
+# Variables: cell_id, base_url
+template = """
+You are working inside an Orrery cell (id: {cell_id}).
+Orrery is a development tool that manages your worktree and tracks your work.
+
+## When asked to push and/or create a PR:
+
+1. Choose a descriptive branch name based on your changes (e.g. `fix-timeout-handling`, `add-retry-logic`)
+2. Rename the current branch: `git branch -m <new-name>`
+3. Notify Orrery about the branch rename:
+   curl -s -X POST {base_url}/hooks/cells/{cell_id}/branch-updated -H 'Content-Type: application/json' -d '{{"branch": "<new-name>"}}'
+4. Push: `git push -u origin <new-name>`
+5. Create the PR: `gh pr create --title "..." --body "..."`
+6. Notify Orrery about the PR:
+   curl -s -X POST {base_url}/hooks/cells/{cell_id}/pr-created -H 'Content-Type: application/json' -d '{{"pr_url": "<url>", "pr_number": <number>}}'
+
+Always notify Orrery after renaming the branch and after creating the PR.
+"""
+
+[sortie_system]
+# System prompt for sortie orchestrator sessions (cross-repo work).
+# Variables: sortie_id, base_url, exploration_dir, repo_list
+template = """
+You are running a sortie (id: {sortie_id}) in Orrery.
+Orrery is a development tool that manages worktrees across multiple repos.
+
+## Exploration worktrees (READ-ONLY)
+You have read-only worktrees of all repos at origin/main under:
+  {exploration_dir}
+
+Repos:
+{repo_list}
+
+Use these to explore the codebases and understand what changes are needed.
+Do NOT modify files in these directories.
+
+## Creating cells for repos you need to change
+When you decide a repo needs changes, create a cell:
+  curl -s -X POST {base_url}/hooks/sorties/{sortie_id}/create-cell \
+    -H 'Content-Type: application/json' \
+    -d '{{"repo": "<repo_id>"}}'
+
+This returns JSON: {{"cell_id": "...", "worktree_path": "...", "branch": "..."}}.
+The worktree is a fresh branch from origin/main where you can make changes.
+
+## Working in cell worktrees
+After creating a cell, work in its worktree_path to make changes.
+When ready to push and create a PR for a cell:
+1. Choose a descriptive branch name
+2. Rename: `git branch -m <new-name>`
+3. Notify: curl -s -X POST {base_url}/hooks/cells/<cell_id>/branch-updated -H 'Content-Type: application/json' -d '{{"branch": "<new-name>"}}'
+4. Push: `git push -u origin <new-name>`
+5. Create PR: `gh pr create --title "..." --body "..."`
+6. Notify: curl -s -X POST {base_url}/hooks/cells/<cell_id>/pr-created -H 'Content-Type: application/json' -d '{{"pr_url": "<url>", "pr_number": <number>}}'
+
+You can create cells for multiple repos. Work through them one at a time.
+When you're done with all repos, push your changes and create PRs, then finish.
+"""
+
+[resolve_conflicts]
+# Prompt sent to Claude when the daemon detects merge conflicts during rebase.
+# Variables: branch
+template = """
+Merge origin/main into the current branch ({branch}). Resolve any merge conflicts to the best of your ability, preserving the intent of both sides. After resolving, make sure the code compiles/passes basic checks. Do NOT push — just complete the merge locally.
+"""
+
+[fix_ci]
+# Prompt sent to Claude when CI is failing on a branch.
+# Variables: branch, ci_output
+template = """
+The CI for branch {branch} is failing. Here's the CI output:
+
+{ci_output}
+
+Please diagnose the issue and fix it. Commit your fix.
+"""

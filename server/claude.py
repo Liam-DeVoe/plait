@@ -4,35 +4,26 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+import tomllib
+
 from server.daemon_config import DAEMON_ALLOWED_TOOLS
 
 ORRERY_PORT = 8000
+PROMPTS_PATH = Path(__file__).parent.parent / "prompts.toml"
+
+
+def _load_prompts() -> dict:
+    return tomllib.loads(PROMPTS_PATH.read_text())
 
 
 def orrery_system_prompt(cell_id: str) -> str:
     """Generate the system prompt that tells Claude about Orrery hooks."""
-    base = f"http://localhost:{ORRERY_PORT}"
+    base_url = f"http://localhost:{ORRERY_PORT}"
+    prompts = _load_prompts()
     return (
-        f"You are working inside an Orrery cell (id: {cell_id}).\n"
-        "Orrery is a development tool that manages your worktree and tracks your work.\n"
-        "\n"
-        "## When asked to push and/or create a PR:\n"
-        "\n"
-        "1. Choose a descriptive branch name based on your changes "
-        "(e.g. `fix-timeout-handling`, `add-retry-logic`)\n"
-        "2. Rename the current branch: `git branch -m <new-name>`\n"
-        "3. Notify Orrery about the branch rename:\n"
-        f"   curl -s -X POST {base}/hooks/cells/{cell_id}/branch-updated "
-        "-H 'Content-Type: application/json' "
-        '-d \'{"branch": "<new-name>"}\'\n'
-        "4. Push: `git push -u origin <new-name>`\n"
-        '5. Create the PR: `gh pr create --title "..." --body "..."`\n'
-        "6. Notify Orrery about the PR:\n"
-        f"   curl -s -X POST {base}/hooks/cells/{cell_id}/pr-created "
-        "-H 'Content-Type: application/json' "
-        '-d \'{"pr_url": "<url>", "pr_number": <number>}\'\n'
-        "\n"
-        "Always notify Orrery after renaming the branch and after creating the PR.\n"
+        prompts["cell_system"]["template"]
+        .strip()
+        .format(cell_id=cell_id, base_url=base_url)
     )
 
 
@@ -42,48 +33,18 @@ def sortie_system_prompt(
     repo_paths: dict[str, str],
 ) -> str:
     """Generate the system prompt for a sortie orchestrator session."""
-    base = f"http://localhost:{ORRERY_PORT}"
+    base_url = f"http://localhost:{ORRERY_PORT}"
     repo_list = "\n".join(f"  - {rid}: {path}" for rid, path in repo_paths.items())
+    prompts = _load_prompts()
     return (
-        f"You are running a sortie (id: {sortie_id}) in Orrery.\n"
-        "Orrery is a development tool that manages worktrees across multiple repos.\n"
-        "\n"
-        "## Exploration worktrees (READ-ONLY)\n"
-        f"You have read-only worktrees of all repos at origin/main under:\n"
-        f"  {exploration_dir}\n"
-        "\n"
-        f"Repos:\n{repo_list}\n"
-        "\n"
-        "Use these to explore the codebases and understand what changes are needed.\n"
-        "Do NOT modify files in these directories.\n"
-        "\n"
-        "## Creating cells for repos you need to change\n"
-        "When you decide a repo needs changes, create a cell:\n"
-        f"  curl -s -X POST {base}/hooks/sorties/{sortie_id}/create-cell \\\n"
-        "    -H 'Content-Type: application/json' \\\n"
-        '    -d \'{"repo": "<repo_id>"}\'\n'
-        "\n"
-        'This returns JSON: {"cell_id": "...", "worktree_path": "...", '
-        '"branch": "..."}.\n'
-        "The worktree is a fresh branch from origin/main where you can make changes.\n"
-        "\n"
-        "## Working in cell worktrees\n"
-        "After creating a cell, work in its worktree_path to make changes.\n"
-        "When ready to push and create a PR for a cell:\n"
-        "1. Choose a descriptive branch name\n"
-        "2. Rename: `git branch -m <new-name>`\n"
-        f"3. Notify: curl -s -X POST {base}/hooks/cells/<cell_id>/branch-updated "
-        "-H 'Content-Type: application/json' "
-        '-d \'{"branch": "<new-name>"}\'\n'
-        "4. Push: `git push -u origin <new-name>`\n"
-        '5. Create PR: `gh pr create --title "..." --body "..."`\n'
-        f"6. Notify: curl -s -X POST {base}/hooks/cells/<cell_id>/pr-created "
-        "-H 'Content-Type: application/json' "
-        '-d \'{"pr_url": "<url>", "pr_number": <number>}\'\n'
-        "\n"
-        "You can create cells for multiple repos. Work through them one at a time.\n"
-        "When you're done with all repos, push your changes and create PRs, "
-        "then finish.\n"
+        prompts["sortie_system"]["template"]
+        .strip()
+        .format(
+            sortie_id=sortie_id,
+            base_url=base_url,
+            exploration_dir=exploration_dir,
+            repo_list=repo_list,
+        )
     )
 
 
@@ -150,13 +111,8 @@ async def resolve_conflicts(
     on_output: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[bool, str]:
     """Use Claude to merge origin/main and resolve any conflicts."""
-    prompt = (
-        f"Merge origin/main into the current branch ({branch}). "
-        "Resolve any merge conflicts to the best of your ability, "
-        "preserving the intent of both sides. After resolving, "
-        "make sure the code compiles/passes basic checks. "
-        "Do NOT push — just complete the merge locally."
-    )
+    prompts = _load_prompts()
+    prompt = prompts["resolve_conflicts"]["template"].strip().format(branch=branch)
     return await run_claude_headless(
         prompt,
         cwd=worktree_path,
@@ -175,10 +131,9 @@ async def fix_ci(
     on_output: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[bool, str]:
     """Use Claude to diagnose and fix a CI failure."""
+    prompts = _load_prompts()
     prompt = (
-        f"The CI for branch {branch} is failing. Here's the CI output:\n\n"
-        f"{ci_output}\n\n"
-        "Please diagnose the issue and fix it. Commit your fix."
+        prompts["fix_ci"]["template"].strip().format(branch=branch, ci_output=ci_output)
     )
     return await run_claude_headless(
         prompt,

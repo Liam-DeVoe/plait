@@ -15,9 +15,9 @@ from pydantic import BaseModel
 
 from server import claude, config, daemon, db, git
 from server.models import (
-    CIStatus,
     Cell,
     CellStatus,
+    CIStatus,
     Session,
     SessionRole,
     Sortie,
