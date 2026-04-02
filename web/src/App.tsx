@@ -537,7 +537,7 @@ function CellsPage() {
 
       {repos.length === 0 ? (
         <div className="empty-state">
-          <div>No repos configured. Add repos to repos.json to get started.</div>
+          <div>No repos configured. Add repos to config.toml to get started.</div>
         </div>
       ) : (
         <div className="cells-page__groups">

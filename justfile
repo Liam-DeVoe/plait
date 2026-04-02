@@ -1,11 +1,11 @@
 server:
-    cd server && uv run uvicorn server.api:app --reload --port 8000
+    uv run uvicorn server.api:app --reload --port 8000
 
 web:
     cd web && npm run dev
 
-dev:
-    @echo "Run 'just server' and 'just web' in separate terminals"
+serve:
+    trap 'kill 0' EXIT; just server & just web & wait
 
 test *args:
     uv run pytest tests/ -n auto {{ args }}
