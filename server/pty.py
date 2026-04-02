@@ -9,6 +9,7 @@ import signal
 import struct
 import subprocess
 import termios
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -23,6 +24,7 @@ class PtySession:
     listeners: list[Callable[[bytes], None]] = field(default_factory=list)
     output_buffer: bytearray = field(default_factory=bytearray)
     exit_code: int | None = None
+    last_output_at: float = field(default_factory=time.monotonic)
 
 
 class PtyManager:
@@ -89,6 +91,7 @@ class PtyManager:
             return
 
         pty_session.output_buffer.extend(data)
+        pty_session.last_output_at = time.monotonic()
         for listener in pty_session.listeners:
             try:
                 listener(data)

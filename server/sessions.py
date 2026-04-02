@@ -7,13 +7,17 @@ spawn_session() handles the PTY mechanics common to all types.
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
 from server import claude, db
 from server.daemon_config import DAEMON_ALLOWED_TOOLS, SORTIE_ALLOWED_TOOLS
 from server.models import Cell, Sortie
+
 from server.pty import pty_manager
+
+logger = logging.getLogger(__name__)
 
 # --- Command factories ---
 # Each returns (cmd, cwd) for a specific session type.
@@ -121,6 +125,7 @@ def spawn_session(
     cwd: str,
     *,
     initial_input: str = "",
+    idle_timeout: float | None = None,
 ) -> asyncio.Task[int | None]:
     """Spawn a PTY session and start watching it.
 
@@ -128,6 +133,9 @@ def spawn_session(
     or discard it for fire-and-forget (interactive sessions).
 
     Use a *_cmd() factory above to build the cmd list.
+
+    idle_timeout: if set, terminate the session after this many seconds
+    of no PTY output (i.e. Claude is sitting idle at the prompt).
     """
     pty_manager.spawn(session_id, cwd=cwd, cmd=cmd)
 
@@ -139,14 +147,18 @@ def spawn_session(
 
         asyncio.create_task(_send_initial_input())
 
-    return asyncio.create_task(_watch_pty(session_id))
+    return asyncio.create_task(_watch_pty(session_id, idle_timeout=idle_timeout))
 
 
-async def _watch_pty(session_id: str) -> int | None:
+async def _watch_pty(
+    session_id: str, *, idle_timeout: float | None = None
+) -> int | None:
     """Watch a PTY process: flush transcript periodically, finalize on exit.
 
     Returns the process exit code (0 = success).
     """
+    import time
+
     from server.daemon import notify
 
     flush_interval = 2.0
@@ -154,6 +166,19 @@ async def _watch_pty(session_id: str) -> int | None:
         transcript = pty_manager.get_transcript(session_id)
         if transcript:
             await db.update_session(session_id, transcript=transcript)
+
+        if idle_timeout is not None:
+            pty_session = pty_manager.get(session_id)
+            if (
+                pty_session is not None
+                and time.monotonic() - pty_session.last_output_at > idle_timeout
+            ):
+                logger.info(
+                    f"Session {session_id} idle for {idle_timeout}s, terminating"
+                )
+                await pty_manager.terminate(session_id)
+                break
+
         await asyncio.sleep(flush_interval)
 
     pty_session = pty_manager.get(session_id)

@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 notify_callback: asyncio.Queue | None = None
 
 POLL_INTERVAL = 300  # seconds (5 minutes)
+SESSION_IDLE_TIMEOUT = 300  # seconds — kill interactive sessions after 5 min of no output
 
 # Per-cell locks to prevent concurrent process_cell execution (e.g. daemon
 # daemon run overlapping with an API-triggered sync).
@@ -63,7 +64,7 @@ async def tend_cell(cell: Cell) -> bool:
     await notify("cell_updated", {"id": cell.id})
 
     cmd, cwd = tend_cmd(session.id, cell)
-    task = spawn_session(session.id, cmd, cwd)
+    task = spawn_session(session.id, cmd, cwd, idle_timeout=SESSION_IDLE_TIMEOUT)
     exit_code = await task
     ok = exit_code == 0
 
