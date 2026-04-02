@@ -245,6 +245,26 @@ def _upstream_to_repo_id(upstream: str) -> str | None:
     return None
 
 
+async def get_pr_state(repo_id: str, pr_number: int) -> str:
+    """Get PR state: 'OPEN', 'MERGED', or 'CLOSED'."""
+    upstream = config.get_repo(repo_id).upstream
+    rc, out, err = await run(
+        "gh",
+        "pr",
+        "view",
+        str(pr_number),
+        "--repo",
+        upstream,
+        "--json",
+        "state",
+        "--jq",
+        ".state",
+    )
+    if rc != 0:
+        return "OPEN"  # default to open on failure to avoid false archival
+    return out.strip()
+
+
 async def get_ci_status(repo_id: str, pr_number: int) -> str:
     """Get CI status for a PR. Returns 'passing', 'failing', 'pending', or 'unknown'."""
     upstream = config.get_repo(repo_id).upstream

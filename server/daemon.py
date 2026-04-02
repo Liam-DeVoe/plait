@@ -147,6 +147,32 @@ async def _process_cell(cell: Cell) -> dict:
                 await db.update_cell(cell.id, sync_status=SyncStatus.conflict)
                 await notify("cell_updated", {"id": cell.id, "sync_status": "conflict"})
 
+        # --- Auto-archive if PR merged/closed ---
+        if cell.pr_number:
+            pr_state = await git.get_pr_state(cell.repo, cell.pr_number)
+            if pr_state in ("MERGED", "CLOSED"):
+                logger.info(
+                    f"Cell {cell.id} PR #{cell.pr_number} is {pr_state}, archiving"
+                )
+                try:
+                    await git.remove_worktree(cell.repo, cell.worktree_path)
+                except Exception:
+                    logger.warning(f"Failed to remove worktree for cell {cell.id}")
+                await db.update_cell(
+                    cell.id,
+                    status=CellStatus.archived,
+                    archived_at=datetime.now(timezone.utc).isoformat(),
+                )
+                await notify("cell_updated", {"id": cell.id, "status": "archived"})
+                return {
+                    "cell_id": cell.id,
+                    "repo": cell.repo,
+                    "branch": cell.branch,
+                    "decision": "archived",
+                    "reasons": [f"pr_{pr_state.lower()}"],
+                    "outcome": None,
+                }
+
         # --- Poll PR state ---
         needs_tend = has_conflicts or behind
         if cell.pr_number:

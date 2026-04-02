@@ -7,6 +7,7 @@ from server import daemon, db, git
 from server.daemon import process_cell, spawn_sortie_session
 from server.models import (
     Cell,
+    CellStatus,
     CIStatus,
     Session,
     SessionRole,
@@ -311,3 +312,48 @@ async def test_merge_retried_after_previous_failure(git_env, init_db, mock_claud
     assert len(sessions) == 6
     succeeded = [s for s in sessions if s.succeeded is True]
     assert len(succeeded) == 1
+
+
+async def test_auto_archive_on_pr_merged(git_env, init_db, mock_gh):
+    """If the PR has been merged, the cell should be auto-archived."""
+    git_env.create_branch("merged-branch")
+    git_env.add_commit("file.txt", "content", "add file")
+    git_env.push("merged-branch")
+    git_env.checkout("main")
+
+    cell = await _create_cell_in_db(git_env, "merged-branch", "daemon-merged")
+    await db.update_cell(cell.id, pr_number=200)
+    cell.pr_number = 200
+
+    mock_gh.set_response("pr view", 0, "MERGED")
+
+    result = await process_cell(cell)
+
+    assert result["decision"] == "archived"
+    assert "pr_merged" in result["reasons"]
+
+    fetched = await db.get_cell(cell.id)
+    assert fetched.status == CellStatus.archived
+    assert fetched.archived_at is not None
+
+
+async def test_auto_archive_on_pr_closed(git_env, init_db, mock_gh):
+    """If the PR has been closed without merging, the cell should be auto-archived."""
+    git_env.create_branch("closed-branch")
+    git_env.add_commit("file.txt", "content", "add file")
+    git_env.push("closed-branch")
+    git_env.checkout("main")
+
+    cell = await _create_cell_in_db(git_env, "closed-branch", "daemon-closed")
+    await db.update_cell(cell.id, pr_number=201)
+    cell.pr_number = 201
+
+    mock_gh.set_response("pr view", 0, "CLOSED")
+
+    result = await process_cell(cell)
+
+    assert result["decision"] == "archived"
+    assert "pr_closed" in result["reasons"]
+
+    fetched = await db.get_cell(cell.id)
+    assert fetched.status == CellStatus.archived
