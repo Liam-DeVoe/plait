@@ -255,9 +255,9 @@ def _spawn_pty_for_session(
 ) -> None:
     """Spawn a PTY running claude for a session and start watching it."""
     if resume:
-        cmd = ["claude", "--resume", session_id]
+        cmd = ["claude", "--verbose", "--resume", session_id]
     else:
-        cmd = ["claude", "--session-id", session_id]
+        cmd = ["claude", "--verbose", "--session-id", session_id]
     pty_manager.spawn(
         session_id,
         cwd=worktree_path,
