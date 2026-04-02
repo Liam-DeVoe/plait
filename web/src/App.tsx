@@ -289,6 +289,7 @@ function CreateCellForm({ onCreated }: { onCreated: () => void }) {
 
 function CellsPage() {
   const { tick } = useOutletContext<LayoutContext>();
+  const navigate = useNavigate();
   const [cells, setCells] = useState<Cell[]>([]);
 
   const loadCells = useCallback(async () => {
@@ -300,8 +301,8 @@ function CellsPage() {
   }, [loadCells, tick]);
 
   const handleNewLocalCell = async (repo: string) => {
-    await createLocalCell(repo);
-    loadCells();
+    const cell = await createLocalCell(repo);
+    navigate(`/cells/${cell.id}`);
   };
 
   // Group cells by repo

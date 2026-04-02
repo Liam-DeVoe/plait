@@ -390,7 +390,7 @@ async def _watch_pty(session_id: str) -> None:
             await db.update_session(session_id, transcript=transcript)
         await asyncio.sleep(flush_interval)
 
-    # If stop_session already handled cleanup, skip final flush
+    # If cleanup was already handled elsewhere, skip final flush
     if pty_manager.get(session_id) is None:
         return
 

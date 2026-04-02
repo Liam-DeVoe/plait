@@ -298,33 +298,6 @@ async def test_create_session_cell_not_found(client, mock_pty):
     assert resp.status_code == 404
 
 
-async def test_stop_session(client, mock_pty):
-    """POST /cells/:id/sessions/:sid/stop should terminate the PTY."""
-    create_resp = await _create_cell_via_api(client)
-    cell_id = create_resp.json()["id"]
-    c, _, _ = client
-
-    resp = await c.post(
-        f"/cells/{cell_id}/sessions",
-        json={},
-    )
-    session_id = resp.json()["id"]
-
-    resp = await c.post(f"/cells/{cell_id}/sessions/{session_id}/stop")
-    assert resp.status_code == 200
-    assert resp.json()["ended_at"] is not None
-    assert resp.json()["alive"] is False
-
-
-async def test_stop_session_not_found(client, mock_pty):
-    create_resp = await _create_cell_via_api(client)
-    cell_id = create_resp.json()["id"]
-    c, _, _ = client
-
-    resp = await c.post(f"/cells/{cell_id}/sessions/nonexistent/stop")
-    assert resp.status_code == 404
-
-
 async def test_resume_session(client, mock_pty):
     """POST /cells/:id/sessions/:sid/resume should spawn a new PTY."""
     create_resp = await _create_cell_via_api(client)
