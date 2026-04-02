@@ -306,20 +306,3 @@ async def spawn_sortie_cell(sortie: Sortie, repo: str) -> None:
         )
 
     await notify("cell_updated", {"id": cell.id})
-
-
-async def run_user_session(cell: Cell, session: Session, prompt: str) -> None:
-    """Run a user-initiated Claude session in a cell's worktree."""
-    on_output = _make_output_callback(session.id, cell.id)
-    ok, output = await claude.run_claude_headless(
-        prompt, cwd=cell.worktree_path, on_output=on_output
-    )
-    ended_at = datetime.now(timezone.utc).isoformat()
-
-    await db.update_session(
-        session.id,
-        status=SessionStatus.completed.value if ok else SessionStatus.failed.value,
-        transcript=output,
-        ended_at=ended_at,
-    )
-    await notify("cell_updated", {"id": cell.id})

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import subprocess
 from contextlib import asynccontextmanager
@@ -20,6 +21,7 @@ from server.models import (
     SessionStatus,
     Sortie,
 )
+from server.pty import pty_manager
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +220,7 @@ async def list_sessions(cell_id: str):
 
 
 class CreateSessionRequest(BaseModel):
-    prompt: str
+    prompt: str = ""
 
 
 @app.post("/cells/{cell_id}/sessions")
@@ -234,8 +236,110 @@ async def create_session_endpoint(cell_id: str, req: CreateSessionRequest):
     )
     await db.create_session(session)
 
-    asyncio.create_task(daemon.run_user_session(cell, session, req.prompt))
+    pty_manager.spawn(session.id, cwd=cell.worktree_path)
+    if req.prompt.strip():
+        # Send initial prompt after a brief delay to let claude start
+        async def _send_initial_prompt():
+            await asyncio.sleep(1.0)
+            pty_manager.write(session.id, (req.prompt + "\n").encode())
+
+        asyncio.create_task(_send_initial_prompt())
+
+    # Start a background task to detect process exit
+    asyncio.create_task(_watch_pty(session.id, cell.id))
+
     return asdict(session)
+
+
+async def _watch_pty(session_id: str, cell_id: str) -> None:
+    """Watch a PTY process and update the session when it exits."""
+    while pty_manager.is_alive(session_id):
+        await asyncio.sleep(1.0)
+
+    transcript = pty_manager.get_transcript(session_id)
+    pty_manager.remove(session_id)
+
+    await db.update_session(
+        session_id,
+        status=SessionStatus.completed.value,
+        transcript=transcript,
+        ended_at=datetime.now(timezone.utc).isoformat(),
+    )
+    await daemon.notify("cell_updated", {"id": cell_id})
+
+
+@app.websocket("/ws/sessions/{session_id}")
+async def session_terminal_ws(ws: WebSocket, session_id: str):
+    pty_session = pty_manager.get(session_id)
+    if pty_session is None:
+        await ws.close(code=4004, reason="No active PTY for this session")
+        return
+
+    await ws.accept()
+
+    # Send buffered output so far
+    if pty_session.output_buffer:
+        await ws.send_bytes(bytes(pty_session.output_buffer))
+
+    # Queue for forwarding PTY output to this WebSocket
+    queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+    def on_output(data: bytes) -> None:
+        queue.put_nowait(data)
+
+    pty_session.listeners.append(on_output)
+
+    async def forward_output():
+        try:
+            while True:
+                data = await queue.get()
+                await ws.send_bytes(data)
+        except Exception:
+            pass
+
+    forward_task = asyncio.create_task(forward_output())
+
+    try:
+        while True:
+            raw = await ws.receive_text()
+            msg = json.loads(raw)
+            if msg.get("type") == "input":
+                pty_manager.write(session_id, msg["data"].encode())
+            elif msg.get("type") == "resize":
+                pty_manager.resize(session_id, msg["rows"], msg["cols"])
+    except WebSocketDisconnect:
+        pass
+    finally:
+        forward_task.cancel()
+        if on_output in pty_session.listeners:
+            pty_session.listeners.remove(on_output)
+
+
+@app.post("/cells/{cell_id}/sessions/{session_id}/stop")
+async def stop_session(cell_id: str, session_id: str):
+    cell = await db.get_cell(cell_id)
+    if not cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+
+    session_list = await db.list_sessions(cell_id)
+    session = next((s for s in session_list if s.id == session_id), None)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.status != SessionStatus.running:
+        raise HTTPException(status_code=400, detail="Session is not running")
+
+    transcript = pty_manager.get_transcript(session_id)
+    await pty_manager.terminate(session_id)
+    pty_manager.remove(session_id)
+
+    updated = await db.update_session(
+        session_id,
+        status=SessionStatus.completed.value,
+        transcript=transcript,
+        ended_at=datetime.now(timezone.utc).isoformat(),
+    )
+    return asdict(updated) if updated else {}
 
 
 # --- Sortie endpoints ---

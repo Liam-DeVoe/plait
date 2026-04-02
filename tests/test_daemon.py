@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from server import db, git
-from server.daemon import process_cell, run_user_session, spawn_sortie_cell
+from server.daemon import process_cell, spawn_sortie_cell
 from server.models import (
     Cell,
     CIStatus,
@@ -325,45 +325,3 @@ async def test_manual_sync_bypasses_limit(git_env, init_db, mock_claude):
     # Should have MAX_DAEMON_ATTEMPTS + 1 sessions (the new one)
     assert len(sessions) == MAX_DAEMON_ATTEMPTS + 1
     assert sessions[0].status == SessionStatus.completed
-
-
-async def test_run_user_session(git_env, init_db, mock_claude):
-    """run_user_session should run Claude and record transcript."""
-    cell = await _create_cell_in_db(git_env, "user-session-branch", "daemon-8")
-
-    session = Session(
-        cell_id=cell.id,
-        role=SessionRole.user,
-        status=SessionStatus.running,
-    )
-    await db.create_session(session)
-
-    mock_claude.return_value = (True, "Done! Made the changes.")
-
-    await run_user_session(cell, session, "fix the bug")
-
-    updated = (await db.list_sessions(cell.id))[0]
-    assert updated.status == SessionStatus.completed
-    assert updated.transcript == "Done! Made the changes."
-    assert updated.ended_at is not None
-
-
-async def test_claude_receives_output_callback(git_env, init_db, mock_claude):
-    """All Claude calls should receive an on_output streaming callback."""
-    cell = await _create_cell_in_db(git_env, "callback-branch", "daemon-cb")
-
-    session = Session(
-        cell_id=cell.id,
-        role=SessionRole.user,
-        status=SessionStatus.running,
-    )
-    await db.create_session(session)
-
-    mock_claude.return_value = (True, "done")
-
-    await run_user_session(cell, session, "test prompt")
-
-    mock_claude.assert_called_once()
-    _, kwargs = mock_claude.call_args
-    assert "on_output" in kwargs
-    assert kwargs["on_output"] is not None

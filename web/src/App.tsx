@@ -21,12 +21,14 @@ import {
   fetchSorties,
   fetchSortie,
   createSortie,
-  createSession,
+  createInteractiveSession,
+  stopSession,
   connectWebSocket,
   type Cell,
   type Session,
   type Sortie,
 } from "./api";
+import Terminal from "./Terminal";
 
 function StatusBadge({ status, label }: { status: string; label: string }) {
   const colors: Record<string, string> = {
@@ -352,17 +354,22 @@ function CellDetailPage() {
     load();
   }, [load, tick]);
 
-  const handleLaunchSession = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!id || !prompt.trim()) return;
+  const handleLaunchSession = async () => {
+    if (!id) return;
     setLaunching(true);
     try {
-      await createSession(id, prompt);
+      await createInteractiveSession(id, prompt.trim() || undefined);
       setPrompt("");
       load();
     } finally {
       setLaunching(false);
     }
+  };
+
+  const handleStopSession = async (sessionId: string) => {
+    if (!id) return;
+    await stopSession(id, sessionId);
+    load();
   };
 
   if (!cell) return null;
@@ -413,22 +420,22 @@ function CellDetailPage() {
 
       <div className="bg-white rounded-lg shadow p-4 mb-6">
         <h3 className="text-lg font-semibold mb-3">Launch Session</h3>
-        <form onSubmit={handleLaunchSession} className="space-y-3">
+        <div className="space-y-3">
           <textarea
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe what Claude should do in this worktree..."
-            rows={3}
+            placeholder="Optional initial prompt for Claude..."
+            rows={2}
             className="w-full px-3 py-2 border rounded text-sm resize-y"
           />
           <button
-            type="submit"
-            disabled={launching || !prompt.trim()}
-            className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50"
+            onClick={handleLaunchSession}
+            disabled={launching}
+            className="px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-900 text-sm disabled:opacity-50"
           >
-            {launching ? "Launching..." : "Run"}
+            {launching ? "Launching..." : "Launch Terminal"}
           </button>
-        </form>
+        </div>
       </div>
 
       <h3 className="text-lg font-semibold mb-3">Sessions</h3>
@@ -446,12 +453,22 @@ function CellDetailPage() {
                 <span className="text-xs text-gray-400">
                   {new Date(s.started_at).toLocaleString()}
                 </span>
+                {s.status === "running" && (
+                  <button
+                    onClick={() => handleStopSession(s.id)}
+                    className="ml-auto px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-800 rounded"
+                  >
+                    Stop
+                  </button>
+                )}
               </div>
-              {s.transcript && (
+              {s.status === "running" ? (
+                <Terminal sessionId={s.id} />
+              ) : s.transcript ? (
                 <pre className="text-xs bg-gray-50 p-3 rounded overflow-auto max-h-60">
                   {s.transcript}
                 </pre>
-              )}
+              ) : null}
             </div>
           ))}
         </div>

@@ -191,8 +191,8 @@ async def test_sortie_derived_status(client):
     assert resp.json()["status"] == "active"
 
 
-async def test_create_user_session(client):
-    """POST /cells/:id/sessions should create a running session."""
+async def test_create_session(client, mock_pty):
+    """POST /cells/:id/sessions should spawn an interactive PTY session."""
     create_resp = await _create_cell_via_api(client)
     cell_id = create_resp.json()["id"]
     c, _, _ = client
@@ -206,16 +206,54 @@ async def test_create_user_session(client):
     assert data["cell_id"] == cell_id
     assert data["role"] == "user"
     assert data["status"] == "running"
+    assert mock_pty.spawn.called
 
     # Verify it shows up in cell sessions
     resp = await c.get(f"/cells/{cell_id}/sessions")
     assert len(resp.json()) == 1
 
 
-async def test_create_session_cell_not_found(client):
+async def test_create_session_no_prompt(client, mock_pty):
+    """Sessions can be created without a prompt."""
+    create_resp = await _create_cell_via_api(client)
+    cell_id = create_resp.json()["id"]
+    c, _, _ = client
+
+    resp = await c.post(f"/cells/{cell_id}/sessions", json={})
+    assert resp.status_code == 200
+    assert mock_pty.spawn.called
+
+
+async def test_create_session_cell_not_found(client, mock_pty):
     c, _, _ = client
     resp = await c.post(
         "/cells/nonexistent/sessions",
         json={"prompt": "hello"},
     )
+    assert resp.status_code == 404
+
+
+async def test_stop_session(client, mock_pty):
+    """POST /cells/:id/sessions/:sid/stop should terminate the PTY."""
+    create_resp = await _create_cell_via_api(client)
+    cell_id = create_resp.json()["id"]
+    c, _, _ = client
+
+    resp = await c.post(
+        f"/cells/{cell_id}/sessions",
+        json={},
+    )
+    session_id = resp.json()["id"]
+
+    resp = await c.post(f"/cells/{cell_id}/sessions/{session_id}/stop")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "completed"
+
+
+async def test_stop_session_not_found(client, mock_pty):
+    create_resp = await _create_cell_via_api(client)
+    cell_id = create_resp.json()["id"]
+    c, _, _ = client
+
+    resp = await c.post(f"/cells/{cell_id}/sessions/nonexistent/stop")
     assert resp.status_code == 404

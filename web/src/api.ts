@@ -105,17 +105,27 @@ export async function createSortie(prompt: string, repos: string[]): Promise<Sor
   return res.json();
 }
 
-export async function createSession(cellId: string, prompt: string): Promise<Session> {
+export async function createInteractiveSession(cellId: string, prompt?: string): Promise<Session> {
   const res = await fetch(`${BASE}/cells/${cellId}/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify({ prompt: prompt ?? "" }),
   });
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || "Failed to create session");
   }
   return res.json();
+}
+
+export async function stopSession(cellId: string, sessionId: string): Promise<void> {
+  const res = await fetch(`${BASE}/cells/${cellId}/sessions/${sessionId}/stop`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to stop session");
+  }
 }
 
 export function connectWebSocket(onMessage: (data: any) => void): WebSocket {

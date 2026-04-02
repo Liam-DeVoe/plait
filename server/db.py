@@ -67,17 +67,6 @@ async def get_db() -> aiosqlite.Connection:
 
 
 async def init_db() -> None:
-    conn = await aiosqlite.connect(DB_PATH)
-    # Migrate rebase_status → sync_status for existing databases
-    try:
-        await conn.execute(
-            "ALTER TABLE cells RENAME COLUMN rebase_status TO sync_status"
-        )
-        await conn.commit()
-    except Exception:
-        pass
-    await conn.close()
-
     db = await get_db()
     await db.close()
 

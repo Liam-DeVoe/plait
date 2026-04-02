@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -168,3 +168,27 @@ def mock_claude():
 
     with patch.object(claude_module, "run_claude_headless", mock):
         yield mock
+
+
+# --- Mock PTY manager ---
+
+
+@pytest.fixture
+def mock_pty():
+    """Mock the pty_manager in server.api to avoid real PTY spawning."""
+    import server.api as api_module
+    from server.pty import PtySession
+
+    fake_session = PtySession(session_id="fake", master_fd=-1, pid=0)
+
+    mock_manager = MagicMock()
+    mock_manager.spawn.return_value = fake_session
+    # Default to alive=True so _watch_pty doesn't immediately complete sessions.
+    # Tests that need the process to exit can flip this.
+    mock_manager.is_alive.return_value = True
+    mock_manager.get_transcript.return_value = ""
+    mock_manager.get.return_value = None
+    mock_manager.terminate = AsyncMock()
+
+    with patch.object(api_module, "pty_manager", mock_manager):
+        yield mock_manager

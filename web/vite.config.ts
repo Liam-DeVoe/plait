@@ -10,6 +10,7 @@ export default defineConfig({
         target: 'http://localhost:8000',
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
+      '/ws/sessions': { target: 'ws://localhost:8000', ws: true },
       '/ws': { target: 'ws://localhost:8000', ws: true },
     },
   },

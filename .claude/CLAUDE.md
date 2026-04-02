@@ -47,6 +47,8 @@ All Claude interactions go through `server/claude.py`, which shells out to `clau
 
 SQLite via `aiosqlite` (`server/db.py`). Each function opens its own connection (no connection pooling). The DB file is `orrery.db` at the project root. Schema is auto-created on every `get_db()` call via `CREATE TABLE IF NOT EXISTS`.
 
+No migration code in the codebase. When a schema change is needed, apply it directly to the production `orrery.db` via `sqlite3` (single-user tool, no other environments to worry about). Do not add migration logic to `init_db` or anywhere else.
+
 Three tables: `cells`, `sorties`, `sessions`. The `sorties.repos` column stores a JSON array. Session trigger types: `"rebase"`, `"ci_fix"`, `"sortie"`, or `None` for user sessions.
 
 ### Git/Worktree Layout
@@ -77,3 +79,4 @@ API tests use `httpx.AsyncClient` with `ASGITransport` against the FastAPI app d
 - Claude sessions are scoped to a cell's worktree directory
 - Daemon sessions (rebase, CI fix) are automatic but visible in the cell's session history
 - The web UI is the primary interface; "open in VS Code" drops you into the worktree
+- No backwards compatibility for its own sake. When a new feature replaces old behavior, remove the old code paths. Keeping dead or redundant code around has a real cost; be aggressive about excising it.
