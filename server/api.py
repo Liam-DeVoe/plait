@@ -638,6 +638,34 @@ async def start_sortie_session(sortie_id: str, session_id: str):
     return _session_dict(session)
 
 
+@app.delete("/sorties/{sortie_id}")
+async def delete_sortie(sortie_id: str):
+    sortie = await db.get_sortie(sortie_id)
+    if not sortie:
+        raise HTTPException(status_code=404, detail="Sortie not found")
+
+    # Kill orchestrator session PTY if alive
+    if sortie.session_id and pty_manager.is_alive(sortie.session_id):
+        await pty_manager.terminate(sortie.session_id)
+
+    # Remove child cell worktrees
+    cells = await db.list_cells_by_sortie(sortie_id)
+    for cell in cells:
+        try:
+            await git.remove_worktree(cell.repo, cell.worktree_path)
+        except Exception:
+            pass
+
+    # Remove sortie exploration worktrees
+    try:
+        await git.remove_sortie_worktrees(sortie_id)
+    except Exception:
+        pass
+
+    await db.delete_sortie(sortie_id)
+    return {"status": "deleted"}
+
+
 # --- Sortie hook endpoints ---
 
 

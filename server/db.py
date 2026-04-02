@@ -385,6 +385,21 @@ async def list_cells_by_sortie(sortie_id: str) -> list[Cell]:
         await conn.close()
 
 
+async def delete_sortie(sortie_id: str) -> None:
+    conn = await get_db()
+    try:
+        await conn.execute("DELETE FROM sessions WHERE sortie_id = ?", (sortie_id,))
+        await conn.execute(
+            "DELETE FROM sessions WHERE cell_id IN (SELECT id FROM cells WHERE sortie_id = ?)",
+            (sortie_id,),
+        )
+        await conn.execute("DELETE FROM cells WHERE sortie_id = ?", (sortie_id,))
+        await conn.execute("DELETE FROM sorties WHERE id = ?", (sortie_id,))
+        await conn.commit()
+    finally:
+        await conn.close()
+
+
 # --- Daemon Ticks ---
 
 MAX_RUNS = 100

@@ -154,6 +154,10 @@ export async function createSortie(): Promise<Sortie> {
   return res.json();
 }
 
+export async function deleteSortie(id: string): Promise<void> {
+  await fetch(`${BASE}/sorties/${id}`, { method: "DELETE" });
+}
+
 export async function createInteractiveSession(cellId: string, prompt?: string): Promise<Session> {
   const res = await fetch(`${BASE}/cells/${cellId}/sessions`, {
     method: "POST",

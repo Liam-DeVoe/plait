@@ -27,6 +27,7 @@ import {
   fetchSorties,
   fetchSortie,
   createSortie,
+  deleteSortie,
   createInteractiveSession,
   deleteSession,
   resumeSession,
@@ -1019,6 +1020,20 @@ function SortieDetailPage() {
       <div className="card sortie-detail__card">
         <div className="sortie-detail__header">
           <div className="sortie-detail__title">Sortie</div>
+          <div className="sortie-detail__actions">
+            <OverflowMenu
+              items={[
+                {
+                  label: "Delete",
+                  onClick: async () => {
+                    await deleteSortie(sortie.id);
+                    navigate("/sorties");
+                  },
+                  danger: true,
+                },
+              ]}
+            />
+          </div>
         </div>
         <div className="sortie-detail__info">
           <div>
