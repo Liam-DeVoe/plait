@@ -5,13 +5,7 @@ from __future__ import annotations
 # Path-based tools use // for absolute paths; the worktree path is
 # substituted at runtime via {worktree}.
 DAEMON_ALLOWED_TOOLS = [
-    "Bash(git *)",
-    "Bash(just *)",
-    "Bash(cargo *)",
-    "Bash(npm *)",
-    "Bash(go *)",
-    "Bash(uv *)",
-    "Bash(dune *)",
+    "Bash",
     "Read(//{worktree}/**)",
     "Edit(//{worktree}/**)",
     "Write(//{worktree}/**)",
