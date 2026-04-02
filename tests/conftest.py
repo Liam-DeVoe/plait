@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
+import shutil
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -75,39 +78,57 @@ class GitEnv:
         self.run_git("checkout", branch)
 
 
+@pytest.fixture(scope="session")
+def _git_env_template(tmp_path_factory) -> Path:
+    """Create a template git environment once per worker.
+    Returns the path to a directory containing remote.git/ and testrepo/."""
+    template = tmp_path_factory.mktemp("git_template")
+
+    def _git(*args, cwd=None):
+        subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+    remote = template / "remote.git"
+    remote.mkdir()
+    _git("init", "--bare", "--initial-branch=main", str(remote))
+
+    clone = template / "testrepo"
+    _git("clone", str(remote), str(clone))
+
+    _git("config", "user.email", "test@test.com", cwd=clone)
+    _git("config", "user.name", "Test", cwd=clone)
+
+    _git("checkout", "-b", "main", cwd=clone)
+
+    (clone / "README.md").write_text("initial")
+    _git("add", "README.md", cwd=clone)
+    _git("commit", "-m", "initial", cwd=clone)
+    _git("push", "-u", "origin", "main", cwd=clone)
+
+    return template
+
+
 @pytest.fixture
-def git_env(tmp_path) -> GitEnv:
-    """Create a temporary git environment with a bare remote and clone.
+def git_env(tmp_path, _git_env_template) -> GitEnv:
+    """Copy the template git environment for this test.
     Also patches git.WORKTREE_ROOT and the config module to use temp dirs."""
     import server.config as config_module
     import server.git as git_module
 
     repo_id = "testrepo"
 
-    def _git(*args, cwd=None):
-        subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+    # Copy template instead of creating from scratch
+    shutil.copytree(_git_env_template, tmp_path / "git", symlinks=True)
+    git_root = tmp_path / "git"
+    remote = git_root / "remote.git"
+    clone = git_root / "testrepo"
 
-    # Create bare remote with main as default branch
-    remote = tmp_path / "remote.git"
-    remote.mkdir()
-    _git("init", "--bare", "--initial-branch=main", str(remote))
-
-    # Clone it
-    clone = tmp_path / "testrepo"
-    _git("clone", str(remote), str(clone))
-
-    # Configure git user for commits
-    _git("config", "user.email", "test@test.com", cwd=clone)
-    _git("config", "user.name", "Test", cwd=clone)
-
-    # Ensure we're on main
-    _git("checkout", "-b", "main", cwd=clone)
-
-    # Initial commit on main
-    (clone / "README.md").write_text("initial")
-    _git("add", "README.md", cwd=clone)
-    _git("commit", "-m", "initial", cwd=clone)
-    _git("push", "-u", "origin", "main", cwd=clone)
+    # Fix remote URL to point to this copy's bare repo, not the template's
+    subprocess.run(
+        ["git", "remote", "set-url", "origin", str(remote)],
+        cwd=clone,
+        check=True,
+        capture_output=True,
+    )
 
     env = GitEnv(remote=remote, clone=clone, repo_id=repo_id)
 
@@ -134,7 +155,7 @@ def git_env(tmp_path) -> GitEnv:
 # --- Mock gh CLI ---
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def mock_gh():
     """Returns a helper to set up canned gh CLI responses.
     Patches git.run to intercept gh commands while letting git commands through."""
@@ -165,14 +186,58 @@ def mock_gh():
 # --- Mock Claude CLI ---
 
 
-@pytest.fixture
+class _SpawnSessionMock:
+    """Mock for spawn_session that returns a task resolving with an exit code.
+
+    Usage:
+        mock.return_value = 0                              # success (default)
+        mock.return_value = 1                              # failure
+        mock.side_effect = async_func(session_id, cwd, **kw) -> int
+    """
+
+    def __init__(self):
+        self.return_value = 0
+        self.side_effect = None
+        self._calls: list[tuple] = []
+
+    def __call__(self, session_id, cwd, **kwargs):
+        self._calls.append((session_id, cwd, kwargs))
+
+        async def _run():
+            from server import db
+
+            if self.side_effect:
+                exit_code = await self.side_effect(session_id, cwd, **kwargs)
+            else:
+                exit_code = self.return_value
+
+            await db.update_session(
+                session_id,
+                ended_at=datetime.now(timezone.utc).isoformat(),
+            )
+            return exit_code
+
+        return asyncio.create_task(_run())
+
+    def assert_called_once(self):
+        assert len(self._calls) == 1
+
+    def assert_not_called(self):
+        assert len(self._calls) == 0
+
+
+@pytest.fixture(autouse=True)
 def mock_claude():
-    """Mock claude.run_claude_headless to return configurable results."""
-    import server.claude as claude_module
+    """Mock spawn_session in the daemon to avoid spawning real Claude processes.
 
-    mock = AsyncMock(return_value=(True, "Claude resolved the conflicts"))
+    Only affects daemon code paths (process_cell, spawn_sortie_session).
+    API endpoints use the real spawn_session backed by mock_pty.
+    """
+    import server.daemon as daemon_module
 
-    with patch.object(claude_module, "run_claude_headless", mock):
+    mock = _SpawnSessionMock()
+
+    with patch.object(daemon_module, "spawn_session", mock):
         yield mock
 
 
@@ -181,8 +246,9 @@ def mock_claude():
 
 @pytest.fixture
 def mock_pty():
-    """Mock the pty_manager in server.api to avoid real PTY spawning."""
+    """Mock pty_manager in server.api and server.sessions to avoid real PTY spawning."""
     import server.api as api_module
+    import server.sessions as sessions_module
     from server.pty import PtySession
 
     fake_session = PtySession(session_id="fake", master_fd=-1, pid=0)
@@ -207,5 +273,8 @@ def mock_pty():
 
     mock_manager.terminate = AsyncMock(side_effect=_terminate)
 
-    with patch.object(api_module, "pty_manager", mock_manager):
+    with (
+        patch.object(api_module, "pty_manager", mock_manager),
+        patch.object(sessions_module, "pty_manager", mock_manager),
+    ):
         yield mock_manager

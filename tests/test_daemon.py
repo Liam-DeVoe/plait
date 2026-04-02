@@ -76,9 +76,8 @@ async def test_cell_conflict_claude_resolves(git_env, init_db, mock_claude):
 
     cell = await _create_cell_in_db(git_env, "conflict-branch", "daemon-3")
 
-    # Mock Claude to actually resolve the conflict by doing a real merge
-    async def fake_claude(prompt, cwd, **kwargs):
-        # Simulate Claude resolving: just do a merge accepting theirs
+    # Mock spawn_session to actually resolve the conflict by doing a real merge
+    async def fake_spawn(session_id, cwd, **kwargs):
         await git.run(
             "git",
             "merge",
@@ -87,9 +86,9 @@ async def test_cell_conflict_claude_resolves(git_env, init_db, mock_claude):
             "--no-edit",
             cwd=cwd,
         )
-        return True, "resolved"
+        return 0
 
-    mock_claude.side_effect = fake_claude
+    mock_claude.side_effect = fake_spawn
 
     await process_cell(cell)
 
@@ -117,7 +116,7 @@ async def test_cell_conflict_claude_fails(git_env, init_db, mock_claude):
     cell = await _create_cell_in_db(git_env, "fail-branch", "daemon-4")
 
     # Mock Claude to fail
-    mock_claude.return_value = (False, "Claude couldn't figure it out")
+    mock_claude.return_value = 1
 
     await process_cell(cell)
 
@@ -172,7 +171,7 @@ async def test_ci_fix_on_failure(git_env, init_db, mock_gh, mock_claude):
     mock_gh.set_response("run view", 0, "Error: tests failed\nassert False")
 
     # Mock Claude to succeed at fixing
-    mock_claude.return_value = (True, "Fixed the test")
+    mock_claude.return_value = 0
 
     await process_cell(cell)
 
@@ -184,7 +183,6 @@ async def test_ci_fix_on_failure(git_env, init_db, mock_gh, mock_claude):
     assert len(sessions) == 1
     assert sessions[0].trigger == "tend"
     assert sessions[0].succeeded is True
-    assert sessions[0].transcript == "Fixed the test"
 
 
 async def test_ci_fix_skipped_while_running(git_env, init_db, mock_gh, mock_claude):
@@ -247,7 +245,7 @@ async def test_spawn_sortie_session(git_env, init_db, mock_claude):
     await db.create_sortie(sortie)
 
     # Mock Claude to succeed
-    mock_claude.return_value = (True, "Added tests")
+    mock_claude.return_value = 0
 
     await spawn_sortie_session(sortie)
 
@@ -292,7 +290,7 @@ async def test_merge_retried_after_previous_failure(git_env, init_db, mock_claud
         await db.create_session(s)
 
     # Claude should still be invoked — no running session
-    async def fake_claude(prompt, cwd, **kwargs):
+    async def fake_spawn(session_id, cwd, **kwargs):
         await git.run(
             "git",
             "merge",
@@ -301,9 +299,9 @@ async def test_merge_retried_after_previous_failure(git_env, init_db, mock_claud
             "--no-edit",
             cwd=cwd,
         )
-        return True, "resolved"
+        return 0
 
-    mock_claude.side_effect = fake_claude
+    mock_claude.side_effect = fake_spawn
 
     await process_cell(cell)
 

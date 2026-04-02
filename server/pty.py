@@ -22,6 +22,7 @@ class PtySession:
     pid: int
     listeners: list[Callable[[bytes], None]] = field(default_factory=list)
     output_buffer: bytearray = field(default_factory=bytearray)
+    exit_code: int | None = None
 
 
 class PtyManager:
@@ -169,8 +170,14 @@ class PtyManager:
         if pty_session is None:
             return False
         try:
-            pid, _ = os.waitpid(pty_session.pid, os.WNOHANG)
-            return pid == 0
+            pid, status = os.waitpid(pty_session.pid, os.WNOHANG)
+            if pid == 0:
+                return True
+            if os.WIFEXITED(status):
+                pty_session.exit_code = os.WEXITSTATUS(status)
+            else:
+                pty_session.exit_code = -1
+            return False
         except ChildProcessError:
             return False
 

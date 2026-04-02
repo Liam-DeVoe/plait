@@ -23,6 +23,7 @@ from server.models import (
     Sortie,
 )
 from server.pty import pty_manager
+from server.sessions import spawn_session
 
 logger = logging.getLogger(__name__)
 
@@ -379,7 +380,7 @@ async def create_session_endpoint(cell_id: str, req: CreateSessionRequest):
     )
     await db.create_session(session)
 
-    _spawn_pty_for_session(
+    spawn_session(
         session.id,
         cwd=cell.worktree_path,
         prompt=req.prompt,
@@ -387,82 +388,6 @@ async def create_session_endpoint(cell_id: str, req: CreateSessionRequest):
     )
 
     return _session_dict(session)
-
-
-def _spawn_pty_for_session(
-    session_id: str,
-    cwd: str,
-    prompt: str = "",
-    system_prompt: str | None = None,
-    resume: bool = False,
-) -> None:
-    """Spawn a PTY running claude for a session and start watching it."""
-    if resume:
-        cmd = ["claude", "--verbose", "--resume", session_id]
-    else:
-        cmd = [
-            "claude",
-            "--verbose",
-            "--session-id",
-            session_id,
-        ]
-        if system_prompt:
-            cmd.extend(["--system-prompt", system_prompt])
-    pty_manager.spawn(
-        session_id,
-        cwd=cwd,
-        cmd=cmd,
-    )
-    if prompt.strip():
-
-        async def _send_initial_prompt():
-            await asyncio.sleep(1.0)
-            pty_manager.write(session_id, (prompt + "\n").encode())
-
-        asyncio.create_task(_send_initial_prompt())
-
-    asyncio.create_task(_watch_pty(session_id))
-
-
-async def _watch_pty(session_id: str) -> None:
-    """Watch a PTY process: flush transcript periodically, finalize on exit."""
-    flush_interval = 2.0
-    while pty_manager.is_alive(session_id):
-        # Periodically flush transcript to DB so it survives crashes
-        transcript = pty_manager.get_transcript(session_id)
-        if transcript:
-            await db.update_session(session_id, transcript=transcript)
-        await asyncio.sleep(flush_interval)
-
-    # If cleanup was already handled elsewhere, skip final flush
-    if pty_manager.get(session_id) is None:
-        return
-
-    # Final flush
-    transcript = pty_manager.get_transcript(session_id)
-    xterm_state = pty_manager.get_raw_output(session_id)
-    pty_manager.remove(session_id)
-
-    await db.update_session(
-        session_id,
-        transcript=transcript,
-        xterm_state=xterm_state,
-        ended_at=datetime.now(timezone.utc).isoformat(),
-    )
-
-    # Look up cell_id/sortie_id for the notification
-    conn = await db.get_db()
-    try:
-        cursor = await conn.execute(
-            "SELECT cell_id, sortie_id FROM sessions WHERE id = ?", (session_id,)
-        )
-        row = await cursor.fetchone()
-        if row and row["cell_id"]:
-            await daemon.notify("cell_updated", {"id": row["cell_id"]})
-        if row and row["sortie_id"]:
-            await daemon.notify("sortie_updated", {"id": row["sortie_id"]})
-    finally:
-        await conn.close()
 
 
 @app.post("/cells/{cell_id}/sessions/{session_id}/resume")
@@ -482,7 +407,7 @@ async def resume_session(cell_id: str, session_id: str):
     # Reset ended_at so daemon sees it as active
     await db.update_session(session_id, ended_at=None)
 
-    _spawn_pty_for_session(session.id, cwd=cell.worktree_path, resume=True)
+    spawn_session(session.id, cwd=cell.worktree_path, resume=True)
 
     session.ended_at = None
     return _session_dict(session)
@@ -611,7 +536,7 @@ async def create_sortie(req: CreateSortieRequest):
     system_prompt = claude.sortie_system_prompt(
         sortie.id, exploration_dir, repo_worktrees
     )
-    _spawn_pty_for_session(
+    spawn_session(
         session.id,
         cwd=exploration_dir,
         prompt=req.prompt,
@@ -692,7 +617,7 @@ async def resume_sortie_session(sortie_id: str, session_id: str):
 
     exploration_dir = str(git.WORKTREE_ROOT / f"sortie-{sortie_id}")
     await db.update_session(session_id, ended_at=None)
-    _spawn_pty_for_session(session.id, cwd=exploration_dir, resume=True)
+    spawn_session(session.id, cwd=exploration_dir, resume=True)
 
     session.ended_at = None
     return _session_dict(session)

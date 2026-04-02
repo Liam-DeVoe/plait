@@ -210,7 +210,7 @@ function CellRow({
             VS Code
           </div>
           <div className="btn btn--sm btn--soft-blue" onClick={onSync}>
-            Sync
+            Tend
           </div>
           <OverflowMenu
             items={[
@@ -224,9 +224,16 @@ function CellRow({
   );
 }
 
-function CreateCellForm({ repos, onCreated }: { repos: Repo[]; onCreated: () => void }) {
+function CreateCellForm({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
   const [prUrl, setPrUrl] = useState("");
-  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -237,7 +244,7 @@ function CreateCellForm({ repos, onCreated }: { repos: Repo[]; onCreated: () => 
     try {
       await createCell(prUrl);
       setPrUrl("");
-      setOpen(false);
+      onClose();
       onCreated();
     } catch (err: any) {
       setError(err.message);
@@ -246,13 +253,7 @@ function CreateCellForm({ repos, onCreated }: { repos: Repo[]; onCreated: () => 
     }
   };
 
-  if (!open) {
-    return (
-      <div className="btn btn--gray" onClick={() => setOpen(true)}>
-        Import Cell
-      </div>
-    );
-  }
+  if (!open) return null;
 
   return (
     <div className="card form">
@@ -264,6 +265,7 @@ function CreateCellForm({ repos, onCreated }: { repos: Repo[]; onCreated: () => 
           value={prUrl}
           onChange={(e) => setPrUrl(e.target.value)}
           className="form__input form__input--flex"
+          autoFocus
           onKeyDown={(e) => {
             if (e.key === "Enter") handleSubmit();
           }}
@@ -279,7 +281,7 @@ function CreateCellForm({ repos, onCreated }: { repos: Repo[]; onCreated: () => 
         <div
           className="btn btn--gray"
           onClick={() => {
-            setOpen(false);
+            onClose();
             setError(null);
           }}
         >
@@ -295,6 +297,7 @@ function CellsPage() {
   const navigate = useNavigate();
   const [cells, setCells] = useState<Cell[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
+  const [importOpen, setImportOpen] = useState(false);
 
   const loadCells = useCallback(async () => {
     setCells(await fetchCells());
@@ -328,8 +331,17 @@ function CellsPage() {
     <>
       <div className="page-header">
         <div className="page-title">Cells</div>
-        <CreateCellForm repos={repos} onCreated={loadCells} />
+        {!importOpen && (
+          <div className="btn btn--gray" onClick={() => setImportOpen(true)}>
+            Import Cell
+          </div>
+        )}
       </div>
+      <CreateCellForm
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        onCreated={loadCells}
+      />
 
       {repos.length === 0 ? (
         <div className="empty-state">
@@ -358,7 +370,7 @@ function CellsPage() {
                       <th className="table__header-cell">Branch</th>
                       <th className="table__header-cell">PR</th>
                       <th className="table__header-cell">CI</th>
-                      <th className="table__header-cell">Sync</th>
+                      <th className="table__header-cell">Tend</th>
                       <th className="table__header-cell">Actions</th>
                     </tr>
                   </thead>
@@ -506,7 +518,7 @@ function CellDetailPage() {
               className="btn btn--md btn--soft-blue"
               onClick={() => triggerSync(cell.id)}
             >
-              Sync
+              Tend
             </div>
             <OverflowMenu
               items={[

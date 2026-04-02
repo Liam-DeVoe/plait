@@ -256,7 +256,10 @@ async def get_ci_status(repo_id: str, pr_number: int) -> str:
         "--repo",
         upstream,
     )
-    if rc != 0:
+    # gh pr checks exits with 1 when any check is failing — that's not an
+    # error, so we still parse the output.  Only bail on truly empty output
+    # (e.g. network failure).
+    if not out.strip():
         return "unknown"
 
     if "fail" in out.lower():

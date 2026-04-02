@@ -51,7 +51,8 @@ async def test_get_ci_status_passing(mock_gh, git_env):
 
 
 async def test_get_ci_status_failing(mock_gh, git_env):
-    mock_gh.set_response("pr checks", 0, "build\tfail\t1m\ntest\tpass\t2m")
+    # gh pr checks exits with 1 when any check is failing
+    mock_gh.set_response("pr checks", 1, "build\tfail\t1m\ntest\tpass\t2m")
     assert await get_ci_status(git_env.repo_id, 1) == "failing"
 
 
@@ -66,5 +67,5 @@ async def test_get_ci_status_queued(mock_gh, git_env):
 
 
 async def test_get_ci_status_gh_failure(mock_gh, git_env):
-    mock_gh.set_response("pr checks", 1, "", "error")
+    mock_gh.set_response("pr checks", 1, "", "network error")
     assert await get_ci_status(git_env.repo_id, 1) == "unknown"

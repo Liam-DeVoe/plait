@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
-from datetime import datetime, timezone
+from pathlib import Path
 
 from server import claude, db, git
+from server.daemon_config import DAEMON_ALLOWED_TOOLS, SORTIE_ALLOWED_TOOLS
 from server.models import (
     Cell,
     CellStatus,
@@ -15,6 +15,7 @@ from server.models import (
     Sortie,
     SyncStatus,
 )
+from server.sessions import spawn_session
 
 logger = logging.getLogger(__name__)
 
@@ -23,26 +24,14 @@ notify_callback: asyncio.Queue | None = None
 
 POLL_INTERVAL = 300  # seconds (5 minutes)
 
+# Per-cell locks to prevent concurrent process_cell execution (e.g. daemon
+# tick overlapping with an API-triggered sync).
+_cell_locks: dict[str, asyncio.Lock] = {}
+
 
 async def notify(event: str, data: dict) -> None:
     if notify_callback is not None:
         await notify_callback.put({"event": event, "data": data})
-
-
-def _make_output_callback(session_id: str, cell_id: str):
-    """Create a throttled callback for streaming Claude output to DB + WebSocket."""
-    last_update = 0.0
-
-    async def callback(transcript: str) -> None:
-        nonlocal last_update
-        now = time.monotonic()
-        if now - last_update < 1.0:
-            return
-        last_update = now
-        await db.update_session(session_id, transcript=transcript)
-        await notify("session_output", {"session_id": session_id, "cell_id": cell_id})
-
-    return callback
 
 
 async def _should_attempt(cell_id: str, trigger: str) -> bool:
@@ -69,6 +58,15 @@ async def _push_if_published(cell: Cell) -> bool | None:
 
 async def process_cell(cell: Cell) -> None:
     """Process a single cell: check sync status, CI status, and fix issues."""
+    lock = _cell_locks.setdefault(cell.id, asyncio.Lock())
+    if lock.locked():
+        logger.info(f"Cell {cell.id} already being processed, skipping")
+        return
+    async with lock:
+        await _process_cell(cell)
+
+
+async def _process_cell(cell: Cell) -> None:
     try:
         await git.assert_not_detached(cell.worktree_path)
 
@@ -118,6 +116,7 @@ async def process_cell(cell: Cell) -> None:
             if ci_status != cell.ci_status:
                 await db.update_cell(cell.id, ci_status=ci_status)
                 await notify("cell_updated", {"id": cell.id, "ci_status": ci})
+            if ci_status == CIStatus.failing:
                 needs_tend = True
 
             comment_count = await git.get_pr_comment_count(cell.repo, cell.pr_number)
@@ -136,16 +135,22 @@ async def process_cell(cell: Cell) -> None:
             await db.create_session(session)
 
             system_prompt = claude.orrery_system_prompt(cell.id)
-            on_output = _make_output_callback(session.id, cell.id)
             prompt = claude.tend_prompt(cell.branch)
-            ok, output = await claude.run_claude_headless(
-                prompt,
+            worktree = str(Path(cell.worktree_path).resolve())
+            allowed_tools = [
+                t.format(worktree=worktree) for t in DAEMON_ALLOWED_TOOLS
+            ]
+
+            task = spawn_session(
+                session.id,
                 cwd=cell.worktree_path,
-                session_id=session.id,
+                print_mode=True,
+                prompt=prompt,
                 system_prompt=system_prompt,
-                on_output=on_output,
+                allowed_tools=allowed_tools,
             )
-            ended_at = datetime.now(timezone.utc).isoformat()
+            exit_code = await task
+            ok = exit_code == 0
 
             if ok:
                 push_result = await _push_if_published(cell)
@@ -160,12 +165,7 @@ async def process_cell(cell: Cell) -> None:
             await db.update_cell(cell.id, sync_status=sync)
             await notify("cell_updated", {"id": cell.id, "sync_status": sync.value})
 
-            await db.update_session(
-                session.id,
-                succeeded=1 if ok else 0,
-                transcript=output,
-                ended_at=ended_at,
-            )
+            await db.update_session(session.id, succeeded=1 if ok else 0)
             if not ok:
                 logger.error(f"Claude failed to fix issues for cell {cell.id}")
 
@@ -203,26 +203,8 @@ async def daemon_loop() -> None:
         await asyncio.sleep(POLL_INTERVAL)
 
 
-def _make_sortie_output_callback(session_id: str, sortie_id: str):
-    """Create a throttled callback for streaming sortie Claude output."""
-    last_update = 0.0
-
-    async def callback(transcript: str) -> None:
-        nonlocal last_update
-        now = time.monotonic()
-        if now - last_update < 1.0:
-            return
-        last_update = now
-        await db.update_session(session_id, transcript=transcript)
-        await notify("sortie_updated", {"id": sortie_id, "session_id": session_id})
-
-    return callback
-
-
 async def spawn_sortie_session(sortie: Sortie) -> None:
     """Spawn the single orchestrator Claude session for a sortie."""
-    from server.daemon_config import SORTIE_ALLOWED_TOOLS
-
     try:
         repo_worktrees = await git.create_sortie_worktrees(sortie.id)
     except RuntimeError:
@@ -247,24 +229,19 @@ async def spawn_sortie_session(sortie: Sortie) -> None:
     allowed_tools = [
         t.format(worktree_root=worktree_root) for t in SORTIE_ALLOWED_TOOLS
     ]
-    on_output = _make_sortie_output_callback(session.id, sortie.id)
 
-    ok, output = await claude.run_claude_headless(
-        sortie.prompt,
+    task = spawn_session(
+        session.id,
         cwd=exploration_dir,
-        session_id=session.id,
+        print_mode=True,
+        prompt=sortie.prompt,
         system_prompt=system_prompt,
-        on_output=on_output,
         allowed_tools=allowed_tools,
     )
-    ended_at = datetime.now(timezone.utc).isoformat()
+    exit_code = await task
+    ok = exit_code == 0
 
-    await db.update_session(
-        session.id,
-        succeeded=1 if ok else 0,
-        transcript=output,
-        ended_at=ended_at,
-    )
+    await db.update_session(session.id, succeeded=1 if ok else 0)
 
     # Clean up exploration worktrees (cell worktrees persist)
     try:
