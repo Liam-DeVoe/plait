@@ -70,12 +70,16 @@ export default function Terminal({ sessionId, cellId, alive, onResume }: Termina
       const scrollingUp = e.deltaY < 0;
       const atBoundary = (scrollingDown && atBottom) || (scrollingUp && atTop);
 
-      if (atBoundary && now - lastScrollTime > COOLDOWN) {
+      if (atBoundary) {
+        if (now - lastScrollTime > COOLDOWN) {
+          return; // cooldown expired, let page scroll
+        }
+        e.preventDefault(); // within cooldown, block page scroll but don't reset timer
         return;
       }
 
+      // non-boundary scroll: let xterm handle it (it calls preventDefault itself)
       lastScrollTime = now;
-      e.preventDefault();
     };
     container.addEventListener("wheel", onWheel, { capture: true, passive: false });
 
@@ -93,6 +97,13 @@ export default function Terminal({ sessionId, cellId, alive, onResume }: Termina
         `${protocol}//${window.location.host}/ws/sessions/${sessionId}`
       );
       ws.binaryType = "arraybuffer";
+
+      ws.onopen = () => {
+        fitAddon.fit();
+        ws.send(
+          JSON.stringify({ type: "resize", rows: term.rows, cols: term.cols })
+        );
+      };
 
       ws.onmessage = (event) => {
         term.write(new Uint8Array(event.data));
@@ -131,16 +142,21 @@ export default function Terminal({ sessionId, cellId, alive, onResume }: Termina
         term.write(new Uint8Array(buffer));
       });
 
-      const disposable = term.onData(async () => {
+      const doResume = async () => {
         if (resumingRef.current) return;
         resumingRef.current = true;
         disposable.dispose();
+        container.removeEventListener("mousedown", doResume);
         term.write("\r\n\x1b[93m[resuming session...]\x1b[0m\r\n");
         await onResume();
-      });
+      };
+
+      const disposable = term.onData(doResume);
+      container.addEventListener("mousedown", doResume);
 
       cleanup = () => {
         disposable.dispose();
+        container.removeEventListener("mousedown", doResume);
       };
     }
 

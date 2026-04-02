@@ -41,7 +41,13 @@ For each active cell, `daemon.process_cell()`:
 2. `git.rebase_onto_main()` -- if clean, force-push; if conflicts, abort rebase then invoke `claude.resolve_conflicts()` (which runs `claude -p` in the worktree)
 3. Check CI via `git.get_ci_status()` (uses `gh pr checks`) -- if newly failing, invoke `claude.fix_ci()` with the failure logs
 
-All Claude interactions go through `server/claude.py`, which shells out to `claude -p <prompt>` in the cell's worktree directory. The daemon creates Session records for every Claude invocation.
+All Claude interactions go through `server/claude.py`, which shells out to `claude -p <prompt>` in the cell's worktree directory. The daemon creates Session records for every Claude invocation. The daemon caps automatic retries at 3 attempts per trigger type (`MAX_DAEMON_ATTEMPTS`); manual sync via the API bypasses this limit (`force=True`).
+
+### Two Claude Interaction Modes
+
+**Daemon (headless)**: `claude.run_claude_headless()` runs `claude -p <prompt>` as a subprocess, streaming stdout line-by-line. Used for rebase conflict resolution, CI fixes, and sortie prompts. Output is captured as a transcript in the session record.
+
+**User (PTY)**: `server/pty.py` manages interactive Claude sessions via pseudoterminals. `PtyManager` spawns `claude --session-id <id>` in a real PTY, buffers raw output (`output_buffer`), strips ANSI for transcripts, and forwards bytes to WebSocket listeners. The API's `/ws/sessions/{session_id}` WebSocket endpoint connects the browser's xterm.js terminal to the PTY. When a PTY process exits, `_watch_pty()` in `api.py` finalizes the session record (transcript + raw xterm state for replay).
 
 ### Database
 
@@ -49,7 +55,7 @@ SQLite via `aiosqlite` (`server/db.py`). Each function opens its own connection 
 
 No migration code in the codebase. When a schema change is needed, apply it directly to the production `orrery.db` via `sqlite3` (single-user tool, no other environments to worry about). Do not add migration logic to `init_db` or anywhere else.
 
-Three tables: `cells`, `sorties`, `sessions`. The `sorties.repos` column stores a JSON array. Session trigger types: `"rebase"`, `"ci_fix"`, `"sortie"`, or `None` for user sessions.
+Three tables: `cells`, `sorties`, `sessions`. The `sorties.repos` column stores a JSON array. Session trigger types: `"merge"`, `"ci_fix"`, `"sortie"`, or `None` for user sessions. Session `role` is `"daemon"` or `"user"`.
 
 ### Git/Worktree Layout
 
