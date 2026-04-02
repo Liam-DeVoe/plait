@@ -704,9 +704,16 @@ function CollapsibleSession({
 
 // --- Sorties ---
 
-function CreateSortieForm({ onCreated }: { onCreated: () => void }) {
+function CreateSortieForm({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
   const [prompt, setPrompt] = useState("");
-  const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -717,7 +724,7 @@ function CreateSortieForm({ onCreated }: { onCreated: () => void }) {
     try {
       await createSortie(prompt);
       setPrompt("");
-      setOpen(false);
+      onClose();
       onCreated();
     } catch (err: any) {
       setError(err.message);
@@ -726,13 +733,7 @@ function CreateSortieForm({ onCreated }: { onCreated: () => void }) {
     }
   };
 
-  if (!open) {
-    return (
-      <div className="btn btn--blue" onClick={() => setOpen(true)}>
-        New Sortie
-      </div>
-    );
-  }
+  if (!open) return null;
 
   return (
     <div className="card form">
@@ -743,6 +744,7 @@ function CreateSortieForm({ onCreated }: { onCreated: () => void }) {
         onChange={(e) => setPrompt(e.target.value)}
         rows={3}
         className="form__textarea"
+        autoFocus
       />
       <div className="form__actions">
         <div
@@ -754,7 +756,7 @@ function CreateSortieForm({ onCreated }: { onCreated: () => void }) {
         <div
           className="btn btn--gray"
           onClick={() => {
-            setOpen(false);
+            onClose();
             setError(null);
           }}
         >
@@ -793,6 +795,7 @@ function SortiesPage() {
   const [sorties, setSorties] = useState<(Sortie & { cell_count: number })[]>(
     [],
   );
+  const [formOpen, setFormOpen] = useState(false);
 
   const loadSorties = useCallback(async () => {
     setSorties(await fetchSorties());
@@ -806,8 +809,17 @@ function SortiesPage() {
     <>
       <div className="page-header">
         <div className="page-title">Sorties</div>
-        <CreateSortieForm onCreated={loadSorties} />
+        {!formOpen && (
+          <div className="btn btn--blue" onClick={() => setFormOpen(true)}>
+            New Sortie
+          </div>
+        )}
       </div>
+      <CreateSortieForm
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        onCreated={loadSorties}
+      />
 
       {sorties.length === 0 ? (
         <div className="empty-state">
