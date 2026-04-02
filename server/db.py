@@ -12,7 +12,6 @@ from server.models import (
     CIStatus,
     Session,
     SessionRole,
-    SessionStatus,
     Sortie,
     SortieStatus,
     SyncStatus,
@@ -50,8 +49,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     cell_id TEXT NOT NULL,
     role TEXT NOT NULL DEFAULT 'user',
     trigger_name TEXT,
-    status TEXT NOT NULL DEFAULT 'running',
-    transcript TEXT NOT NULL DEFAULT '[]',
+    succeeded INTEGER,
+    transcript TEXT NOT NULL DEFAULT '',
     started_at TEXT NOT NULL,
     ended_at TEXT,
     FOREIGN KEY (cell_id) REFERENCES cells(id)
@@ -182,8 +181,9 @@ def _row_to_cell(row: aiosqlite.Row) -> Cell:
 async def create_session(session: Session) -> Session:
     db = await get_db()
     try:
+        succeeded_val = None if session.succeeded is None else int(session.succeeded)
         await db.execute(
-            """INSERT INTO sessions (id, cell_id, role, trigger_name, status,
+            """INSERT INTO sessions (id, cell_id, role, trigger_name, succeeded,
                transcript, started_at, ended_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
@@ -191,7 +191,7 @@ async def create_session(session: Session) -> Session:
                 session.cell_id,
                 session.role.value,
                 session.trigger,
-                session.status.value,
+                succeeded_val,
                 session.transcript,
                 session.started_at,
                 session.ended_at,
@@ -240,12 +240,13 @@ async def update_session(session_id: str, **kwargs: object) -> Session | None:
 
 
 def _row_to_session(row: aiosqlite.Row) -> Session:
+    succeeded_raw = row["succeeded"]
     return Session(
         id=row["id"],
         cell_id=row["cell_id"],
         role=SessionRole(row["role"]),
         trigger=row["trigger_name"],
-        status=SessionStatus(row["status"]),
+        succeeded=None if succeeded_raw is None else bool(succeeded_raw),
         transcript=row["transcript"],
         started_at=row["started_at"],
         ended_at=row["ended_at"],

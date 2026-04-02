@@ -30,12 +30,6 @@ class SortieStatus(str, Enum):
     completed = "completed"
 
 
-class SessionStatus(str, Enum):
-    running = "running"
-    completed = "completed"
-    failed = "failed"
-
-
 class SessionRole(str, Enum):
     daemon = "daemon"
     user = "user"
@@ -76,8 +70,8 @@ class Session:
     cell_id: str = ""
     role: SessionRole = SessionRole.user
     trigger: str | None = None
-    status: SessionStatus = SessionStatus.running
-    transcript: str = ""  # JSON-encoded list of messages
+    succeeded: bool | None = None
+    transcript: str = ""
     started_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

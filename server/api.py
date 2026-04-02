@@ -18,7 +18,6 @@ from server.models import (
     CellStatus,
     Session,
     SessionRole,
-    SessionStatus,
     Sortie,
 )
 from server.pty import pty_manager
@@ -29,6 +28,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
+    # Sweep stale sessions from a previous crash
+    await _cleanup_stale_sessions()
     # Start daemon
     event_queue: asyncio.Queue = asyncio.Queue()
     daemon.notify_callback = event_queue
@@ -126,7 +127,7 @@ async def get_cell(cell_id: str):
         raise HTTPException(status_code=404, detail="Cell not found")
     sessions = await db.list_sessions(cell_id)
     result = asdict(cell)
-    result["sessions"] = [asdict(s) for s in sessions]
+    result["sessions"] = [_session_dict(s) for s in sessions]
     return result
 
 
@@ -213,10 +214,17 @@ async def open_in_vscode(cell_id: str):
 # --- Session endpoints ---
 
 
+def _session_dict(s: Session) -> dict:
+    """Serialize a session, adding runtime 'alive' field."""
+    d = asdict(s)
+    d["alive"] = pty_manager.is_alive(s.id)
+    return d
+
+
 @app.get("/cells/{cell_id}/sessions")
 async def list_sessions(cell_id: str):
     sessions = await db.list_sessions(cell_id)
-    return [asdict(s) for s in sessions]
+    return [_session_dict(s) for s in sessions]
 
 
 class CreateSessionRequest(BaseModel):
@@ -232,40 +240,114 @@ async def create_session_endpoint(cell_id: str, req: CreateSessionRequest):
     session = Session(
         cell_id=cell.id,
         role=SessionRole.user,
-        status=SessionStatus.running,
     )
     await db.create_session(session)
 
-    pty_manager.spawn(session.id, cwd=cell.worktree_path)
-    if req.prompt.strip():
-        # Send initial prompt after a brief delay to let claude start
+    _spawn_pty_for_session(session.id, cell.worktree_path, prompt=req.prompt)
+
+    return _session_dict(session)
+
+
+def _spawn_pty_for_session(
+    session_id: str, worktree_path: str, prompt: str = ""
+) -> None:
+    """Spawn a PTY running claude for a session and start watching it."""
+    pty_manager.spawn(
+        session_id,
+        cwd=worktree_path,
+        cmd=["claude", "--session-id", session_id],
+    )
+    if prompt.strip():
+
         async def _send_initial_prompt():
             await asyncio.sleep(1.0)
-            pty_manager.write(session.id, (req.prompt + "\n").encode())
+            pty_manager.write(session_id, (prompt + "\n").encode())
 
         asyncio.create_task(_send_initial_prompt())
 
-    # Start a background task to detect process exit
-    asyncio.create_task(_watch_pty(session.id, cell.id))
-
-    return asdict(session)
+    asyncio.create_task(_watch_pty(session_id))
 
 
-async def _watch_pty(session_id: str, cell_id: str) -> None:
-    """Watch a PTY process and update the session when it exits."""
+async def _watch_pty(session_id: str) -> None:
+    """Watch a PTY process: flush transcript periodically, finalize on exit."""
+    flush_interval = 2.0
     while pty_manager.is_alive(session_id):
-        await asyncio.sleep(1.0)
+        # Periodically flush transcript to DB so it survives crashes
+        transcript = pty_manager.get_transcript(session_id)
+        if transcript:
+            await db.update_session(session_id, transcript=transcript)
+        await asyncio.sleep(flush_interval)
 
+    # Final flush
     transcript = pty_manager.get_transcript(session_id)
     pty_manager.remove(session_id)
 
     await db.update_session(
         session_id,
-        status=SessionStatus.completed.value,
         transcript=transcript,
         ended_at=datetime.now(timezone.utc).isoformat(),
     )
-    await daemon.notify("cell_updated", {"id": cell_id})
+
+    # Look up cell_id for the notification
+    conn = await db.get_db()
+    try:
+        cursor = await conn.execute(
+            "SELECT cell_id FROM sessions WHERE id = ?", (session_id,)
+        )
+        row = await cursor.fetchone()
+        if row:
+            await daemon.notify("cell_updated", {"id": row["cell_id"]})
+    finally:
+        await conn.close()
+
+
+@app.post("/cells/{cell_id}/sessions/{session_id}/resume")
+async def resume_session(cell_id: str, session_id: str):
+    cell = await db.get_cell(cell_id)
+    if not cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+
+    session_list = await db.list_sessions(cell_id)
+    session = next((s for s in session_list if s.id == session_id), None)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if pty_manager.is_alive(session_id):
+        raise HTTPException(status_code=400, detail="Session is already alive")
+
+    # Reset ended_at so daemon sees it as active
+    await db.update_session(session_id, ended_at=None)
+
+    _spawn_pty_for_session(session.id, cell.worktree_path)
+
+    session.ended_at = None
+    return _session_dict(session)
+
+
+@app.post("/cells/{cell_id}/sessions/{session_id}/stop")
+async def stop_session(cell_id: str, session_id: str):
+    cell = await db.get_cell(cell_id)
+    if not cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+
+    session_list = await db.list_sessions(cell_id)
+    session = next((s for s in session_list if s.id == session_id), None)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if not pty_manager.is_alive(session_id):
+        raise HTTPException(status_code=400, detail="Session is not alive")
+
+    transcript = pty_manager.get_transcript(session_id)
+    await pty_manager.terminate(session_id)
+    pty_manager.remove(session_id)
+
+    updated = await db.update_session(
+        session_id,
+        transcript=transcript,
+        ended_at=datetime.now(timezone.utc).isoformat(),
+    )
+    return _session_dict(updated) if updated else {}
 
 
 @app.websocket("/ws/sessions/{session_id}")
@@ -315,31 +397,18 @@ async def session_terminal_ws(ws: WebSocket, session_id: str):
             pty_session.listeners.remove(on_output)
 
 
-@app.post("/cells/{cell_id}/sessions/{session_id}/stop")
-async def stop_session(cell_id: str, session_id: str):
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
-
-    session_list = await db.list_sessions(cell_id)
-    session = next((s for s in session_list if s.id == session_id), None)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-
-    if session.status != SessionStatus.running:
-        raise HTTPException(status_code=400, detail="Session is not running")
-
-    transcript = pty_manager.get_transcript(session_id)
-    await pty_manager.terminate(session_id)
-    pty_manager.remove(session_id)
-
-    updated = await db.update_session(
-        session_id,
-        status=SessionStatus.completed.value,
-        transcript=transcript,
-        ended_at=datetime.now(timezone.utc).isoformat(),
-    )
-    return asdict(updated) if updated else {}
+async def _cleanup_stale_sessions() -> None:
+    """On startup, mark any sessions without ended_at as ended.
+    Their PTY processes died when the previous server process exited."""
+    conn = await db.get_db()
+    try:
+        await conn.execute(
+            "UPDATE sessions SET ended_at = ? WHERE ended_at IS NULL",
+            (datetime.now(timezone.utc).isoformat(),),
+        )
+        await conn.commit()
+    finally:
+        await conn.close()
 
 
 # --- Sortie endpoints ---

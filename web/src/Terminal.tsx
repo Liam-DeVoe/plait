@@ -58,6 +58,8 @@ export default function Terminal({ sessionId }: { sessionId: string }) {
       term.write("\r\n\x1b[90m[session ended]\x1b[0m\r\n");
     };
 
+    term.attachCustomKeyEventHandler(() => true);
+
     term.onData((data) => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "input", data }));

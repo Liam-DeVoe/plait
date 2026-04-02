@@ -4,7 +4,6 @@ from server.models import (
     CIStatus,
     Session,
     SessionRole,
-    SessionStatus,
     Sortie,
     SortieStatus,
     SyncStatus,
@@ -28,7 +27,7 @@ def test_session_defaults():
     session = Session()
     assert session.id
     assert session.role == SessionRole.user
-    assert session.status == SessionStatus.running
+    assert session.succeeded is None
     assert session.trigger is None
     assert session.ended_at is None
     assert session.transcript == ""
@@ -48,7 +47,6 @@ def test_enum_values():
     assert CIStatus.passing.value == "passing"
     assert SyncStatus.conflict.value == "conflict"
     assert SessionRole.daemon.value == "daemon"
-    assert SessionStatus.failed.value == "failed"
 
 
 def test_cell_unique_ids():

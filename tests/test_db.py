@@ -9,7 +9,6 @@ from server.models import (
     CIStatus,
     Session,
     SessionRole,
-    SessionStatus,
     Sortie,
     SortieStatus,
     SyncStatus,
@@ -100,11 +99,9 @@ async def test_update_session(init_db):
     session = Session(cell_id=cell.id)
     await db.create_session(session)
 
-    updated = await db.update_session(
-        session.id, status=SessionStatus.completed.value, transcript="done"
-    )
+    updated = await db.update_session(session.id, succeeded=1, transcript="done")
     assert updated is not None
-    assert updated.status == SessionStatus.completed
+    assert updated.succeeded is True
     assert updated.transcript == "done"
 
 
@@ -165,7 +162,6 @@ async def test_list_cells_by_sortie(init_db):
 st_cell_status = st.sampled_from(list(CellStatus))
 st_ci_status = st.sampled_from(list(CIStatus))
 st_sync_status = st.sampled_from(list(SyncStatus))
-st_session_status = st.sampled_from(list(SessionStatus))
 st_session_role = st.sampled_from(list(SessionRole))
 st_sortie_status = st.sampled_from(list(SortieStatus))
 
@@ -192,7 +188,7 @@ def st_session(draw):
         cell_id=draw(st.text(min_size=1, max_size=36)),
         role=draw(st_session_role),
         trigger=draw(st.none() | st.text(min_size=0, max_size=50)),
-        status=draw(st_session_status),
+        succeeded=draw(st.none() | st.booleans()),
         transcript=draw(st.text(min_size=0, max_size=500)),
         ended_at=draw(st.none() | st.text(min_size=1, max_size=30)),
     )
@@ -238,7 +234,7 @@ async def test_session_roundtrip(session: Session):
     assert fetched.cell_id == session.cell_id
     assert fetched.role == session.role
     assert fetched.trigger == session.trigger
-    assert fetched.status == session.status
+    assert fetched.succeeded == session.succeeded
     assert fetched.transcript == session.transcript
     assert fetched.ended_at == session.ended_at
 

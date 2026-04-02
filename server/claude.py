@@ -8,17 +8,22 @@ from pathlib import Path
 async def run_claude_headless(
     prompt: str,
     cwd: str | Path,
+    session_id: str | None = None,
     on_output: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[bool, str]:
     """Run claude in print mode with a prompt. Returns (success, output).
 
+    If session_id is provided, passes --session-id so the conversation can be
+    resumed interactively later.
+
     If on_output is provided, it is called with the accumulated stdout so far
     each time a new line is read, enabling streaming transcript updates.
     """
+    args = ["claude", "-p", prompt]
+    if session_id:
+        args.extend(["--session-id", session_id])
     proc = await asyncio.create_subprocess_exec(
-        "claude",
-        "-p",
-        prompt,
+        *args,
         cwd=cwd,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -48,6 +53,7 @@ async def run_claude_headless(
 async def resolve_conflicts(
     worktree_path: str,
     branch: str,
+    session_id: str | None = None,
     on_output: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[bool, str]:
     """Use Claude to merge origin/main and resolve any conflicts."""
@@ -58,13 +64,16 @@ async def resolve_conflicts(
         "make sure the code compiles/passes basic checks. "
         "Do NOT push — just complete the merge locally."
     )
-    return await run_claude_headless(prompt, cwd=worktree_path, on_output=on_output)
+    return await run_claude_headless(
+        prompt, cwd=worktree_path, session_id=session_id, on_output=on_output
+    )
 
 
 async def fix_ci(
     worktree_path: str,
     branch: str,
     ci_output: str,
+    session_id: str | None = None,
     on_output: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[bool, str]:
     """Use Claude to diagnose and fix a CI failure."""
@@ -73,4 +82,6 @@ async def fix_ci(
         f"{ci_output}\n\n"
         "Please diagnose the issue and fix it. Commit your fix."
     )
-    return await run_claude_headless(prompt, cwd=worktree_path, on_output=on_output)
+    return await run_claude_headless(
+        prompt, cwd=worktree_path, session_id=session_id, on_output=on_output
+    )

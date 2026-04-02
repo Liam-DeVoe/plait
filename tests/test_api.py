@@ -205,7 +205,8 @@ async def test_create_session(client, mock_pty):
     data = resp.json()
     assert data["cell_id"] == cell_id
     assert data["role"] == "user"
-    assert data["status"] == "running"
+    assert data["alive"] is True
+    assert data["ended_at"] is None
     assert mock_pty.spawn.called
 
     # Verify it shows up in cell sessions
@@ -247,7 +248,8 @@ async def test_stop_session(client, mock_pty):
 
     resp = await c.post(f"/cells/{cell_id}/sessions/{session_id}/stop")
     assert resp.status_code == 200
-    assert resp.json()["status"] == "completed"
+    assert resp.json()["ended_at"] is not None
+    assert resp.json()["alive"] is False
 
 
 async def test_stop_session_not_found(client, mock_pty):
@@ -257,3 +259,35 @@ async def test_stop_session_not_found(client, mock_pty):
 
     resp = await c.post(f"/cells/{cell_id}/sessions/nonexistent/stop")
     assert resp.status_code == 404
+
+
+async def test_resume_session(client, mock_pty):
+    """POST /cells/:id/sessions/:sid/resume should spawn a new PTY."""
+    create_resp = await _create_cell_via_api(client)
+    cell_id = create_resp.json()["id"]
+    c, _, _ = client
+
+    # Create and stop a session
+    resp = await c.post(f"/cells/{cell_id}/sessions", json={})
+    session_id = resp.json()["id"]
+    await c.post(f"/cells/{cell_id}/sessions/{session_id}/stop")
+
+    # Resume it — mock needs is_alive to return False first (stopped), then True (resumed)
+    mock_pty.is_alive.return_value = False
+    resp = await c.post(f"/cells/{cell_id}/sessions/{session_id}/resume")
+    assert resp.status_code == 200
+    assert resp.json()["ended_at"] is None
+
+
+async def test_resume_alive_session_fails(client, mock_pty):
+    """Resuming an already-alive session should return 400."""
+    create_resp = await _create_cell_via_api(client)
+    cell_id = create_resp.json()["id"]
+    c, _, _ = client
+
+    resp = await c.post(f"/cells/{cell_id}/sessions", json={})
+    session_id = resp.json()["id"]
+
+    # Session is alive (mock default), so resume should fail
+    resp = await c.post(f"/cells/{cell_id}/sessions/{session_id}/resume")
+    assert resp.status_code == 400

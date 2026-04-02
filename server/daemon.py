@@ -12,7 +12,6 @@ from server.models import (
     CIStatus,
     Session,
     SessionRole,
-    SessionStatus,
     Sortie,
     SyncStatus,
 )
@@ -56,15 +55,15 @@ async def _should_attempt(cell_id: str, trigger: str, *, force: bool = False) ->
     sessions = await db.list_sessions(cell_id)
     trigger_sessions = [s for s in sessions if s.trigger == trigger]
 
-    # Never start if one is already running
-    if any(s.status == SessionStatus.running for s in trigger_sessions):
+    # Never start if one is still running (ended_at not set)
+    if any(s.ended_at is None for s in trigger_sessions):
         return False
 
     # Skip retry limit if forced (manual trigger)
     if force:
         return True
 
-    failed = sum(1 for s in trigger_sessions if s.status == SessionStatus.failed)
+    failed = sum(1 for s in trigger_sessions if s.succeeded is False)
     return failed < MAX_DAEMON_ATTEMPTS
 
 
@@ -117,14 +116,17 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
                     cell_id=cell.id,
                     role=SessionRole.daemon,
                     trigger="merge",
-                    status=SessionStatus.running,
                 )
                 await db.create_session(session)
 
                 on_output = _make_output_callback(session.id, cell.id)
                 claude_ok, claude_out = await claude.resolve_conflicts(
-                    cell.worktree_path, cell.branch, on_output=on_output
+                    cell.worktree_path,
+                    cell.branch,
+                    session_id=session.id,
+                    on_output=on_output,
                 )
+                ended_at = datetime.now(timezone.utc).isoformat()
 
                 if claude_ok:
                     push_ok, push_out = await git.push(cell.worktree_path, cell.branch)
@@ -141,9 +143,9 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
 
                     await db.update_session(
                         session.id,
-                        status=SessionStatus.completed.value,
+                        succeeded=1,
                         transcript=claude_out,
-                        ended_at=datetime.now(timezone.utc).isoformat(),
+                        ended_at=ended_at,
                     )
                 else:
                     await db.update_cell(cell.id, sync_status=SyncStatus.failed)
@@ -152,9 +154,9 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
                     )
                     await db.update_session(
                         session.id,
-                        status=SessionStatus.failed.value,
+                        succeeded=0,
                         transcript=claude_out,
-                        ended_at=datetime.now(timezone.utc).isoformat(),
+                        ended_at=ended_at,
                     )
                     logger.error(
                         f"Claude failed to resolve conflicts for cell {cell.id}"
@@ -207,13 +209,16 @@ async def _fix_ci(cell: Cell, *, force: bool = False) -> None:
         cell_id=cell.id,
         role=SessionRole.daemon,
         trigger="ci_fix",
-        status=SessionStatus.running,
     )
     await db.create_session(session)
 
     on_output = _make_output_callback(session.id, cell.id)
     ok, output = await claude.fix_ci(
-        cell.worktree_path, cell.branch, ci_logs, on_output=on_output
+        cell.worktree_path,
+        cell.branch,
+        ci_logs,
+        session_id=session.id,
+        on_output=on_output,
     )
     ended_at = datetime.now(timezone.utc).isoformat()
 
@@ -221,7 +226,7 @@ async def _fix_ci(cell: Cell, *, force: bool = False) -> None:
         push_ok, _ = await git.push(cell.worktree_path, cell.branch)
         await db.update_session(
             session.id,
-            status=SessionStatus.completed.value,
+            succeeded=1,
             transcript=output,
             ended_at=ended_at,
         )
@@ -231,7 +236,7 @@ async def _fix_ci(cell: Cell, *, force: bool = False) -> None:
     else:
         await db.update_session(
             session.id,
-            status=SessionStatus.failed.value,
+            succeeded=0,
             transcript=output,
             ended_at=ended_at,
         )
@@ -262,13 +267,15 @@ async def spawn_sortie_cell(sortie: Sortie, repo: str) -> None:
         cell_id=cell.id,
         role=SessionRole.daemon,
         trigger="sortie",
-        status=SessionStatus.running,
     )
     await db.create_session(session)
 
     on_output = _make_output_callback(session.id, cell.id)
     ok, output = await claude.run_claude_headless(
-        sortie.prompt, cwd=cell.worktree_path, on_output=on_output
+        sortie.prompt,
+        cwd=cell.worktree_path,
+        session_id=session.id,
+        on_output=on_output,
     )
     ended_at = datetime.now(timezone.utc).isoformat()
 
@@ -293,14 +300,14 @@ async def spawn_sortie_cell(sortie: Sortie, repo: str) -> None:
 
         await db.update_session(
             session.id,
-            status=SessionStatus.completed.value,
+            succeeded=1,
             transcript=output,
             ended_at=ended_at,
         )
     else:
         await db.update_session(
             session.id,
-            status=SessionStatus.failed.value,
+            succeeded=0,
             transcript=output,
             ended_at=ended_at,
         )

@@ -19,10 +19,11 @@ export interface Session {
   cell_id: string;
   role: "daemon" | "user";
   trigger: string | null;
-  status: "running" | "completed" | "failed";
+  succeeded: boolean | null;
   transcript: string;
   started_at: string;
   ended_at: string | null;
+  alive: boolean;
 }
 
 export interface Sortie {
@@ -126,6 +127,17 @@ export async function stopSession(cellId: string, sessionId: string): Promise<vo
     const err = await res.json();
     throw new Error(err.detail || "Failed to stop session");
   }
+}
+
+export async function resumeSession(cellId: string, sessionId: string): Promise<Session> {
+  const res = await fetch(`${BASE}/cells/${cellId}/sessions/${sessionId}/resume`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to resume session");
+  }
+  return res.json();
 }
 
 export function connectWebSocket(onMessage: (data: any) => void): WebSocket {

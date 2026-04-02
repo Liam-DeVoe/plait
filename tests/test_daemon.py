@@ -10,7 +10,6 @@ from server.models import (
     CIStatus,
     Session,
     SessionRole,
-    SessionStatus,
     Sortie,
     SyncStatus,
 )
@@ -101,7 +100,7 @@ async def test_cell_conflict_claude_resolves(git_env, init_db, mock_claude):
     sessions = await db.list_sessions(cell.id)
     assert len(sessions) == 1
     assert sessions[0].trigger == "merge"
-    assert sessions[0].status == SessionStatus.completed
+    assert sessions[0].succeeded is True
 
 
 async def test_cell_conflict_claude_fails(git_env, init_db, mock_claude):
@@ -128,7 +127,7 @@ async def test_cell_conflict_claude_fails(git_env, init_db, mock_claude):
     # Verify a failed daemon session was created
     sessions = await db.list_sessions(cell.id)
     assert len(sessions) == 1
-    assert sessions[0].status == SessionStatus.failed
+    assert sessions[0].succeeded is False
 
 
 async def test_ci_status_update(git_env, init_db, mock_gh):
@@ -184,7 +183,7 @@ async def test_ci_fix_on_failure(git_env, init_db, mock_gh, mock_claude):
     sessions = await db.list_sessions(cell.id)
     assert len(sessions) == 1
     assert sessions[0].trigger == "ci_fix"
-    assert sessions[0].status == SessionStatus.completed
+    assert sessions[0].succeeded is True
     assert sessions[0].transcript == "Fixed the test"
 
 
@@ -243,7 +242,7 @@ async def test_spawn_sortie_cell(git_env, init_db, mock_claude, mock_gh):
     sessions = await db.list_sessions(cell.id)
     assert len(sessions) == 1
     assert sessions[0].trigger == "sortie"
-    assert sessions[0].status == SessionStatus.completed
+    assert sessions[0].succeeded is True
 
 
 async def test_daemon_stops_after_max_failures(git_env, init_db, mock_claude):
@@ -267,7 +266,8 @@ async def test_daemon_stops_after_max_failures(git_env, init_db, mock_claude):
             cell_id=cell.id,
             role=SessionRole.daemon,
             trigger="merge",
-            status=SessionStatus.failed,
+            succeeded=False,
+            ended_at="2024-01-01T00:00:00+00:00",
         )
         await db.create_session(s)
 
@@ -301,7 +301,8 @@ async def test_manual_sync_bypasses_limit(git_env, init_db, mock_claude):
             cell_id=cell.id,
             role=SessionRole.daemon,
             trigger="merge",
-            status=SessionStatus.failed,
+            succeeded=False,
+            ended_at="2024-01-01T00:00:00+00:00",
         )
         await db.create_session(s)
 
@@ -324,4 +325,4 @@ async def test_manual_sync_bypasses_limit(git_env, init_db, mock_claude):
     sessions = await db.list_sessions(cell.id)
     # Should have MAX_DAEMON_ATTEMPTS + 1 sessions (the new one)
     assert len(sessions) == MAX_DAEMON_ATTEMPTS + 1
-    assert sessions[0].status == SessionStatus.completed
+    assert sessions[0].succeeded is True

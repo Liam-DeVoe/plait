@@ -23,6 +23,7 @@ import {
   createSortie,
   createInteractiveSession,
   stopSession,
+  resumeSession,
   connectWebSocket,
   type Cell,
   type Session,
@@ -372,6 +373,12 @@ function CellDetailPage() {
     load();
   };
 
+  const handleResumeSession = async (sessionId: string) => {
+    if (!id) return;
+    await resumeSession(id, sessionId);
+    load();
+  };
+
   if (!cell) return null;
 
   return (
@@ -446,23 +453,37 @@ function CellDetailPage() {
           {cell.sessions.map((s) => (
             <div key={s.id} className="bg-white rounded-lg shadow p-4">
               <div className="flex items-center gap-3 mb-2">
-                <StatusBadge status={s.status} label={s.status} />
+                {s.alive ? (
+                  <StatusBadge status="running" label="alive" />
+                ) : (
+                  <StatusBadge
+                    status={s.succeeded === true ? "completed" : s.succeeded === false ? "failed" : "unknown"}
+                    label={s.succeeded === true ? "succeeded" : s.succeeded === false ? "failed" : "ended"}
+                  />
+                )}
                 <span className="text-xs text-gray-500">
                   {s.role} {s.trigger ? `(${s.trigger})` : ""}
                 </span>
                 <span className="text-xs text-gray-400">
                   {new Date(s.started_at).toLocaleString()}
                 </span>
-                {s.status === "running" && (
+                {s.alive ? (
                   <button
                     onClick={() => handleStopSession(s.id)}
                     className="ml-auto px-2 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-800 rounded"
                   >
                     Stop
                   </button>
+                ) : (
+                  <button
+                    onClick={() => handleResumeSession(s.id)}
+                    className="ml-auto px-2 py-1 text-xs bg-blue-100 hover:bg-blue-200 text-blue-800 rounded"
+                  >
+                    Resume
+                  </button>
                 )}
               </div>
-              {s.status === "running" ? (
+              {s.alive ? (
                 <Terminal sessionId={s.id} />
               ) : s.transcript ? (
                 <pre className="text-xs bg-gray-50 p-3 rounded overflow-auto max-h-60">

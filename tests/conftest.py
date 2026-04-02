@@ -181,14 +181,24 @@ def mock_pty():
 
     fake_session = PtySession(session_id="fake", master_fd=-1, pid=0)
 
+    alive_sessions: set[str] = set()
+
     mock_manager = MagicMock()
-    mock_manager.spawn.return_value = fake_session
-    # Default to alive=True so _watch_pty doesn't immediately complete sessions.
-    # Tests that need the process to exit can flip this.
-    mock_manager.is_alive.return_value = True
+
+    def _spawn(session_id, **kwargs):
+        alive_sessions.add(session_id)
+        return fake_session
+
+    mock_manager.spawn.side_effect = _spawn
+    mock_manager.is_alive.side_effect = lambda sid: sid in alive_sessions
     mock_manager.get_transcript.return_value = ""
     mock_manager.get.return_value = None
-    mock_manager.terminate = AsyncMock()
+    mock_manager.remove.side_effect = lambda sid: alive_sessions.discard(sid)
+
+    async def _terminate(sid):
+        alive_sessions.discard(sid)
+
+    mock_manager.terminate = AsyncMock(side_effect=_terminate)
 
     with patch.object(api_module, "pty_manager", mock_manager):
         yield mock_manager
