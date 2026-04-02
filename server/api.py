@@ -248,13 +248,13 @@ async def open_session_in_vscode(cell_id: str, session_id: str):
     # Uses AppleScript to wait for VS Code, open a terminal (Ctrl+Shift+`),
     # and type the command.
     resume_cmd = f"claude --resume {session_id}"
-    applescript = f"""delay 2.5
+    applescript = f"""delay 3
 tell application "Visual Studio Code" to activate
-delay 0.1
+delay 0.3
 tell application "System Events"
     tell process "Code"
         keystroke ";" using {{command down}}
-        delay 0.1
+        delay 0.3
         keystroke "{resume_cmd}"
         keystroke return
     end tell
