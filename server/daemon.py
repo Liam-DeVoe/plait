@@ -74,7 +74,11 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
         await git.fetch_origin(cell.repo)
 
         # Check if behind main
-        if await git.is_behind_main(cell.worktree_path):
+        behind = await git.is_behind_main(cell.worktree_path)
+        if not behind and cell.sync_status != SyncStatus.current:
+            await db.update_cell(cell.id, sync_status=SyncStatus.current)
+            await notify("cell_updated", {"id": cell.id, "sync_status": "current"})
+        if behind:
             logger.info(
                 f"Cell {cell.id} ({cell.repo}:{cell.branch}) is behind main, merging"
             )
