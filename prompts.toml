@@ -71,9 +71,16 @@ The branch {branch} needs attention. Investigate and fix any of the following th
 
 1. **Merge conflicts with main**: If the branch is behind origin/main, merge it and resolve any conflicts, preserving the intent of both sides.
 2. **CI failures**: Check CI status with `gh pr checks`. If failing, look at the failure logs and fix the issue.
-3. **Thumbs-up reactions from {author}**: Check PR comments for any that have a thumbs-up (+1) reaction from `{author}`. A thumbs-up means the user agrees with that comment — you should fix the code according to what the comment says.
+3. **Thumbs-up reactions from {author}**: Check PR comments for any that have a thumbs-up (+1) reaction from `{author}`. A thumbs-up means the user agrees with that comment — you should fix the code according to what the comment says. **Skip comments whose review thread is already resolved** — only act on unresolved threads. After you've addressed a +1'd comment, resolve its review thread with:
+   ```
+   gh api graphql -f query='mutation {{ resolveReviewThread(input: {{threadId: "THREAD_NODE_ID"}}) {{ thread {{ isResolved }} }} }}'
+   ```
+   To find review threads and their resolved status, query:
+   ```
+   gh api graphql -f query='{{ repository(owner: "OWNER", name: "REPO") {{ pullRequest(number: PR_NUMBER) {{ reviewThreads(first: 100) {{ nodes {{ id isResolved comments(first: 1) {{ nodes {{ body }} }} }} }} }} }} }}'
+   ```
 
-Never reply to comments on github; you should treat your interaction with github as read-only except for pushing commits.
+Never reply to comments on github; you should treat your interaction with github as read-only except for pushing commits and resolving review threads.
 
 After fixing, make sure the code compiles and passes basic checks. Then commit and push your fixes.
 """
