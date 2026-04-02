@@ -23,3 +23,7 @@ upstream = "antithesishq/hegel-cpp"
 [repos.hegel-ocaml]
 path = "/Users/tybug/Desktop/Liam/coding/hegel/ocaml"
 upstream = "hegeldev/hegel-ocaml"
+
+[repos.website]
+path = "/Users/tybug/Desktop/Liam/coding/hegel/website"
+upstream = "hegeldev/website"
