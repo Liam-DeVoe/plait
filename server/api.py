@@ -105,6 +105,12 @@ async def list_daemon_runs(limit: int = 20):
     return await db.list_daemon_runs(limit)
 
 
+@app.post("/daemon/runs")
+async def trigger_daemon_run():
+    asyncio.create_task(daemon.run_once())
+    return {"status": "started"}
+
+
 # --- Cell endpoints ---
 
 
@@ -245,7 +251,7 @@ async def trigger_sync(cell_id: str):
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
 
-    asyncio.create_task(daemon.process_cell(cell))
+    asyncio.create_task(daemon.tend_cell(cell))
     return {"status": "sync triggered"}
 
 
@@ -450,9 +456,11 @@ async def get_xterm_state(cell_id: str, session_id: str):
     session = next((s for s in sessions if s.id == session_id), None)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    if not session.xterm_state:
+    # Prefer live PTY buffer for running sessions, fall back to DB
+    xterm_state = pty_manager.get_raw_output(session_id) or session.xterm_state
+    if not xterm_state:
         raise HTTPException(status_code=404, detail="No xterm state available")
-    return Response(content=session.xterm_state, media_type="application/octet-stream")
+    return Response(content=xterm_state, media_type="application/octet-stream")
 
 
 @app.websocket("/ws/sessions/{session_id}")
@@ -604,9 +612,10 @@ async def get_sortie_xterm_state(sortie_id: str, session_id: str):
     session = await db.get_session(session_id)
     if not session or session.sortie_id != sortie_id:
         raise HTTPException(status_code=404, detail="Session not found")
-    if not session.xterm_state:
+    xterm_state = pty_manager.get_raw_output(session_id) or session.xterm_state
+    if not xterm_state:
         raise HTTPException(status_code=404, detail="No xterm state available")
-    return Response(content=session.xterm_state, media_type="application/octet-stream")
+    return Response(content=xterm_state, media_type="application/octet-stream")
 
 
 @app.post("/sorties/{sortie_id}/sessions/{session_id}/resume")

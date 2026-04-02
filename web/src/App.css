@@ -791,12 +791,18 @@
   margin-top: 32px;
 }
 
+.daemon-log__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
 .daemon-log__title {
   font-size: 14px;
   line-height: 20px;
   font-weight: 500;
   color: #6b7280;
-  margin-bottom: 8px;
 }
 
 .daemon-log__list > * + * {

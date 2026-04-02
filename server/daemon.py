@@ -52,6 +52,36 @@ async def _push_if_published(cell: Cell) -> bool | None:
     return ok
 
 
+async def tend_cell(cell: Cell) -> bool:
+    """Unconditionally spawn a tend session for a cell. Returns True on success."""
+    session = Session(
+        cell_id=cell.id,
+        role=SessionRole.daemon,
+        trigger="tend",
+    )
+    await db.create_session(session)
+    await notify("cell_updated", {"id": cell.id})
+
+    cmd, cwd = tend_cmd(session.id, cell)
+    task = spawn_session(session.id, cmd, cwd)
+    exit_code = await task
+    ok = exit_code == 0
+
+    if ok:
+        push_result = await _push_if_published(cell)
+        sync = SyncStatus.current if push_result is not False else SyncStatus.failed
+    else:
+        sync = SyncStatus.failed
+
+    await db.update_cell(cell.id, sync_status=sync)
+    await notify("cell_updated", {"id": cell.id, "sync_status": sync.value})
+
+    await db.update_session(session.id, succeeded=1 if ok else 0)
+    if not ok:
+        logger.error(f"Claude failed to fix issues for cell {cell.id}")
+    return ok
+
+
 async def process_cell(cell: Cell) -> dict | None:
     """Process a single cell: check sync status, CI status, and fix issues.
 
@@ -151,35 +181,11 @@ async def _process_cell(cell: Cell) -> dict:
             logger.info(f"Cell {cell.id} needs fixing, invoking Claude")
             _in_flight.add(key)
             try:
-                session = Session(
-                    cell_id=cell.id,
-                    role=SessionRole.daemon,
-                    trigger="tend",
-                )
-                await db.create_session(session)
-
-                cmd, cwd = tend_cmd(session.id, cell)
-                task = spawn_session(session.id, cmd, cwd)
-                exit_code = await task
-                ok = exit_code == 0
+                ok = await tend_cell(cell)
                 outcome = "succeeded" if ok else "failed"
-
-                if ok:
-                    push_result = await _push_if_published(cell)
-                    sync = (
-                        SyncStatus.current
-                        if push_result is not False
-                        else SyncStatus.failed
-                    )
-                else:
-                    sync = SyncStatus.failed
-
-                await db.update_cell(cell.id, sync_status=sync)
-                await notify("cell_updated", {"id": cell.id, "sync_status": sync.value})
-
-                await db.update_session(session.id, succeeded=1 if ok else 0)
-                if not ok:
-                    logger.error(f"Claude failed to fix issues for cell {cell.id}")
+            except Exception:
+                outcome = "failed"
+                logger.exception(f"Tend failed for cell {cell.id}")
             finally:
                 _in_flight.discard(key)
         elif needs_tend:
@@ -212,25 +218,29 @@ async def _process_cell(cell: Cell) -> dict:
     }
 
 
+async def run_once() -> None:
+    """Process all active cells once and record the results."""
+    cells = await db.list_cells(status=CellStatus.active)
+    logger.info(f"Daemon run: processing {len(cells)} active cells")
+
+    started_at = datetime.now(timezone.utc).isoformat()
+    results = []
+    for cell in cells:
+        result = await process_cell(cell)
+        if result is not None:
+            results.append(result)
+
+    ended_at = datetime.now(timezone.utc).isoformat()
+    run_id = str(uuid.uuid4())
+    await db.create_daemon_run(run_id, started_at, ended_at, results)
+
+
 async def daemon_loop() -> None:
     """Main daemon loop. Runs forever, processing all active cells periodically."""
     logger.info("Daemon started")
     while True:
         try:
-            cells = await db.list_cells(status=CellStatus.active)
-            logger.info(f"Daemon run: processing {len(cells)} active cells")
-
-            started_at = datetime.now(timezone.utc).isoformat()
-            results = []
-            for cell in cells:
-                result = await process_cell(cell)
-                if result is not None:
-                    results.append(result)
-
-            ended_at = datetime.now(timezone.utc).isoformat()
-            run_id = str(uuid.uuid4())
-            await db.create_daemon_run(run_id, started_at, ended_at, results)
-
+            await run_once()
         except Exception:
             logger.exception("Daemon loop error")
 

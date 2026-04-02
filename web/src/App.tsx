@@ -16,6 +16,7 @@ import {
   fetchCell,
   fetchDaemonRuns,
   fetchRepos,
+  triggerDaemonRun,
   createCell,
   createLocalCell,
   archiveCell,
@@ -333,7 +334,15 @@ function DaemonLog({ runs }: { runs: DaemonRun[] }) {
 
   return (
     <div className="daemon-log">
-      <div className="daemon-log__title">Daemon Log</div>
+      <div className="daemon-log__header">
+        <div className="daemon-log__title">Daemon log</div>
+        <div
+          className="btn btn--sm btn--soft-blue"
+          onClick={() => triggerDaemonRun()}
+        >
+          Run Now
+        </div>
+      </div>
       <div className="daemon-log__list">
         {runs.map((run) => (
           <div key={run.id} className="daemon-log__run">

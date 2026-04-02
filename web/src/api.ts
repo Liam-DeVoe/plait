@@ -65,6 +65,10 @@ export async function fetchDaemonRuns(limit = 20): Promise<DaemonRun[]> {
   return res.json();
 }
 
+export async function triggerDaemonRun(): Promise<void> {
+  await fetch(`${BASE}/daemon/runs`, { method: "POST" });
+}
+
 export async function fetchRepos(): Promise<Repo[]> {
   const res = await fetch(`${BASE}/repos`);
   return res.json();
