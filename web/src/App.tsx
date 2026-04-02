@@ -32,6 +32,7 @@ import {
   resumeSession,
   fetchXtermState,
   fetchSortieXtermState,
+  startSortieSession,
   resumeSortieSession,
   connectWebSocket,
   type Cell,
@@ -979,6 +980,8 @@ function SortieDetailPage() {
     null,
   );
 
+  const startingRef = useRef(false);
+
   const load = useCallback(async () => {
     if (!id) return;
     setSortie(await fetchSortie(id));
@@ -988,7 +991,25 @@ function SortieDetailPage() {
     load();
   }, [load, run]);
 
+  // Auto-start session on first load (PTY not yet spawned).
+  // Uses empty transcript (not ended_at) to detect "never started", because
+  // _cleanup_stale_sessions may set ended_at on server restart.
+  useEffect(() => {
+    if (
+      sortie?.session &&
+      !sortie.session.alive &&
+      !sortie.session.transcript &&
+      !startingRef.current
+    ) {
+      startingRef.current = true;
+      startSortieSession(sortie.id, sortie.session.id).then(() => load());
+    }
+  }, [sortie]);
+
   if (!sortie) return null;
+
+  const sessionReady =
+    sortie.session && (sortie.session.alive || sortie.session.transcript);
 
   return (
     <div>
@@ -1005,10 +1026,15 @@ function SortieDetailPage() {
             {new Date(sortie.created_at).toLocaleString()}
           </div>
         </div>
-        {sortie.session && (
+        {sortie.session && !sessionReady && (
+          <div className="muted" style={{ padding: "12px 0" }}>
+            Starting session...
+          </div>
+        )}
+        {sessionReady && (
           <Terminal
-            sessionId={sortie.session.id}
-            alive={sortie.session.alive}
+            sessionId={sortie.session!.id}
+            alive={sortie.session!.alive}
             onResume={async () => {
               await resumeSortieSession(sortie.id, sortie.session!.id);
               load();

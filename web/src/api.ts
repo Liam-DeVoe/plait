@@ -204,6 +204,17 @@ export async function fetchSortieXtermState(sortieId: string, sessionId: string)
   return res.arrayBuffer();
 }
 
+export async function startSortieSession(sortieId: string, sessionId: string): Promise<Session> {
+  const res = await fetch(`${BASE}/sorties/${sortieId}/sessions/${sessionId}/start`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to start session");
+  }
+  return res.json();
+}
+
 export async function resumeSortieSession(sortieId: string, sessionId: string): Promise<Session> {
   const res = await fetch(`${BASE}/sorties/${sortieId}/sessions/${sessionId}/resume`, {
     method: "POST",

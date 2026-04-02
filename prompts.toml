@@ -81,6 +81,11 @@ The branch {branch} needs attention. Investigate and fix any of the following th
    gh api graphql -f query='{{ repository(owner: "OWNER", name: "REPO") {{ pullRequest(number: PR_NUMBER) {{ reviewThreads(first: 100) {{ nodes {{ id isResolved comments(first: 1) {{ nodes {{ body }} }} }} }} }} }} }}'
    ```
 
+**Important**: GitHub API results are paginated. The REST API defaults to 30 results per page — always use `--paginate` with `gh api` REST calls. For review comments, prefer a single GraphQL query that fetches threads, comments, and reactions together to avoid silent truncation:
+   ```
+   gh api graphql -f query='{{ repository(owner: "OWNER", name: "REPO") {{ pullRequest(number: PR_NUMBER) {{ reviewThreads(first: 100) {{ nodes {{ id isResolved comments(first: 10) {{ nodes {{ databaseId body author {{ login }} reactions(first: 10) {{ nodes {{ content user {{ login }} }} }} }} }} }} }} }} }} }}'
+   ```
+
 Never reply to comments on github; you should treat your interaction with github as read-only except for pushing commits and resolving review threads.
 
 After fixing, make sure the code compiles and passes basic checks. Then commit and push your fixes.

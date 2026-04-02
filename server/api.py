@@ -33,6 +33,14 @@ from server.sessions import (
 logger = logging.getLogger(__name__)
 
 
+def _sortie_repo_worktrees(sortie_id: str) -> dict[str, str]:
+    """Reconstruct the repo_id -> worktree path mapping for a sortie."""
+    return {
+        repo_id: str(git.WORKTREE_ROOT / f"sortie-{sortie_id}" / repo_id)
+        for repo_id in config.get_repos()
+    }
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
@@ -536,11 +544,9 @@ async def create_sortie():
     await db.create_sortie(sortie)
 
     try:
-        repo_worktrees = await git.create_sortie_worktrees(sortie.id)
+        await git.create_sortie_worktrees(sortie.id)
     except RuntimeError:
         raise HTTPException(status_code=500, detail="Failed to create sortie worktrees")
-
-    exploration_dir = str(git.WORKTREE_ROOT / f"sortie-{sortie.id}")
 
     session = Session(
         sortie_id=sortie.id,
@@ -549,9 +555,6 @@ async def create_sortie():
     )
     await db.create_session(session)
     await db.update_sortie(sortie.id, session_id=session.id)
-
-    cmd, cwd = user_sortie_cmd(session.id, sortie.id, exploration_dir, repo_worktrees)
-    spawn_session(session.id, cmd, cwd)
 
     result = asdict(sortie)
     result["session_id"] = session.id
@@ -615,6 +618,23 @@ async def resume_sortie_session(sortie_id: str, session_id: str):
     spawn_session(session.id, cmd, cwd, idle_timeout=idle_timeout)
 
     session.ended_at = None
+    return _session_dict(session)
+
+
+@app.post("/sorties/{sortie_id}/sessions/{session_id}/start")
+async def start_sortie_session(sortie_id: str, session_id: str):
+    session = await db.get_session(session_id)
+    if not session or session.sortie_id != sortie_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if pty_manager.is_alive(session_id):
+        raise HTTPException(status_code=400, detail="Session is already alive")
+
+    exploration_dir = str(git.WORKTREE_ROOT / f"sortie-{sortie_id}")
+    repo_worktrees = _sortie_repo_worktrees(sortie_id)
+    cmd, cwd = user_sortie_cmd(session.id, sortie_id, exploration_dir, repo_worktrees)
+    spawn_session(session.id, cmd, cwd)
+
     return _session_dict(session)
 
 
