@@ -108,10 +108,11 @@ class PtyManager:
             os.close(pty_session.master_fd)
         except OSError:
             pass
+        pty_session.master_fd = -1
 
     def write(self, session_id: str, data: bytes) -> None:
         pty_session = self._sessions.get(session_id)
-        if pty_session is None:
+        if pty_session is None or pty_session.master_fd == -1:
             return
         try:
             os.write(pty_session.master_fd, data)
@@ -120,7 +121,7 @@ class PtyManager:
 
     def resize(self, session_id: str, rows: int, cols: int) -> None:
         pty_session = self._sessions.get(session_id)
-        if pty_session is None:
+        if pty_session is None or pty_session.master_fd == -1:
             return
         winsize = struct.pack("HHHH", rows, cols, 0, 0)
         try:
