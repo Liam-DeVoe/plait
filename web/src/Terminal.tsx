@@ -31,10 +31,11 @@ interface TerminalProps {
   sessionId: string;
   cellId: string;
   alive: boolean;
+  autoFocus?: boolean;
   onResume: () => Promise<void>;
 }
 
-export default function Terminal({ sessionId, cellId, alive, onResume }: TerminalProps) {
+export default function Terminal({ sessionId, cellId, alive, autoFocus, onResume }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const resumingRef = useRef(false);
@@ -103,6 +104,10 @@ export default function Terminal({ sessionId, cellId, alive, onResume }: Termina
         ws.send(
           JSON.stringify({ type: "resize", rows: term.rows, cols: term.cols })
         );
+        if (autoFocus) {
+          container.scrollIntoView({ behavior: "smooth", block: "center" });
+          term.focus();
+        }
       };
 
       ws.onmessage = (event) => {
@@ -113,7 +118,16 @@ export default function Terminal({ sessionId, cellId, alive, onResume }: Termina
         term.write("\r\n\x1b[90m[session ended]\x1b[0m\r\n");
       };
 
-      term.attachCustomKeyEventHandler(() => true);
+      term.attachCustomKeyEventHandler((e) => {
+        // Cmd+Backspace -> kill line (Ctrl+U)
+        if (e.metaKey && e.key === "Backspace" && e.type === "keydown") {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "input", data: "\x15" }));
+          }
+          return false;
+        }
+        return true;
+      });
 
       term.onData((data) => {
         if (ws.readyState === WebSocket.OPEN) {
@@ -151,10 +165,17 @@ export default function Terminal({ sessionId, cellId, alive, onResume }: Termina
         await onResume();
       };
 
-      const disposable = term.onData(doResume);
-      container.addEventListener("mousedown", doResume);
+      // Delay attaching resume listeners so replayed xterm state
+      // (which may re-enable focus reporting) doesn't immediately
+      // trigger a resume via onData or mousedown.
+      let disposable = { dispose: () => {} };
+      const attachTimer = setTimeout(() => {
+        disposable = term.onData(doResume);
+        container.addEventListener("mousedown", doResume);
+      }, 500);
 
       cleanup = () => {
+        clearTimeout(attachTimer);
         disposable.dispose();
         container.removeEventListener("mousedown", doResume);
       };
@@ -166,7 +187,7 @@ export default function Terminal({ sessionId, cellId, alive, onResume }: Termina
       cleanup();
       term.dispose();
     };
-  }, [sessionId, alive]);
+  }, [sessionId, alive, autoFocus]);
 
   return (
     <div
