@@ -657,6 +657,9 @@ function CellDetailPage() {
               </span>
             </div>
             <div className="cell-detail__badges">
+              {cell.status === "archived" && (
+                <StatusBadge status="archived" label="Archived" />
+              )}
               <StatusBadge
                 status={cell.ci_status}
                 label={`CI: ${cell.ci_status}`}
