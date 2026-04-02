@@ -304,13 +304,16 @@ async def test_resume_session(client, mock_pty):
     cell_id = create_resp.json()["id"]
     c, _, _ = client
 
-    # Create and stop a session
+    # Create a session, then simulate it dying
     resp = await c.post(f"/cells/{cell_id}/sessions", json={})
     session_id = resp.json()["id"]
-    await c.post(f"/cells/{cell_id}/sessions/{session_id}/stop")
 
-    # Resume it — mock needs is_alive to return False first (stopped), then True (resumed)
+    # Mark the session as no longer alive and set ended_at
     mock_pty.is_alive.return_value = False
+    from server import db
+
+    await db.update_session(session_id, ended_at="2024-01-01T00:00:00+00:00")
+
     resp = await c.post(f"/cells/{cell_id}/sessions/{session_id}/resume")
     assert resp.status_code == 200
     assert resp.json()["ended_at"] is None
