@@ -53,7 +53,7 @@ All Claude interactions go through `server/claude.py`, which shells out to `clau
 
 SQLite via `aiosqlite` (`server/db.py`). Each function opens its own connection (no connection pooling). The DB file is `orrery.db` at the project root. Schema is auto-created on every `get_db()` call via `CREATE TABLE IF NOT EXISTS`.
 
-No migration code in the codebase. When a schema change is needed, apply it directly to the production `orrery.db` via `sqlite3` (single-user tool, no other environments to worry about). Do not add migration logic to `init_db` or anywhere else.
+**NEVER delete or recreate the database.** When a schema change is needed, write a migration SQL script (e.g. `ALTER TABLE ... ADD COLUMN ...`) and run it against the production `orrery.db` via `sqlite3` to migrate in-place, preserving all existing data. Always ask before running the migration. Do not add migration logic to `init_db` or anywhere else — this is a single-user tool with one database.
 
 Three tables: `cells`, `sorties`, `sessions`. The `sorties.repos` column stores a JSON array. Session trigger types: `"merge"`, `"ci_fix"`, `"sortie"`, or `None` for user sessions. Session `role` is `"daemon"` or `"user"`.
 
