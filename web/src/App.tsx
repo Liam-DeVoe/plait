@@ -14,6 +14,7 @@ import {
   fetchCells,
   fetchCell,
   createCell,
+  createLocalCell,
   archiveCell,
   triggerSync,
   deleteCell,
@@ -244,8 +245,8 @@ function CreateCellForm({ onCreated }: { onCreated: () => void }) {
 
   if (!open) {
     return (
-      <div className="btn btn--blue" onClick={() => setOpen(true)}>
-        New Cell
+      <div className="btn btn--gray" onClick={() => setOpen(true)}>
+        Import Cell
       </div>
     );
   }
@@ -298,6 +299,11 @@ function CellsPage() {
     loadCells();
   }, [loadCells, tick]);
 
+  const handleNewLocalCell = async (repo: string) => {
+    await createLocalCell(repo);
+    loadCells();
+  };
+
   // Group cells by repo
   const grouped = new Map<string, Cell[]>();
   for (const cell of cells) {
@@ -315,7 +321,7 @@ function CellsPage() {
 
       {cells.length === 0 ? (
         <div className="empty-state">
-          <div>No cells yet. Create one to get started.</div>
+          <div>No cells yet. Import one or create a sortie to get started.</div>
         </div>
       ) : (
         <div className="cells-page__groups">
@@ -324,6 +330,13 @@ function CellsPage() {
               <div className="cells-page__group-header">
                 <div className="cells-page__group-title">
                   {repo.split("/").pop()}
+                </div>
+                <div
+                  className="btn btn--sm btn--blue cells-page__add-btn"
+                  onClick={() => handleNewLocalCell(repo)}
+                  title="New cell"
+                >
+                  +
                 </div>
               </div>
               <table className="table">

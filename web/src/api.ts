@@ -61,6 +61,19 @@ export async function createCell(prUrl: string): Promise<Cell> {
   return res.json();
 }
 
+export async function createLocalCell(repo: string): Promise<Cell> {
+  const res = await fetch(`${BASE}/cells`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ repo }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to create cell");
+  }
+  return res.json();
+}
+
 export async function archiveCell(id: string): Promise<Cell> {
   const res = await fetch(`${BASE}/cells/${id}/archive`, { method: "POST" });
   return res.json();

@@ -429,6 +429,9 @@
   background: #f9fafb;
   border-bottom: 1px solid #e5e7eb;
   padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
 }
 
 .cells-page__group-title {
@@ -436,6 +439,12 @@
   line-height: 20px;
   font-weight: 600;
   color: #374151;
+}
+
+.cells-page__add-btn {
+  font-size: 16px;
+  line-height: 16px;
+  padding: 2px 8px;
 }
 
 /* === CellDetail === */
