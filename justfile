@@ -1,5 +1,5 @@
 server:
-    uv run uvicorn server.api:app --reload --port 8000
+    .venv/bin/uvicorn server.api:app --reload --port 8000
 
 web:
     cd web && npm run dev
