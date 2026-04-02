@@ -308,8 +308,8 @@ async def test_resume_session(client, mock_pty):
     resp = await c.post(f"/cells/{cell_id}/sessions", json={})
     session_id = resp.json()["id"]
 
-    # Mark the session as no longer alive and set ended_at
-    mock_pty.is_alive.return_value = False
+    # Simulate the PTY dying and mark ended in DB
+    await mock_pty.terminate(session_id)
     from server import db
 
     await db.update_session(session_id, ended_at="2024-01-01T00:00:00+00:00")

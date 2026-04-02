@@ -416,7 +416,7 @@
 }
 
 .cell-row__actions {
-  display: flex;
+  display: inline-flex;
   gap: 8px;
 }
 
