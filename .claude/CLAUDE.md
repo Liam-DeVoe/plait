@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Orrery** is a local development tool for managing multiple PRs across the hegel repositories. It automatically keeps branches rebased on main (using Claude to resolve conflicts), monitors CI, and provides a web UI for managing cross-repo work.
+**Orrery** is a local development tool for managing multiple PRs across repositories. It automatically keeps branches rebased on main (using Claude to resolve conflicts), monitors CI, and provides a web UI for managing cross-repo work.
 
 ## Glossary
 
 - **Orrery** -- the tool itself
-- **Sortie** -- a cross-repo initiative (e.g. "make this change across hegel repos"). Spawns one cell per repo.
+- **Sortie** -- a cross-repo initiative (e.g. "make this change across all repos"). Spawns one cell per repo.
 - **Cell** -- a per-repo unit of work. Contains a git worktree, branch, PR link, CI status, and sessions. Lifecycle: active -> archived (on merge) -> optionally re-opened.
 - **Session** -- a Claude conversation scoped to a cell's worktree. Created by the daemon (rebase, ci_fix, sortie triggers) or by the user via the API.
 - **Daemon** -- the background async task that polls every 5 minutes, processing all active cells: rebasing behind-main branches, checking CI status, and spawning Claude to fix failures.
@@ -59,7 +59,7 @@ Three tables: `cells`, `sorties`, `sessions`. The `sorties.repos` column stores 
 
 ### Git/Worktree Layout
 
-`server/git.py` manages worktrees. `REPO_ROOT` is the parent of the coordination directory (where all hegel repos live as siblings). `WORKTREE_ROOT` is `./worktrees/`. Each cell gets a worktree at `worktrees/<cell-uuid>/`, created from either an existing remote branch or a new branch off `origin/main`. Repos are identified by their GitHub `owner/repo` string (e.g. `hegeldev/hegel-rust`), and `git.repo_path()` resolves that to the sibling directory name.
+`server/git.py` manages worktrees. `REPO_ROOT` is the parent of the coordination directory (where all repos live as siblings). `WORKTREE_ROOT` is `./worktrees/`. Each cell gets a worktree at `worktrees/<cell-uuid>/`, created from either an existing remote branch or a new branch off `origin/main`. Repos are identified by their GitHub `owner/repo` string (e.g. `acme/my-repo`), and `git.repo_path()` resolves that to the sibling directory name.
 
 ### Frontend
 

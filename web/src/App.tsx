@@ -300,7 +300,7 @@ function CreateCellForm({ onCreated }: { onCreated: () => void }) {
       <div className="flex gap-3">
         <input
           type="text"
-          placeholder="https://github.com/hegeldev/hegel-rust/pull/42"
+          placeholder="https://github.com/owner/repo/pull/42"
           value={prUrl}
           onChange={(e) => setPrUrl(e.target.value)}
           required
@@ -727,7 +727,7 @@ function CreateSortieForm({ onCreated }: { onCreated: () => void }) {
       />
       <input
         type="text"
-        placeholder="hegeldev/hegel-rust, hegeldev/hegel-go, ..."
+        placeholder="owner/repo-one, owner/repo-two, ..."
         value={reposText}
         onChange={(e) => setReposText(e.target.value)}
         required

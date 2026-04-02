@@ -22,7 +22,7 @@ async def run(*args: str, cwd: str | Path | None = None) -> tuple[int, str, str]
 
 def repo_path(repo: str) -> Path:
     """Path to the main clone of a repo. Expects repos to be siblings of
-    the coordination directory, e.g. ../hegel-rust for hegeldev/hegel-rust."""
+    the coordination directory, e.g. ../my-repo for owner/my-repo."""
     name = repo.split("/")[-1]
     return REPO_ROOT / name
 

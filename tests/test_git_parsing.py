@@ -14,14 +14,14 @@ def test_repo_path_extracts_name():
     original = git_module.REPO_ROOT
     git_module.REPO_ROOT = Path("/fake/root")
     try:
-        assert repo_path("hegeldev/hegel-rust") == Path("/fake/root/hegel-rust")
+        assert repo_path("acme/some-repo") == Path("/fake/root/some-repo")
         assert repo_path("owner/my-repo") == Path("/fake/root/my-repo")
     finally:
         git_module.REPO_ROOT = original
 
 
 async def test_get_pr_info_parses_url(mock_gh):
-    pr_url = "https://github.com/hegeldev/hegel-rust/pull/42"
+    pr_url = "https://github.com/acme/some-repo/pull/42"
     mock_gh.set_response(
         "pr view",
         0,
@@ -29,7 +29,7 @@ async def test_get_pr_info_parses_url(mock_gh):
     )
 
     info = await get_pr_info_from_url(pr_url)
-    assert info["repo"] == "hegeldev/hegel-rust"
+    assert info["repo"] == "acme/some-repo"
     assert info["branch"] == "my-branch"
     assert info["number"] == 42
     assert info["url"] == pr_url

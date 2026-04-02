@@ -4,6 +4,8 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from server.daemon_config import DAEMON_ALLOWED_TOOLS
+
 
 async def run_claude_headless(
     prompt: str,
@@ -19,7 +21,9 @@ async def run_claude_headless(
     If on_output is provided, it is called with the accumulated stdout so far
     each time a new line is read, enabling streaming transcript updates.
     """
-    args = ["claude", "-p", prompt]
+    worktree = str(Path(cwd).resolve())
+    allowed = [t.format(worktree=worktree) for t in DAEMON_ALLOWED_TOOLS]
+    args = ["claude", "-p", prompt, "--allowedTools", *allowed]
     if session_id:
         args.extend(["--session-id", session_id])
     proc = await asyncio.create_subprocess_exec(
