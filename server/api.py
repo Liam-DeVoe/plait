@@ -138,6 +138,9 @@ async def create_cell(req: CreateCellRequest):
     if cell.pr_number:
         ci = await git.get_ci_status(cell.repo, cell.pr_number)
         cell.ci_status = CIStatus(ci)
+        cell.pr_comment_count = await git.get_pr_comment_count(
+            cell.repo, cell.pr_number
+        )
 
     await db.create_cell(cell)
     return await _cell_dict(cell)

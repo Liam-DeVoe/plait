@@ -110,19 +110,23 @@ async def process_cell(cell: Cell) -> None:
                 await db.update_cell(cell.id, sync_status=SyncStatus.conflict)
                 await notify("cell_updated", {"id": cell.id, "sync_status": "conflict"})
 
-        # --- Update CI status ---
-        ci_status = None
+        # --- Poll PR state ---
+        needs_tend = has_conflicts or behind
         if cell.pr_number:
             ci = await git.get_ci_status(cell.repo, cell.pr_number)
             ci_status = CIStatus(ci)
             if ci_status != cell.ci_status:
                 await db.update_cell(cell.id, ci_status=ci_status)
                 await notify("cell_updated", {"id": cell.id, "ci_status": ci})
+                needs_tend = True
 
-        # --- Spawn a fix session if anything new needs attention ---
-        needs_fix = has_conflicts or ci_status == CIStatus.failing
+            comment_count = await git.get_pr_comment_count(cell.repo, cell.pr_number)
+            if comment_count != cell.pr_comment_count:
+                await db.update_cell(cell.id, pr_comment_count=comment_count)
+                needs_tend = True
 
-        if needs_fix and await _should_attempt(cell.id, "tend"):
+        # --- Spawn a tend session if anything changed ---
+        if needs_tend and await _should_attempt(cell.id, "tend"):
             logger.info(f"Cell {cell.id} needs fixing, invoking Claude")
             session = Session(
                 cell_id=cell.id,

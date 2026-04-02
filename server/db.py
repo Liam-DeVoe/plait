@@ -183,6 +183,7 @@ def _row_to_cell(row: aiosqlite.Row) -> Cell:
         pr_number=row["pr_number"],
         pr_url=row["pr_url"],
         ci_status=CIStatus(row["ci_status"]),
+        pr_comment_count=row["pr_comment_count"],
         sync_status=SyncStatus(row["sync_status"]),
         status=CellStatus(row["status"]),
         created_at=row["created_at"],

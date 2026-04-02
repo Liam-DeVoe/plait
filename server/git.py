@@ -268,6 +268,30 @@ async def get_ci_status(repo_id: str, pr_number: int) -> str:
     return "unknown"
 
 
+async def get_pr_comment_count(repo_id: str, pr_number: int) -> int:
+    """Get the total number of comments on a PR (issue comments + review comments)."""
+    upstream = config.get_repo(repo_id).upstream
+    rc, out, err = await run(
+        "gh",
+        "pr",
+        "view",
+        str(pr_number),
+        "--repo",
+        upstream,
+        "--json",
+        "comments,reviews",
+    )
+    if rc != 0:
+        return 0
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return 0
+    comments = len(data.get("comments", []))
+    reviews = len(data.get("reviews", []))
+    return comments + reviews
+
+
 async def get_ci_failure_logs(repo_id: str, branch: str) -> str:
     """Get CI failure logs for the most recent failing run on a branch."""
     upstream = config.get_repo(repo_id).upstream
