@@ -9,10 +9,12 @@ import {
   useNavigate,
   Outlet,
   useOutletContext,
+  useLocation,
 } from "react-router-dom";
 import {
   fetchCells,
   fetchCell,
+  fetchRepos,
   createCell,
   createLocalCell,
   archiveCell,
@@ -30,6 +32,7 @@ import {
   type Cell,
   type Session,
   type Sortie,
+  type Repo,
 } from "./api";
 import Terminal from "./Terminal";
 import "./App.css";
@@ -221,7 +224,7 @@ function CellRow({
   );
 }
 
-function CreateCellForm({ onCreated }: { onCreated: () => void }) {
+function CreateCellForm({ repos, onCreated }: { repos: Repo[]; onCreated: () => void }) {
   const [prUrl, setPrUrl] = useState("");
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -291,9 +294,14 @@ function CellsPage() {
   const { tick } = useOutletContext<LayoutContext>();
   const navigate = useNavigate();
   const [cells, setCells] = useState<Cell[]>([]);
+  const [repos, setRepos] = useState<Repo[]>([]);
 
   const loadCells = useCallback(async () => {
     setCells(await fetchCells());
+  }, []);
+
+  useEffect(() => {
+    fetchRepos().then(setRepos);
   }, []);
 
   useEffect(() => {
@@ -302,27 +310,30 @@ function CellsPage() {
 
   const handleNewLocalCell = async (repo: string) => {
     const cell = await createLocalCell(repo);
-    navigate(`/cells/${cell.id}`);
+    const session = await createInteractiveSession(cell.id);
+    navigate(`/cells/${cell.id}`, { state: { autoFocusSessionId: session.id } });
   };
 
-  // Group cells by repo
+  // Group cells by repo, include repos with no cells
   const grouped = new Map<string, Cell[]>();
+  for (const repo of repos) {
+    grouped.set(repo.id, []);
+  }
   for (const cell of cells) {
-    const repo = cell.repo;
-    if (!grouped.has(repo)) grouped.set(repo, []);
-    grouped.get(repo)!.push(cell);
+    if (!grouped.has(cell.repo)) grouped.set(cell.repo, []);
+    grouped.get(cell.repo)!.push(cell);
   }
 
   return (
     <>
       <div className="page-header">
         <div className="page-title">Cells</div>
-        <CreateCellForm onCreated={loadCells} />
+        <CreateCellForm repos={repos} onCreated={loadCells} />
       </div>
 
-      {cells.length === 0 ? (
+      {repos.length === 0 ? (
         <div className="empty-state">
-          <div>No cells yet. Import one or create a sortie to get started.</div>
+          <div>No repos configured. Add repos to repos.json to get started.</div>
         </div>
       ) : (
         <div className="cells-page__groups">
@@ -330,7 +341,7 @@ function CellsPage() {
             <div key={repo} className="card card--clipped">
               <div className="cells-page__group-header">
                 <div className="cells-page__group-title">
-                  {repo.split("/").pop()}
+                  {repo}
                 </div>
                 <div
                   className="btn btn--sm btn--blue cells-page__add-btn"
@@ -340,35 +351,41 @@ function CellsPage() {
                   +
                 </div>
               </div>
-              <table className="table">
-                <thead className="table__head">
-                  <tr>
-                    <th className="table__header-cell">Branch</th>
-                    <th className="table__header-cell">PR</th>
-                    <th className="table__header-cell">CI</th>
-                    <th className="table__header-cell">Sync</th>
-                    <th className="table__header-cell">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {repoCells.map((cell) => (
-                    <CellRow
-                      key={cell.id}
-                      cell={cell}
-                      onSync={() => triggerSync(cell.id)}
-                      onArchive={async () => {
-                        await archiveCell(cell.id);
-                        loadCells();
-                      }}
-                      onDelete={async () => {
-                        await deleteCell(cell.id);
-                        loadCells();
-                      }}
-                      onVSCode={() => openInVSCode(cell.id)}
-                    />
-                  ))}
-                </tbody>
-              </table>
+              {repoCells.length > 0 ? (
+                <table className="table">
+                  <thead className="table__head">
+                    <tr>
+                      <th className="table__header-cell">Branch</th>
+                      <th className="table__header-cell">PR</th>
+                      <th className="table__header-cell">CI</th>
+                      <th className="table__header-cell">Sync</th>
+                      <th className="table__header-cell">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {repoCells.map((cell) => (
+                      <CellRow
+                        key={cell.id}
+                        cell={cell}
+                        onSync={() => triggerSync(cell.id)}
+                        onArchive={async () => {
+                          await archiveCell(cell.id);
+                          loadCells();
+                        }}
+                        onDelete={async () => {
+                          await deleteCell(cell.id);
+                          loadCells();
+                        }}
+                        onVSCode={() => openInVSCode(cell.id)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="muted" style={{ padding: "12px 16px" }}>
+                  No cells
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -380,12 +397,15 @@ function CellsPage() {
 function CellDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { tick } = useOutletContext<LayoutContext>();
   const [cell, setCell] = useState<(Cell & { sessions: Session[] }) | null>(
     null,
   );
   const [launching, setLaunching] = useState(false);
-  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
+    (location.state as any)?.autoFocusSessionId ?? null,
+  );
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -447,7 +467,7 @@ function CellDetailPage() {
         <div className="cell-detail__header">
           <div>
             <div className="cell-detail__title">
-              {cell.repo.split("/").pop()}{" "}
+              {cell.repo}{" "}
               <span className="cell-detail__title-branch">
                 / {cell.branch}
               </span>
@@ -669,27 +689,37 @@ function CollapsibleSession({
 
 function CreateSortieForm({ onCreated }: { onCreated: () => void }) {
   const [prompt, setPrompt] = useState("");
-  const [reposText, setReposText] = useState("");
+  const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
+  const [repos, setRepos] = useState<Repo[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (open) fetchRepos().then(setRepos);
+  }, [open]);
+
+  const toggleRepo = (id: string) => {
+    setSelectedRepos((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
   const handleSubmit = async () => {
     if (!prompt.trim()) return;
-    const repos = reposText
-      .split(",")
-      .map((r) => r.trim())
-      .filter(Boolean);
-    if (repos.length === 0) {
-      setError("Provide at least one repo");
+    if (selectedRepos.size === 0) {
+      setError("Select at least one repo");
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      await createSortie(prompt, repos);
+      await createSortie(prompt, [...selectedRepos]);
       setPrompt("");
-      setReposText("");
+      setSelectedRepos(new Set());
       setOpen(false);
       onCreated();
     } catch (err: any) {
@@ -717,16 +747,18 @@ function CreateSortieForm({ onCreated }: { onCreated: () => void }) {
         rows={3}
         className="form__textarea"
       />
-      <input
-        type="text"
-        placeholder="owner/repo-one, owner/repo-two, ..."
-        value={reposText}
-        onChange={(e) => setReposText(e.target.value)}
-        className="form__input form__input--full"
-        onKeyDown={(e) => {
-          if (e.key === "Enter") handleSubmit();
-        }}
-      />
+      <div className="form__checkboxes">
+        {repos.map((repo) => (
+          <label key={repo.id} className="form__checkbox-label">
+            <input
+              type="checkbox"
+              checked={selectedRepos.has(repo.id)}
+              onChange={() => toggleRepo(repo.id)}
+            />
+            {repo.id}
+          </label>
+        ))}
+      </div>
       <div className="form__actions">
         <div
           className={`btn btn--blue${loading ? " btn--disabled" : ""}`}
@@ -893,7 +925,7 @@ function SortieDetailPage() {
                 >
                   <td className="table__cell">
                     <div className="sortie-detail__cell-repo">
-                      {cell.repo.split("/").pop()}
+                      {cell.repo}
                     </div>
                     <div className="sortie-detail__cell-branch">
                       {cell.branch}

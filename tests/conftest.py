@@ -41,7 +41,7 @@ class GitEnv:
 
     remote: Path  # bare repo acting as "origin"
     clone: Path  # local clone of the remote
-    repo_name: str  # fake repo name like "testorg/testrepo"
+    repo_id: str  # config key like "testrepo"
 
     def run_git(self, *args: str, cwd: Path | None = None) -> str:
         result = subprocess.run(
@@ -78,10 +78,11 @@ class GitEnv:
 @pytest.fixture
 def git_env(tmp_path) -> GitEnv:
     """Create a temporary git environment with a bare remote and clone.
-    Also patches git.WORKTREE_ROOT and git.REPO_ROOT to use temp dirs."""
+    Also patches git.WORKTREE_ROOT and the config module to use temp dirs."""
+    import server.config as config_module
     import server.git as git_module
 
-    repo_name = "testorg/testrepo"
+    repo_id = "testrepo"
 
     def _git(*args, cwd=None):
         subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
@@ -108,21 +109,26 @@ def git_env(tmp_path) -> GitEnv:
     _git("commit", "-m", "initial", cwd=clone)
     _git("push", "-u", "origin", "main", cwd=clone)
 
-    env = GitEnv(remote=remote, clone=clone, repo_name=repo_name)
+    env = GitEnv(remote=remote, clone=clone, repo_id=repo_id)
 
-    # Patch git module to use our temp dirs
+    # Patch git module to use our temp worktree dir
     worktree_root = tmp_path / "worktrees"
     worktree_root.mkdir()
 
     original_worktree_root = git_module.WORKTREE_ROOT
-    original_repo_root = git_module.REPO_ROOT
     git_module.WORKTREE_ROOT = worktree_root
-    git_module.REPO_ROOT = tmp_path
+
+    # Patch config to return our test repo
+    from server.config import Repo
+
+    test_repo = Repo(id=repo_id, path=clone, upstream="testorg/testrepo")
+    original_repos = config_module._repos
+    config_module._repos = {repo_id: test_repo}
 
     yield env
 
     git_module.WORKTREE_ROOT = original_worktree_root
-    git_module.REPO_ROOT = original_repo_root
+    config_module._repos = original_repos
 
 
 # --- Mock gh CLI ---

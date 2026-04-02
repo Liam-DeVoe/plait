@@ -17,10 +17,10 @@ from server.models import (
 
 async def _create_cell_in_db(git_env, branch: str, cell_id: str) -> Cell:
     """Helper: create a worktree and DB record for a cell."""
-    wt_path = await git.create_worktree(git_env.repo_name, branch, cell_id)
+    wt_path = await git.create_worktree(git_env.repo_id, branch, cell_id)
     cell = Cell(
         id=cell_id,
-        repo=git_env.repo_name,
+        repo=git_env.repo_id,
         branch=branch,
         worktree_path=wt_path,
     )
@@ -218,20 +218,20 @@ async def test_spawn_sortie_cell(git_env, init_db, mock_claude):
     Claude is responsible for pushing and creating the PR (via hooks),
     so the daemon only creates the cell and runs Claude.
     """
-    sortie = Sortie(prompt="add tests", repos=[git_env.repo_name])
+    sortie = Sortie(prompt="add tests", repos=[git_env.repo_id])
     await db.create_sortie(sortie)
 
     # Mock Claude to succeed
     mock_claude.return_value = (True, "Added tests")
 
-    await spawn_sortie_cell(sortie, git_env.repo_name)
+    await spawn_sortie_cell(sortie, git_env.repo_id)
 
     # Verify cell was created
     cells = await db.list_cells()
     assert len(cells) == 1
     cell = cells[0]
     assert cell.sortie_id == sortie.id
-    assert cell.repo == git_env.repo_name
+    assert cell.repo == git_env.repo_id
     assert cell.branch == f"sortie/{sortie.id[:8]}"
     # No PR yet — Claude handles that via hooks
     assert cell.pr_number is None

@@ -39,7 +39,7 @@ class SessionRole(str, Enum):
 class Cell:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     sortie_id: str | None = None
-    repo: str = ""  # e.g. "owner/repo-name"
+    repo: str = ""  # repo ID from repos.json config
     branch: str = ""
     worktree_path: str = ""
     pr_number: int | None = None

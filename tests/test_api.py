@@ -20,7 +20,10 @@ async def client(init_db, git_env, mock_gh):
 
 def _setup_gh_for_pr(mock_gh, git_env, branch="test-branch", pr_number=42):
     """Configure mock_gh to return valid PR info for a test PR URL."""
-    pr_url = f"https://github.com/{git_env.repo_name}/pull/{pr_number}"
+    from server.config import get_repo
+
+    upstream = get_repo(git_env.repo_id).upstream
+    pr_url = f"https://github.com/{upstream}/pull/{pr_number}"
     mock_gh.set_response(
         "pr view",
         0,
@@ -54,7 +57,7 @@ async def test_create_cell(client):
     resp = await _create_cell_via_api(client)
     assert resp.status_code == 200
     data = resp.json()
-    assert data["repo"] == client[1].repo_name
+    assert data["repo"] == client[1].repo_id
     assert data["branch"] == "test-branch"
     assert data["pr_number"] == 42
     assert data["status"] == "active"
@@ -130,10 +133,10 @@ async def test_delete_cell_not_found(client):
 async def test_create_local_cell(client):
     """Creating a cell with just repo should create a local cell with generic branch."""
     c, git_env, _ = client
-    resp = await c.post("/cells", json={"repo": git_env.repo_name})
+    resp = await c.post("/cells", json={"repo": git_env.repo_id})
     assert resp.status_code == 200
     data = resp.json()
-    assert data["repo"] == git_env.repo_name
+    assert data["repo"] == git_env.repo_id
     assert data["branch"].startswith("cell/")
     assert data["pr_number"] is None
     assert data["pr_url"] is None
@@ -171,23 +174,23 @@ async def test_list_cells_filter_by_status(client):
 
 
 async def test_create_sortie(client):
-    c, _, _ = client
+    c, git_env, _ = client
     resp = await c.post(
         "/sorties",
         json={
             "prompt": "update everything",
-            "repos": ["org/a", "org/b"],
+            "repos": [git_env.repo_id],
         },
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["prompt"] == "update everything"
-    assert data["repos"] == ["org/a", "org/b"]
+    assert data["repos"] == [git_env.repo_id]
 
 
 async def test_list_sorties(client):
-    c, _, _ = client
-    await c.post("/sorties", json={"prompt": "first", "repos": ["a"]})
+    c, git_env, _ = client
+    await c.post("/sorties", json={"prompt": "first", "repos": [git_env.repo_id]})
     resp = await c.get("/sorties")
     assert resp.status_code == 200
     data = resp.json()
@@ -203,7 +206,7 @@ async def test_sortie_derived_status(client):
     # Create a sortie — status should be active (no cells archived yet)
     resp = await c.post(
         "/sorties",
-        json={"prompt": "update", "repos": [git_env.repo_name]},
+        json={"prompt": "update", "repos": [git_env.repo_id]},
     )
     sortie_id = resp.json()["id"]
 

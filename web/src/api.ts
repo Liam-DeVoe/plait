@@ -35,7 +35,18 @@ export interface Sortie {
   cells?: Cell[];
 }
 
+export interface Repo {
+  id: string;
+  path: string;
+  upstream: string;
+}
+
 const BASE = "/api";
+
+export async function fetchRepos(): Promise<Repo[]> {
+  const res = await fetch(`${BASE}/repos`);
+  return res.json();
+}
 
 export async function fetchCells(status?: string): Promise<Cell[]> {
   const params = status ? `?status=${status}` : "";

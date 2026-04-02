@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from server import claude, daemon, db, git
+from server import claude, config, daemon, db, git
 from server.models import (
     Cell,
     CellStatus,
@@ -78,6 +78,18 @@ async def websocket_endpoint(ws: WebSocket):
         ws_connections.remove(ws)
 
 
+# --- Repo endpoints ---
+
+
+@app.get("/repos")
+async def list_repos():
+    repos = config.get_repos()
+    return [
+        {"id": r.id, "path": str(r.path), "upstream": r.upstream}
+        for r in repos.values()
+    ]
+
+
 # --- Cell endpoints ---
 
 
@@ -96,13 +108,18 @@ async def create_cell(req: CreateCellRequest):
             raise HTTPException(status_code=400, detail=str(e))
 
         cell = Cell(
-            repo=pr_info["repo"],
+            repo=pr_info["repo_id"],
             branch=pr_info["branch"],
             worktree_path="",
             pr_number=pr_info["number"],
             pr_url=pr_info["url"],
         )
     elif req.repo:
+        # Validate repo ID exists in config
+        try:
+            config.get_repo(req.repo)
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Unknown repo: {req.repo!r}")
         # Create local cell with generic branch name
         cell = Cell(
             repo=req.repo,
@@ -545,6 +562,13 @@ class CreateSortieRequest(BaseModel):
 
 @app.post("/sorties")
 async def create_sortie(req: CreateSortieRequest):
+    # Validate all repo IDs exist in config
+    for repo_id in req.repos:
+        try:
+            config.get_repo(repo_id)
+        except KeyError:
+            raise HTTPException(status_code=400, detail=f"Unknown repo: {repo_id!r}")
+
     sortie = Sortie(prompt=req.prompt, repos=req.repos)
     await db.create_sortie(sortie)
 

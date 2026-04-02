@@ -5,8 +5,9 @@ import json
 import re
 from pathlib import Path
 
+from server import config
+
 WORKTREE_ROOT = Path(__file__).parent.parent / "worktrees"
-REPO_ROOT = Path(__file__).parent.parent.parent
 
 
 async def run(*args: str, cwd: str | Path | None = None) -> tuple[int, str, str]:
@@ -20,51 +21,34 @@ async def run(*args: str, cwd: str | Path | None = None) -> tuple[int, str, str]
     return proc.returncode, stdout.decode(), stderr.decode()
 
 
-def repo_path(repo: str) -> Path:
-    """Path to the main clone of a repo. Expects repos to be siblings of
-    the coordination directory, e.g. ../my-repo for owner/my-repo."""
-    name = repo.split("/")[-1]
-    return REPO_ROOT / name
-
-
-async def ensure_repo_cloned(repo: str) -> Path:
-    path = repo_path(repo)
-    if path.exists():
-        return path
-    url = f"https://github.com/{repo}.git"
-    rc, out, err = await run("git", "clone", url, str(path))
+async def fetch_origin(repo_id: str) -> None:
+    repo = config.get_repo(repo_id)
+    rc, out, err = await run("git", "fetch", "origin", cwd=repo.path)
     if rc != 0:
-        raise RuntimeError(f"Failed to clone {repo}: {err}")
-    return path
+        raise RuntimeError(f"Failed to fetch origin for {repo_id}: {err}")
 
 
-async def fetch_origin(repo: str) -> None:
-    path = repo_path(repo)
-    rc, out, err = await run("git", "fetch", "origin", cwd=path)
-    if rc != 0:
-        raise RuntimeError(f"Failed to fetch origin for {repo}: {err}")
-
-
-async def create_worktree(repo: str, branch: str, cell_id: str) -> str:
+async def create_worktree(repo_id: str, branch: str, cell_id: str) -> str:
     """Create a git worktree for a cell. Returns the worktree path."""
-    main_repo = await ensure_repo_cloned(repo)
+    repo = config.get_repo(repo_id)
+    repo_dir = repo.path
     worktree_dir = WORKTREE_ROOT / cell_id
     worktree_dir.parent.mkdir(parents=True, exist_ok=True)
 
     # Check if branch exists on remote
     rc, out, err = await run(
-        "git", "ls-remote", "--heads", "origin", branch, cwd=main_repo
+        "git", "ls-remote", "--heads", "origin", branch, cwd=repo_dir
     )
     if rc == 0 and branch in out:
         # Fetch and create worktree from remote branch
-        await run("git", "fetch", "origin", branch, cwd=main_repo)
+        await run("git", "fetch", "origin", branch, cwd=repo_dir)
         rc, out, err = await run(
             "git",
             "worktree",
             "add",
             str(worktree_dir),
             f"origin/{branch}",
-            cwd=main_repo,
+            cwd=repo_dir,
         )
         if rc != 0:
             # Try creating from the tracking branch
@@ -76,11 +60,11 @@ async def create_worktree(repo: str, branch: str, cell_id: str) -> str:
                 branch,
                 str(worktree_dir),
                 f"origin/{branch}",
-                cwd=main_repo,
+                cwd=repo_dir,
             )
     else:
         # Create new branch from origin/main
-        await fetch_origin(repo)
+        await fetch_origin(repo_id)
         rc, out, err = await run(
             "git",
             "worktree",
@@ -89,7 +73,7 @@ async def create_worktree(repo: str, branch: str, cell_id: str) -> str:
             branch,
             str(worktree_dir),
             "origin/main",
-            cwd=main_repo,
+            cwd=repo_dir,
         )
 
     if rc != 0:
@@ -98,9 +82,9 @@ async def create_worktree(repo: str, branch: str, cell_id: str) -> str:
     return str(worktree_dir)
 
 
-async def remove_worktree(repo: str, worktree_path: str) -> None:
-    main_repo = repo_path(repo)
-    await run("git", "worktree", "remove", "--force", worktree_path, cwd=main_repo)
+async def remove_worktree(repo_id: str, worktree_path: str) -> None:
+    repo = config.get_repo(repo_id)
+    await run("git", "worktree", "remove", "--force", worktree_path, cwd=repo.path)
 
 
 async def is_behind_main(worktree_path: str) -> bool:
@@ -141,13 +125,21 @@ async def push(worktree_path: str, branch: str) -> tuple[bool, str]:
 
 async def get_pr_info_from_url(pr_url: str) -> dict:
     """Get PR details from a GitHub PR URL using gh CLI.
-    Returns dict with keys: repo, number, url, branch."""
+    Returns dict with keys: repo_id, number, url, branch."""
 
-    # Parse owner/repo from URL (more reliable than gh's nameWithOwner)
+    # Parse owner/repo from URL
     m = re.match(r"https://github\.com/([^/]+/[^/]+)/pull/\d+", pr_url)
     if not m:
         raise RuntimeError(f"Could not parse repo from URL: {pr_url}")
-    repo = m.group(1)
+    upstream = m.group(1)
+
+    # Find which config repo matches this upstream
+    repo_id = _upstream_to_repo_id(upstream)
+    if repo_id is None:
+        raise RuntimeError(
+            f"No configured repo matches upstream {upstream!r}. "
+            f"Add it to repos.json first."
+        )
 
     rc, out, err = await run(
         "gh",
@@ -160,20 +152,29 @@ async def get_pr_info_from_url(pr_url: str) -> dict:
     if rc != 0:
         raise RuntimeError(f"Failed to fetch PR info from {pr_url}: {err}")
     data = json.loads(out)
-    data["repo"] = repo
+    data["repo_id"] = repo_id
     data["branch"] = data.pop("headRefName")
     return data
 
 
-async def get_ci_status(repo: str, pr_number: int) -> str:
+def _upstream_to_repo_id(upstream: str) -> str | None:
+    """Find the repo ID whose upstream matches the given owner/repo string."""
+    for repo_id, repo in config.get_repos().items():
+        if repo.upstream == upstream:
+            return repo_id
+    return None
+
+
+async def get_ci_status(repo_id: str, pr_number: int) -> str:
     """Get CI status for a PR. Returns 'passing', 'failing', 'pending', or 'unknown'."""
+    upstream = config.get_repo(repo_id).upstream
     rc, out, err = await run(
         "gh",
         "pr",
         "checks",
         str(pr_number),
         "--repo",
-        repo,
+        upstream,
     )
     if rc != 0:
         return "unknown"
@@ -187,8 +188,9 @@ async def get_ci_status(repo: str, pr_number: int) -> str:
     return "unknown"
 
 
-async def get_ci_failure_logs(repo: str, branch: str) -> str:
+async def get_ci_failure_logs(repo_id: str, branch: str) -> str:
     """Get CI failure logs for the most recent failing run on a branch."""
+    upstream = config.get_repo(repo_id).upstream
     rc, out, err = await run(
         "gh",
         "run",
@@ -202,7 +204,7 @@ async def get_ci_failure_logs(repo: str, branch: str) -> str:
         "--json",
         "databaseId",
         "--repo",
-        repo,
+        upstream,
     )
     if rc != 0 or not out.strip():
         return "Could not retrieve CI failure information"
@@ -220,7 +222,7 @@ async def get_ci_failure_logs(repo: str, branch: str) -> str:
         run_id,
         "--log-failed",
         "--repo",
-        repo,
+        upstream,
     )
     if rc != 0:
         return f"Could not retrieve logs for run {run_id}: {err}"
@@ -240,8 +242,9 @@ async def has_remote_branch(worktree_path: str, branch: str) -> bool:
     return rc == 0
 
 
-async def find_pr_for_branch(repo: str, branch: str) -> dict | None:
+async def find_pr_for_branch(repo_id: str, branch: str) -> dict | None:
     """Check if a PR exists for a branch. Returns {number, url} or None."""
+    upstream = config.get_repo(repo_id).upstream
     rc, out, err = await run(
         "gh",
         "pr",
@@ -249,7 +252,7 @@ async def find_pr_for_branch(repo: str, branch: str) -> dict | None:
         "--head",
         branch,
         "--repo",
-        repo,
+        upstream,
         "--json",
         "number,url",
         "--limit",
@@ -263,8 +266,9 @@ async def find_pr_for_branch(repo: str, branch: str) -> dict | None:
     return {"number": prs[0]["number"], "url": prs[0]["url"]}
 
 
-async def create_pr(worktree_path: str, repo: str, title: str, body: str) -> dict:
+async def create_pr(worktree_path: str, repo_id: str, title: str, body: str) -> dict:
     """Create a PR from the current branch. Returns dict with number and url."""
+    upstream = config.get_repo(repo_id).upstream
     rc, out, err = await run(
         "gh",
         "pr",
@@ -274,7 +278,7 @@ async def create_pr(worktree_path: str, repo: str, title: str, body: str) -> dic
         "--body",
         body,
         "--repo",
-        repo,
+        upstream,
         cwd=worktree_path,
     )
     if rc != 0:
