@@ -187,8 +187,8 @@ async def test_ci_fix_on_failure(git_env, init_db, mock_gh, mock_claude):
     assert sessions[0].transcript == "Fixed the test"
 
 
-async def test_ci_fix_not_repeated(git_env, init_db, mock_gh, mock_claude):
-    """If CI was already failing, no new fix attempt should be made."""
+async def test_ci_fix_skipped_while_running(git_env, init_db, mock_gh, mock_claude):
+    """If a ci_fix session is already running, no new fix should be started."""
     git_env.create_branch("ci-norepeat")
     git_env.add_commit("file.txt", "content", "add file")
     git_env.push("ci-norepeat")
@@ -199,17 +199,48 @@ async def test_ci_fix_not_repeated(git_env, init_db, mock_gh, mock_claude):
     cell.pr_number = 101
     cell.ci_status = CIStatus.failing
 
-    # CI still failing — no status change
+    # Simulate a running ci_fix session (no ended_at)
+    running_session = Session(
+        cell_id=cell.id, role=SessionRole.daemon, trigger="ci_fix"
+    )
+    await db.create_session(running_session)
+
     mock_gh.set_response("pr checks", 0, "build\tfail\t1m")
 
     await process_cell(cell)
 
-    # Claude should NOT have been called
+    # Claude should NOT have been called — existing session still running
     mock_claude.assert_not_called()
 
-    # No sessions should be created
-    sessions = await db.list_sessions(cell.id)
-    assert len(sessions) == 0
+
+async def test_ci_fix_retried_after_previous_failure(
+    git_env, init_db, mock_gh, mock_claude
+):
+    """If CI is still failing and the previous fix session ended, try again."""
+    git_env.create_branch("ci-retry")
+    git_env.add_commit("file.txt", "content", "add file")
+    git_env.push("ci-retry")
+    git_env.checkout("main")
+
+    cell = await _create_cell_in_db(git_env, "ci-retry", "daemon-8")
+    await db.update_cell(cell.id, pr_number=102, ci_status=CIStatus.failing)
+    cell.pr_number = 102
+    cell.ci_status = CIStatus.failing
+
+    # Previous ci_fix session that ended (failed)
+    prev_session = Session(cell_id=cell.id, role=SessionRole.daemon, trigger="ci_fix")
+    await db.create_session(prev_session)
+    await db.update_session(
+        prev_session.id, succeeded=0, ended_at="2024-01-01T00:00:00+00:00"
+    )
+
+    mock_gh.set_response("pr checks", 0, "build\tfail\t1m")
+    mock_gh.set_response("pr checks --json", 1, "")
+
+    await process_cell(cell)
+
+    # Claude SHOULD have been called — previous session ended
+    mock_claude.assert_called_once()
 
 
 async def test_spawn_sortie_session(git_env, init_db, mock_claude):
@@ -239,23 +270,20 @@ async def test_spawn_sortie_session(git_env, init_db, mock_claude):
     assert not sortie_dir.exists()
 
 
-async def test_daemon_stops_after_max_failures(git_env, init_db, mock_claude):
-    """After MAX_DAEMON_ATTEMPTS failed sessions, daemon should stop retrying."""
-    from server.daemon import MAX_DAEMON_ATTEMPTS
-
-    # Create a branch that conflicts with main
-    git_env.create_branch("limit-branch")
+async def test_merge_retried_after_previous_failure(git_env, init_db, mock_claude):
+    """If merge previously failed but no session is running, try again."""
+    git_env.create_branch("retry-branch")
     git_env.add_commit("README.md", "branch version", "edit on branch")
-    git_env.push("limit-branch")
+    git_env.push("retry-branch")
     git_env.checkout("main")
 
     git_env.add_commit("README.md", "main version", "edit on main")
     git_env.push("main")
 
-    cell = await _create_cell_in_db(git_env, "limit-branch", "daemon-limit")
+    cell = await _create_cell_in_db(git_env, "retry-branch", "daemon-retry")
 
-    # Pre-fill MAX_DAEMON_ATTEMPTS failed merge sessions
-    for _ in range(MAX_DAEMON_ATTEMPTS):
+    # Pre-fill several failed merge sessions (all ended)
+    for _ in range(5):
         s = Session(
             cell_id=cell.id,
             role=SessionRole.daemon,
@@ -265,42 +293,7 @@ async def test_daemon_stops_after_max_failures(git_env, init_db, mock_claude):
         )
         await db.create_session(s)
 
-    # process_cell should NOT invoke Claude
-    mock_claude.return_value = (False, "should not be called")
-    await process_cell(cell)
-
-    # No new sessions should have been created
-    sessions = await db.list_sessions(cell.id)
-    assert len(sessions) == MAX_DAEMON_ATTEMPTS
-    mock_claude.assert_not_called()
-
-
-async def test_manual_sync_bypasses_limit(git_env, init_db, mock_claude):
-    """Manual sync (force=True) should bypass the failure limit."""
-    from server.daemon import MAX_DAEMON_ATTEMPTS
-
-    git_env.create_branch("force-branch")
-    git_env.add_commit("README.md", "branch version", "edit on branch")
-    git_env.push("force-branch")
-    git_env.checkout("main")
-
-    git_env.add_commit("README.md", "main version", "edit on main")
-    git_env.push("main")
-
-    cell = await _create_cell_in_db(git_env, "force-branch", "daemon-force")
-
-    # Pre-fill MAX_DAEMON_ATTEMPTS failed sessions
-    for _ in range(MAX_DAEMON_ATTEMPTS):
-        s = Session(
-            cell_id=cell.id,
-            role=SessionRole.daemon,
-            trigger="merge",
-            succeeded=False,
-            ended_at="2024-01-01T00:00:00+00:00",
-        )
-        await db.create_session(s)
-
-    # With force=True, Claude should still be invoked
+    # Claude should still be invoked — no running session
     async def fake_claude(prompt, cwd, **kwargs):
         await git.run(
             "git",
@@ -314,10 +307,9 @@ async def test_manual_sync_bypasses_limit(git_env, init_db, mock_claude):
 
     mock_claude.side_effect = fake_claude
 
-    await process_cell(cell, force=True)
+    await process_cell(cell)
 
     sessions = await db.list_sessions(cell.id)
-    # Should have MAX_DAEMON_ATTEMPTS + 1 sessions (the new one)
-    assert len(sessions) == MAX_DAEMON_ATTEMPTS + 1
+    assert len(sessions) == 6
     succeeded = [s for s in sessions if s.succeeded is True]
     assert len(succeeded) == 1

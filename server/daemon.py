@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 notify_callback: asyncio.Queue | None = None
 
 POLL_INTERVAL = 300  # seconds (5 minutes)
-MAX_DAEMON_ATTEMPTS = 3
 
 
 async def notify(event: str, data: dict) -> None:
@@ -46,25 +45,14 @@ def _make_output_callback(session_id: str, cell_id: str):
     return callback
 
 
-async def _should_attempt(cell_id: str, trigger: str, *, force: bool = False) -> bool:
+async def _should_attempt(cell_id: str, trigger: str) -> bool:
     """Check if we should attempt a daemon action on this cell.
 
-    Always blocks if a session with the same trigger is already running.
-    Blocks after MAX_DAEMON_ATTEMPTS failures unless force=True (manual trigger).
+    Blocks only if a session with the same trigger is already running.
     """
     sessions = await db.list_sessions(cell_id)
     trigger_sessions = [s for s in sessions if s.trigger == trigger]
-
-    # Never start if one is still running (ended_at not set)
-    if any(s.ended_at is None for s in trigger_sessions):
-        return False
-
-    # Skip retry limit if forced (manual trigger)
-    if force:
-        return True
-
-    failed = sum(1 for s in trigger_sessions if s.succeeded is False)
-    return failed < MAX_DAEMON_ATTEMPTS
+    return not any(s.ended_at is None for s in trigger_sessions)
 
 
 async def _push_if_published(cell: Cell) -> bool | None:
@@ -79,7 +67,7 @@ async def _push_if_published(cell: Cell) -> bool | None:
     return ok
 
 
-async def process_cell(cell: Cell, *, force: bool = False) -> None:
+async def process_cell(cell: Cell) -> None:
     """Process a single cell: check sync status, CI status."""
     try:
         await git.assert_not_detached(cell.worktree_path)
@@ -128,7 +116,7 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
                 await db.update_cell(cell.id, sync_status=SyncStatus.conflict)
                 await notify("cell_updated", {"id": cell.id, "sync_status": "conflict"})
 
-                if not await _should_attempt(cell.id, "merge", force=force):
+                if not await _should_attempt(cell.id, "merge"):
                     logger.info(
                         f"Cell {cell.id}: skipping merge (limit reached or in progress)"
                     )
@@ -205,9 +193,8 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
                 await db.update_cell(cell.id, ci_status=ci_status)
                 await notify("cell_updated", {"id": cell.id, "ci_status": ci})
 
-                # If CI just started failing, try to fix
-                if ci_status == CIStatus.failing:
-                    await _fix_ci(cell, force=force)
+            if ci_status == CIStatus.failing:
+                await _fix_ci(cell)
 
         # Fallback: detect PR for cells that have been pushed but have no PR yet
         if not cell.pr_number and await git.has_remote_branch(
@@ -243,9 +230,9 @@ async def daemon_loop() -> None:
         await asyncio.sleep(POLL_INTERVAL)
 
 
-async def _fix_ci(cell: Cell, *, force: bool = False) -> None:
+async def _fix_ci(cell: Cell) -> None:
     """Spawn Claude to diagnose and fix a CI failure."""
-    if not await _should_attempt(cell.id, "ci_fix", force=force):
+    if not await _should_attempt(cell.id, "ci_fix"):
         logger.info(f"Cell {cell.id}: skipping CI fix (limit reached or in progress)")
         return
 

@@ -212,8 +212,7 @@ async def trigger_sync(cell_id: str):
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
 
-    # Run merge in background, bypassing retry limits
-    asyncio.create_task(daemon.process_cell(cell, force=True))
+    asyncio.create_task(daemon.process_cell(cell))
     return {"status": "sync triggered"}
 
 
