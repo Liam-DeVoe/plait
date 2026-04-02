@@ -778,7 +778,7 @@ function CollapsibleSession({
   onResume: () => void;
   onVSCode: () => void;
 }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(session.alive);
 
   return (
     <div>
