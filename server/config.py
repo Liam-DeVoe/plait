@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from pathlib import Path
 
-CONFIG_PATH = Path(__file__).parent.parent / "repos.json"
+import tomllib
+
+CONFIG_PATH = Path(__file__).parent.parent / "config.toml"
 
 
 @dataclass
@@ -14,26 +15,30 @@ class Repo:
     upstream: str  # GitHub "owner/repo" for gh CLI
 
 
-def load_repos(path: Path = CONFIG_PATH) -> dict[str, Repo]:
-    data = json.loads(path.read_text())
+def _load() -> dict:
+    return tomllib.loads(CONFIG_PATH.read_text())
+
+
+_data: dict | None = None
+
+
+def _get_data() -> dict:
+    global _data
+    if _data is None:
+        _data = _load()
+    return _data
+
+
+def get_repos() -> dict[str, Repo]:
+    data = _get_data()
     repos = {}
-    for repo_id, info in data.items():
+    for repo_id, info in data.get("repos", {}).items():
         repos[repo_id] = Repo(
             id=repo_id,
             path=Path(info["path"]),
             upstream=info["upstream"],
         )
     return repos
-
-
-_repos: dict[str, Repo] | None = None
-
-
-def get_repos() -> dict[str, Repo]:
-    global _repos
-    if _repos is None:
-        _repos = load_repos()
-    return _repos
 
 
 def get_repo(repo_id: str) -> Repo:
@@ -43,6 +48,10 @@ def get_repo(repo_id: str) -> Repo:
     return repos[repo_id]
 
 
+def get_author() -> str:
+    return _get_data().get("author", "")
+
+
 def reload() -> None:
-    global _repos
-    _repos = None
+    global _data
+    _data = None

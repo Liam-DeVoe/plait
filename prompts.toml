@@ -65,12 +65,15 @@ When you're done with all repos, push your changes and create PRs, then finish.
 [tend]
 # Prompt sent to Claude when the daemon detects the branch needs attention.
 # Claude should investigate the actual state and fix what it finds.
-# Variables: branch
+# Variables: branch, author
 template = """
 The branch {branch} needs attention. Investigate and fix any of the following that apply:
 
 1. **Merge conflicts with main**: If the branch is behind origin/main, merge it and resolve any conflicts, preserving the intent of both sides.
 2. **CI failures**: Check CI status with `gh pr checks`. If failing, look at the failure logs and fix the issue.
+3. **Thumbs-up reactions from {author}**: Check PR comments for any that have a thumbs-up (+1) reaction from `{author}`. A thumbs-up means the user agrees with that comment — you should fix the code according to what the comment says.
+
+Never reply to comments on github; you should treat your interaction with github as read-only except for pushing commits.
 
 After fixing, make sure the code compiles and passes basic checks. Then commit and push your fixes.
 """

@@ -140,16 +140,18 @@ def git_env(tmp_path, _git_env_template) -> GitEnv:
     git_module.WORKTREE_ROOT = worktree_root
 
     # Patch config to return our test repo
-    from server.config import Repo
-
-    test_repo = Repo(id=repo_id, path=clone, upstream="testorg/testrepo")
-    original_repos = config_module._repos
-    config_module._repos = {repo_id: test_repo}
+    original_data = config_module._data
+    config_module._data = {
+        "author": "testuser",
+        "repos": {
+            repo_id: {"path": str(clone), "upstream": "testorg/testrepo"},
+        },
+    }
 
     yield env
 
     git_module.WORKTREE_ROOT = original_worktree_root
-    config_module._repos = original_repos
+    config_module._data = original_data
 
 
 # --- Mock gh CLI ---
@@ -192,7 +194,7 @@ class _SpawnSessionMock:
     Usage:
         mock.return_value = 0                              # success (default)
         mock.return_value = 1                              # failure
-        mock.side_effect = async_func(session_id, cwd, **kw) -> int
+        mock.side_effect = async_func(session_id, cmd, cwd, **kw) -> int
     """
 
     def __init__(self):
@@ -200,14 +202,14 @@ class _SpawnSessionMock:
         self.side_effect = None
         self._calls: list[tuple] = []
 
-    def __call__(self, session_id, cwd, **kwargs):
-        self._calls.append((session_id, cwd, kwargs))
+    def __call__(self, session_id, cmd, cwd, **kwargs):
+        self._calls.append((session_id, cmd, cwd, kwargs))
 
         async def _run():
             from server import db
 
             if self.side_effect:
-                exit_code = await self.side_effect(session_id, cwd, **kwargs)
+                exit_code = await self.side_effect(session_id, cmd, cwd, **kwargs)
             else:
                 exit_code = self.return_value
 

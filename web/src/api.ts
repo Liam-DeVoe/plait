@@ -36,6 +36,22 @@ export interface Sortie {
   session?: Session;
 }
 
+export interface DaemonRunResult {
+  cell_id: string;
+  repo: string;
+  branch: string;
+  decision: "idle" | "skipped" | "tended" | "error";
+  reasons: string[];
+  outcome: "succeeded" | "failed" | null;
+}
+
+export interface DaemonRun {
+  id: string;
+  started_at: string;
+  ended_at: string;
+  results: DaemonRunResult[];
+}
+
 export interface Repo {
   id: string;
   path: string;
@@ -43,6 +59,11 @@ export interface Repo {
 }
 
 const BASE = "/api";
+
+export async function fetchDaemonRuns(limit = 20): Promise<DaemonRun[]> {
+  const res = await fetch(`${BASE}/daemon/runs?limit=${limit}`);
+  return res.json();
+}
 
 export async function fetchRepos(): Promise<Repo[]> {
   const res = await fetch(`${BASE}/repos`);

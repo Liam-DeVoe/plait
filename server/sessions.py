@@ -1,70 +1,143 @@
 """Shared session spawning and lifecycle management.
 
-Both the API (user sessions) and the daemon (headless sessions) use
-spawn_session() to create PTY-backed Claude processes.
+Command factories (*_cmd) define how each session type is invoked.
+spawn_session() handles the PTY mechanics common to all types.
 """
 
 from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone
+from pathlib import Path
 
-from server import db
+from server import claude, db
+from server.daemon_config import DAEMON_ALLOWED_TOOLS, SORTIE_ALLOWED_TOOLS
+from server.models import Cell, Sortie
 from server.pty import pty_manager
+
+# --- Command factories ---
+# Each returns (cmd, cwd) for a specific session type.
+
+
+def tend_cmd(session_id: str, cell: Cell) -> tuple[list[str], str]:
+    """Daemon headless session to fix merge conflicts / CI failures."""
+    worktree = str(Path(cell.worktree_path).resolve())
+    allowed_tools = [t.format(worktree=worktree) for t in DAEMON_ALLOWED_TOOLS]
+    return [
+        "claude",
+        "-p",
+        claude.tend_prompt(cell.branch),
+        "--verbose",
+        "--session-id",
+        session_id,
+        "--system-prompt",
+        claude.orrery_system_prompt(cell.id),
+        "--allowedTools",
+        *allowed_tools,
+    ], cell.worktree_path
+
+
+def daemon_sortie_cmd(
+    session_id: str,
+    sortie: Sortie,
+    exploration_dir: str,
+    repo_worktrees: dict[str, str],
+) -> tuple[list[str], str]:
+    """Daemon headless session to orchestrate a sortie."""
+    from server import git
+
+    worktree_root = str(git.WORKTREE_ROOT.resolve())
+    allowed_tools = [
+        t.format(worktree_root=worktree_root) for t in SORTIE_ALLOWED_TOOLS
+    ]
+    system_prompt = claude.sortie_system_prompt(
+        sortie.id, exploration_dir, repo_worktrees
+    )
+    return [
+        "claude",
+        "-p",
+        sortie.prompt,
+        "--verbose",
+        "--session-id",
+        session_id,
+        "--system-prompt",
+        system_prompt,
+        "--allowedTools",
+        *allowed_tools,
+    ], exploration_dir
+
+
+def user_cell_cmd(session_id: str, cell: Cell) -> tuple[list[str], str]:
+    """Interactive user session in a cell worktree."""
+    return [
+        "claude",
+        "--verbose",
+        "--dangerously-skip-permissions",
+        "--session-id",
+        session_id,
+        "--system-prompt",
+        claude.orrery_system_prompt(cell.id),
+    ], cell.worktree_path
+
+
+def user_sortie_cmd(
+    session_id: str,
+    sortie_id: str,
+    exploration_dir: str,
+    repo_worktrees: dict[str, str],
+) -> tuple[list[str], str]:
+    """Interactive user session to orchestrate a sortie."""
+    system_prompt = claude.sortie_system_prompt(
+        sortie_id, exploration_dir, repo_worktrees
+    )
+    return [
+        "claude",
+        "--verbose",
+        "--dangerously-skip-permissions",
+        "--session-id",
+        session_id,
+        "--system-prompt",
+        system_prompt,
+    ], exploration_dir
+
+
+def resume_cmd(session_id: str, cwd: str) -> tuple[list[str], str]:
+    """Resume a previously ended session."""
+    return [
+        "claude",
+        "--verbose",
+        "--dangerously-skip-permissions",
+        "--resume",
+        session_id,
+    ], cwd
+
+
+# --- Spawn mechanics ---
 
 
 def spawn_session(
     session_id: str,
+    cmd: list[str],
     cwd: str,
     *,
-    prompt: str = "",
-    system_prompt: str | None = None,
-    resume: bool = False,
-    print_mode: bool = False,
-    allowed_tools: list[str] | None = None,
+    initial_input: str = "",
 ) -> asyncio.Task[int | None]:
     """Spawn a PTY session and start watching it.
 
-    Returns the watcher task. Await it to block until the session ends
-    and get the exit code (daemon use). Discard it for fire-and-forget
-    (interactive user sessions).
+    Returns the watcher task. Await it for the exit code (daemon use),
+    or discard it for fire-and-forget (interactive sessions).
 
-    Modes:
-      - resume=True: ``claude --resume <session_id>``
-      - print_mode=True: ``claude -p <prompt> --session-id <session_id>``
-        (headless, for daemon use)
-      - default: ``claude --session-id <session_id>`` (interactive)
+    Use a *_cmd() factory above to build the cmd list.
     """
-    if resume:
-        cmd = ["claude", "--verbose", "--resume", session_id]
-    elif print_mode:
-        cmd = [
-            "claude",
-            "-p",
-            prompt,
-            "--verbose",
-            "--session-id",
-            session_id,
-        ]
-        if system_prompt:
-            cmd.extend(["--system-prompt", system_prompt])
-        if allowed_tools:
-            cmd.extend(["--allowedTools", *allowed_tools])
-    else:
-        cmd = ["claude", "--verbose", "--session-id", session_id]
-        if system_prompt:
-            cmd.extend(["--system-prompt", system_prompt])
-
     pty_manager.spawn(session_id, cwd=cwd, cmd=cmd)
 
-    # For interactive sessions, send prompt as initial input after startup
-    if not print_mode and not resume and prompt.strip():
+    if initial_input.strip():
 
-        async def _send_initial_prompt():
+        async def _send_initial_input():
             await asyncio.sleep(1.0)
-            pty_manager.write(session_id, (prompt + "\n").encode())
+            pty_manager.write(session_id, (initial_input + "\n").encode())
 
-        asyncio.create_task(_send_initial_prompt())
+        asyncio.create_task(_send_initial_input())
 
     return asyncio.create_task(_watch_pty(session_id))
 

@@ -786,6 +786,79 @@
   color: #6b7280;
 }
 
+/* === Daemon Log === */
+.daemon-log {
+  margin-top: 32px;
+}
+
+.daemon-log__title {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+  color: #6b7280;
+  margin-bottom: 8px;
+}
+
+.daemon-log__list > * + * {
+  margin-top: 4px;
+}
+
+.daemon-log__run-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: white;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.daemon-log__run-header:hover {
+  background: #f9fafb;
+}
+
+.daemon-log__run-arrow {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.daemon-log__run-time {
+  color: #6b7280;
+  min-width: 60px;
+}
+
+.daemon-log__run-summary {
+  color: #374151;
+}
+
+.daemon-log__run-details {
+  padding: 8px 12px 8px 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.daemon-log__cell-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.daemon-log__cell-name {
+  color: #374151;
+  font-weight: 500;
+}
+
+.daemon-log__reasons {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
 /* === Terminal === */
 .terminal__container {
   border-radius: 4px;

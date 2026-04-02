@@ -39,13 +39,14 @@ class SessionRole(str, Enum):
 class Cell:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     sortie_id: str | None = None
-    repo: str = ""  # repo ID from repos.json config
+    repo: str = ""  # repo ID from config.toml
     branch: str = ""
     worktree_path: str = ""
     pr_number: int | None = None
     pr_url: str | None = None
     ci_status: CIStatus = CIStatus.unknown
     pr_comment_count: int = 0
+    pr_reaction_count: int = 0
     sync_status: SyncStatus = SyncStatus.current
     status: CellStatus = CellStatus.active
     created_at: str = field(

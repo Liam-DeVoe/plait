@@ -4,6 +4,8 @@ from pathlib import Path
 
 import tomllib
 
+from server import config
+
 ORRERY_PORT = 8000
 PROMPTS_PATH = Path(__file__).parent.parent / "prompts.toml"
 
@@ -47,4 +49,5 @@ def sortie_system_prompt(
 def tend_prompt(branch: str) -> str:
     """Build a prompt for the tend session."""
     prompts = _load_prompts()
-    return prompts["tend"]["template"].strip().format(branch=branch)
+    author = config.get_author()
+    return prompts["tend"]["template"].strip().format(branch=branch, author=author)

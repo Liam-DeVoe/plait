@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from server import db, git
+from server import daemon, db, git
 from server.daemon import process_cell, spawn_sortie_session
 from server.models import (
     Cell,
@@ -77,7 +77,7 @@ async def test_cell_conflict_claude_resolves(git_env, init_db, mock_claude):
     cell = await _create_cell_in_db(git_env, "conflict-branch", "daemon-3")
 
     # Mock spawn_session to actually resolve the conflict by doing a real merge
-    async def fake_spawn(session_id, cwd, **kwargs):
+    async def fake_spawn(session_id, cmd, cwd, **kwargs):
         await git.run(
             "git",
             "merge",
@@ -197,16 +197,18 @@ async def test_ci_fix_skipped_while_running(git_env, init_db, mock_gh, mock_clau
     cell.pr_number = 101
     cell.ci_status = CIStatus.failing
 
-    # Simulate a running ci_fix session (no ended_at)
-    running_session = Session(cell_id=cell.id, role=SessionRole.daemon, trigger="tend")
-    await db.create_session(running_session)
+    # Simulate an in-flight tend session
+    key = (cell.id, "tend")
+    daemon._in_flight.add(key)
+    try:
+        mock_gh.set_response("pr checks", 0, "build\tfail\t1m")
 
-    mock_gh.set_response("pr checks", 0, "build\tfail\t1m")
+        await process_cell(cell)
 
-    await process_cell(cell)
-
-    # Claude should NOT have been called — existing session still running
-    mock_claude.assert_not_called()
+        # Claude should NOT have been called — existing session still running
+        mock_claude.assert_not_called()
+    finally:
+        daemon._in_flight.discard(key)
 
 
 async def test_ci_fix_retried_after_previous_failure(
@@ -290,7 +292,7 @@ async def test_merge_retried_after_previous_failure(git_env, init_db, mock_claud
         await db.create_session(s)
 
     # Claude should still be invoked — no running session
-    async def fake_spawn(session_id, cwd, **kwargs):
+    async def fake_spawn(session_id, cmd, cwd, **kwargs):
         await git.run(
             "git",
             "merge",

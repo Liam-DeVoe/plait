@@ -14,6 +14,7 @@ import {
 import {
   fetchCells,
   fetchCell,
+  fetchDaemonRuns,
   fetchRepos,
   createCell,
   createLocalCell,
@@ -33,6 +34,7 @@ import {
   resumeSortieSession,
   connectWebSocket,
   type Cell,
+  type DaemonRun,
   type Session,
   type Sortie,
   type Repo,
@@ -107,12 +109,12 @@ function OverflowMenu({
 
 // --- Layout ---
 
-type LayoutContext = { tick: number };
+type LayoutContext = { run: number };
 
 function Layout() {
-  const [tick, setTick] = useState(0);
+  const [run, setRun] = useState(0);
   useEffect(() => {
-    const ws = connectWebSocket(() => setTick((t) => t + 1));
+    const ws = connectWebSocket(() => setRun((r) => r + 1));
     return () => ws.close();
   }, []);
 
@@ -144,7 +146,7 @@ function Layout() {
         </div>
       </div>
       <div className="layout__main">
-        <Outlet context={{ tick } satisfies LayoutContext} />
+        <Outlet context={{ run } satisfies LayoutContext} />
       </div>
     </div>
   );
@@ -292,11 +294,111 @@ function CreateCellForm({
   );
 }
 
+function timeAgo(iso: string): string {
+  const seconds = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+function runSummary(run: DaemonRun): string {
+  const total = run.results.length;
+  const tended = run.results.filter((r) => r.decision === "tended");
+  const skipped = run.results.filter((r) => r.decision === "skipped").length;
+  const errored = run.results.filter((r) => r.decision === "error").length;
+  const idle = run.results.filter((r) => r.decision === "idle").length;
+
+  const parts: string[] = [];
+  if (tended.length > 0) {
+    const ok = tended.filter((r) => r.outcome === "succeeded").length;
+    const fail = tended.filter((r) => r.outcome === "failed").length;
+    const sub = [ok > 0 && `${ok} ok`, fail > 0 && `${fail} failed`]
+      .filter(Boolean)
+      .join(", ");
+    parts.push(`${tended.length} tended (${sub})`);
+  }
+  if (skipped > 0) parts.push(`${skipped} skipped`);
+  if (errored > 0) parts.push(`${errored} errored`);
+  if (idle > 0) parts.push(`${idle} idle`);
+
+  return parts.join(", ");
+}
+
+function DaemonLog({ runs }: { runs: DaemonRun[] }) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  if (runs.length === 0) return null;
+
+  return (
+    <div className="daemon-log">
+      <div className="daemon-log__title">Daemon Log</div>
+      <div className="daemon-log__list">
+        {runs.map((run) => (
+          <div key={run.id} className="daemon-log__run">
+            <div
+              className="daemon-log__run-header"
+              onClick={() =>
+                setExpanded(expanded === run.id ? null : run.id)
+              }
+            >
+              <span className="daemon-log__run-arrow">
+                {expanded === run.id ? "▾" : "▸"}
+              </span>
+              <span className="daemon-log__run-time">
+                {timeAgo(run.started_at)}
+              </span>
+              <span className="daemon-log__run-summary">
+                {runSummary(run)}
+              </span>
+            </div>
+            {expanded === run.id && (
+              <div className="daemon-log__run-details">
+                {run.results.map((r) => (
+                  <div key={r.cell_id} className="daemon-log__cell-result">
+                    <span className="daemon-log__cell-name">
+                      {r.repo}:{r.branch}
+                    </span>
+                    <span
+                      className={`badge badge--${
+                        r.decision === "tended"
+                          ? r.outcome === "succeeded"
+                            ? "passing"
+                            : "failing"
+                          : r.decision === "skipped"
+                            ? "pending"
+                            : r.decision === "error"
+                              ? "failing"
+                              : "unknown"
+                      }`}
+                    >
+                      {r.decision}
+                      {r.outcome ? ` (${r.outcome})` : ""}
+                    </span>
+                    {r.reasons.length > 0 && (
+                      <span className="daemon-log__reasons">
+                        {r.reasons.join(", ")}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CellsPage() {
-  const { tick } = useOutletContext<LayoutContext>();
+  const { run } = useOutletContext<LayoutContext>();
   const navigate = useNavigate();
   const [cells, setCells] = useState<Cell[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
+  const [runs, setRuns] = useState<DaemonRun[]>([]);
   const [importOpen, setImportOpen] = useState(false);
 
   const loadCells = useCallback(async () => {
@@ -309,7 +411,8 @@ function CellsPage() {
 
   useEffect(() => {
     loadCells();
-  }, [loadCells, tick]);
+    fetchDaemonRuns(10).then(setRuns);
+  }, [loadCells, run]);
 
   const handleNewLocalCell = async (repo: string) => {
     const cell = await createLocalCell(repo);
@@ -402,6 +505,8 @@ function CellsPage() {
           ))}
         </div>
       )}
+
+      <DaemonLog runs={runs} />
     </>
   );
 }
@@ -410,7 +515,7 @@ function CellDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  const { tick } = useOutletContext<LayoutContext>();
+  const { run } = useOutletContext<LayoutContext>();
   const [cell, setCell] = useState<(Cell & { sessions: Session[] }) | null>(
     null,
   );
@@ -426,7 +531,7 @@ function CellDetailPage() {
 
   useEffect(() => {
     load();
-  }, [load, tick]);
+  }, [load, run]);
 
   const handleLaunchSession = async () => {
     if (!id) return;
@@ -802,7 +907,7 @@ function SortieRow({ sortie }: { sortie: Sortie & { cell_count: number } }) {
 }
 
 function SortiesPage() {
-  const { tick } = useOutletContext<LayoutContext>();
+  const { run } = useOutletContext<LayoutContext>();
   const [sorties, setSorties] = useState<(Sortie & { cell_count: number })[]>(
     [],
   );
@@ -814,7 +919,7 @@ function SortiesPage() {
 
   useEffect(() => {
     loadSorties();
-  }, [loadSorties, tick]);
+  }, [loadSorties, run]);
 
   return (
     <>
@@ -862,7 +967,7 @@ function SortiesPage() {
 function SortieDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { tick } = useOutletContext<LayoutContext>();
+  const { run } = useOutletContext<LayoutContext>();
   const [sortie, setSortie] = useState<(Sortie & { cells: Cell[] }) | null>(
     null,
   );
@@ -874,7 +979,7 @@ function SortieDetailPage() {
 
   useEffect(() => {
     load();
-  }, [load, tick]);
+  }, [load, run]);
 
   if (!sortie) return null;
 

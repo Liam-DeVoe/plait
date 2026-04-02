@@ -177,15 +177,14 @@ async def test_create_cell_gh_returns_non_json(client):
 async def test_create_cell_repo_path_missing(client):
     """When the configured repo path doesn't exist on disk, should return 400, not 500."""
     c, git_env, mock_gh = client
-    from pathlib import Path
 
     import server.config as config_module
-    from server.config import Repo
 
     # Add a second repo whose path doesn't exist
-    config_module._repos["ghost"] = Repo(
-        id="ghost", path=Path("/nonexistent/path"), upstream="org/ghost"
-    )
+    config_module._data["repos"]["ghost"] = {
+        "path": "/nonexistent/path",
+        "upstream": "org/ghost",
+    }
     pr_url = "https://github.com/org/ghost/pull/1"
     mock_gh.set_response(
         "pr view",

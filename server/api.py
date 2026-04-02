@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from server import claude, config, daemon, db, git
+from server import config, daemon, db, git
 from server.models import (
     Cell,
     CellStatus,
@@ -23,7 +23,12 @@ from server.models import (
     Sortie,
 )
 from server.pty import pty_manager
-from server.sessions import spawn_session
+from server.sessions import (
+    resume_cmd,
+    spawn_session,
+    user_cell_cmd,
+    user_sortie_cmd,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +95,14 @@ async def list_repos():
         {"id": r.id, "path": str(r.path), "upstream": r.upstream}
         for r in repos.values()
     ]
+
+
+# --- Daemon endpoints ---
+
+
+@app.get("/daemon/runs")
+async def list_daemon_runs(limit: int = 20):
+    return await db.list_daemon_runs(limit)
 
 
 # --- Cell endpoints ---
@@ -380,12 +393,8 @@ async def create_session_endpoint(cell_id: str, req: CreateSessionRequest):
     )
     await db.create_session(session)
 
-    spawn_session(
-        session.id,
-        cwd=cell.worktree_path,
-        prompt=req.prompt,
-        system_prompt=claude.orrery_system_prompt(cell.id),
-    )
+    cmd, cwd = user_cell_cmd(session.id, cell)
+    spawn_session(session.id, cmd, cwd, initial_input=req.prompt)
 
     return _session_dict(session)
 
@@ -407,7 +416,8 @@ async def resume_session(cell_id: str, session_id: str):
     # Reset ended_at so daemon sees it as active
     await db.update_session(session_id, ended_at=None)
 
-    spawn_session(session.id, cwd=cell.worktree_path, resume=True)
+    cmd, cwd = resume_cmd(session.id, cell.worktree_path)
+    spawn_session(session.id, cmd, cwd)
 
     session.ended_at = None
     return _session_dict(session)
@@ -533,15 +543,8 @@ async def create_sortie(req: CreateSortieRequest):
     await db.create_session(session)
     await db.update_sortie(sortie.id, session_id=session.id)
 
-    system_prompt = claude.sortie_system_prompt(
-        sortie.id, exploration_dir, repo_worktrees
-    )
-    spawn_session(
-        session.id,
-        cwd=exploration_dir,
-        prompt=req.prompt,
-        system_prompt=system_prompt,
-    )
+    cmd, cwd = user_sortie_cmd(session.id, sortie.id, exploration_dir, repo_worktrees)
+    spawn_session(session.id, cmd, cwd, initial_input=req.prompt)
 
     result = asdict(sortie)
     result["session_id"] = session.id
@@ -617,7 +620,8 @@ async def resume_sortie_session(sortie_id: str, session_id: str):
 
     exploration_dir = str(git.WORKTREE_ROOT / f"sortie-{sortie_id}")
     await db.update_session(session_id, ended_at=None)
-    spawn_session(session.id, cwd=exploration_dir, resume=True)
+    cmd, cwd = resume_cmd(session.id, exploration_dir)
+    spawn_session(session.id, cmd, cwd)
 
     session.ended_at = None
     return _session_dict(session)

@@ -215,7 +215,7 @@ async def get_pr_info_from_url(pr_url: str) -> dict:
     if repo_id is None:
         raise RuntimeError(
             f"No configured repo matches upstream {upstream!r}. "
-            f"Add it to repos.json first."
+            f"Add it to config.toml first."
         )
 
     rc, out, err = await run(
@@ -293,6 +293,29 @@ async def get_pr_comment_count(repo_id: str, pr_number: int) -> int:
     comments = len(data.get("comments", []))
     reviews = len(data.get("reviews", []))
     return comments + reviews
+
+
+async def get_pr_reaction_count(repo_id: str, pr_number: int) -> int:
+    """Get the total number of reactions on PR comments (issue + review comments)."""
+    upstream = config.get_repo(repo_id).upstream
+    total = 0
+    for endpoint in [
+        f"repos/{upstream}/issues/{pr_number}/comments",
+        f"repos/{upstream}/pulls/{pr_number}/comments",
+    ]:
+        rc, out, err = await run(
+            "gh",
+            "api",
+            endpoint,
+            "--jq",
+            "[.[].reactions.total_count] | add // 0",
+        )
+        if rc == 0:
+            try:
+                total += int(out.strip())
+            except ValueError:
+                pass
+    return total
 
 
 async def get_ci_failure_logs(repo_id: str, branch: str) -> str:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from enum import Enum
 from pathlib import Path
 
@@ -29,6 +30,7 @@ CREATE TABLE IF NOT EXISTS cells (
     pr_url TEXT,
     ci_status TEXT NOT NULL DEFAULT 'unknown',
     pr_comment_count INTEGER NOT NULL DEFAULT 0,
+    pr_reaction_count INTEGER NOT NULL DEFAULT 0,
     sync_status TEXT NOT NULL DEFAULT 'current',
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL,
@@ -42,6 +44,13 @@ CREATE TABLE IF NOT EXISTS sorties (
     session_id TEXT,
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS daemon_runs (
+    id TEXT PRIMARY KEY,
+    started_at TEXT NOT NULL,
+    ended_at TEXT NOT NULL,
+    results TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
@@ -74,6 +83,7 @@ async def init_db() -> None:
         "ALTER TABLE sessions ADD COLUMN xterm_state BLOB",
         "ALTER TABLE sessions ADD COLUMN sortie_id TEXT",
         "ALTER TABLE sorties ADD COLUMN session_id TEXT",
+        "ALTER TABLE cells ADD COLUMN pr_reaction_count INTEGER NOT NULL DEFAULT 0",
     ]:
         try:
             await db.execute(migration)
@@ -91,9 +101,9 @@ async def create_cell(cell: Cell) -> Cell:
     try:
         await db.execute(
             """INSERT INTO cells (id, sortie_id, repo, branch, worktree_path,
-               pr_number, pr_url, ci_status, pr_comment_count, sync_status,
-               status, created_at, archived_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               pr_number, pr_url, ci_status, pr_comment_count, pr_reaction_count,
+               sync_status, status, created_at, archived_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 cell.id,
                 cell.sortie_id,
@@ -104,6 +114,7 @@ async def create_cell(cell: Cell) -> Cell:
                 cell.pr_url,
                 cell.ci_status.value,
                 cell.pr_comment_count,
+                cell.pr_reaction_count,
                 cell.sync_status.value,
                 cell.status.value,
                 cell.created_at,
@@ -184,6 +195,7 @@ def _row_to_cell(row: aiosqlite.Row) -> Cell:
         pr_url=row["pr_url"],
         ci_status=CIStatus(row["ci_status"]),
         pr_comment_count=row["pr_comment_count"],
+        pr_reaction_count=row["pr_reaction_count"],
         sync_status=SyncStatus(row["sync_status"]),
         status=CellStatus(row["status"]),
         created_at=row["created_at"],
@@ -377,3 +389,50 @@ async def list_cells_by_sortie(sortie_id: str) -> list[Cell]:
         return [_row_to_cell(row) for row in rows]
     finally:
         await conn.close()
+
+
+# --- Daemon Ticks ---
+
+MAX_RUNS = 100
+
+
+async def create_daemon_run(
+    tick_id: str, started_at: str, ended_at: str, results: list[dict]
+) -> None:
+    db = await get_db()
+    try:
+        await db.execute(
+            "INSERT INTO daemon_runs (id, started_at, ended_at, results) VALUES (?, ?, ?, ?)",
+            (tick_id, started_at, ended_at, json.dumps(results)),
+        )
+        # Prune old ticks beyond MAX_RUNS
+        await db.execute(
+            """DELETE FROM daemon_runs WHERE id NOT IN (
+                SELECT id FROM daemon_runs ORDER BY started_at DESC LIMIT ?
+            )""",
+            (MAX_RUNS,),
+        )
+        await db.commit()
+    finally:
+        await db.close()
+
+
+async def list_daemon_runs(limit: int = 20) -> list[dict]:
+    db = await get_db()
+    try:
+        cursor = await db.execute(
+            "SELECT * FROM daemon_runs ORDER BY started_at DESC LIMIT ?",
+            (limit,),
+        )
+        rows = await cursor.fetchall()
+        return [
+            {
+                "id": row["id"],
+                "started_at": row["started_at"],
+                "ended_at": row["ended_at"],
+                "results": json.loads(row["results"]),
+            }
+            for row in rows
+        ]
+    finally:
+        await db.close()

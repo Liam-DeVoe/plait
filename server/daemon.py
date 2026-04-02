@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from pathlib import Path
+import uuid
+from datetime import datetime, timezone
 
-from server import claude, db, git
-from server.daemon_config import DAEMON_ALLOWED_TOOLS, SORTIE_ALLOWED_TOOLS
+from server import db, git
 from server.models import (
     Cell,
     CellStatus,
@@ -15,7 +15,7 @@ from server.models import (
     Sortie,
     SyncStatus,
 )
-from server.sessions import spawn_session
+from server.sessions import daemon_sortie_cmd, spawn_session, tend_cmd
 
 logger = logging.getLogger(__name__)
 
@@ -25,23 +25,19 @@ notify_callback: asyncio.Queue | None = None
 POLL_INTERVAL = 300  # seconds (5 minutes)
 
 # Per-cell locks to prevent concurrent process_cell execution (e.g. daemon
-# tick overlapping with an API-triggered sync).
+# daemon run overlapping with an API-triggered sync).
 _cell_locks: dict[str, asyncio.Lock] = {}
+
+# In-flight daemon actions, keyed by (cell_id, trigger). Prevents the daemon
+# from spawning duplicate sessions for the same trigger on the same cell.
+# Tracked in memory so user-side actions (e.g. resuming a session) don't
+# interfere with daemon concurrency control.
+_in_flight: set[tuple[str, str]] = set()
 
 
 async def notify(event: str, data: dict) -> None:
     if notify_callback is not None:
         await notify_callback.put({"event": event, "data": data})
-
-
-async def _should_attempt(cell_id: str, trigger: str) -> bool:
-    """Check if we should attempt a daemon action on this cell.
-
-    Blocks only if a session with the same trigger is already running.
-    """
-    sessions = await db.list_sessions(cell_id)
-    trigger_sessions = [s for s in sessions if s.trigger == trigger]
-    return not any(s.ended_at is None for s in trigger_sessions)
 
 
 async def _push_if_published(cell: Cell) -> bool | None:
@@ -56,17 +52,25 @@ async def _push_if_published(cell: Cell) -> bool | None:
     return ok
 
 
-async def process_cell(cell: Cell) -> None:
-    """Process a single cell: check sync status, CI status, and fix issues."""
+async def process_cell(cell: Cell) -> dict | None:
+    """Process a single cell: check sync status, CI status, and fix issues.
+
+    Returns a result dict for daemon run tracking, or None if the cell
+    was already being processed.
+    """
     lock = _cell_locks.setdefault(cell.id, asyncio.Lock())
     if lock.locked():
         logger.info(f"Cell {cell.id} already being processed, skipping")
-        return
+        return None
     async with lock:
-        await _process_cell(cell)
+        return await _process_cell(cell)
 
 
-async def _process_cell(cell: Cell) -> None:
+async def _process_cell(cell: Cell) -> dict:
+    reasons: list[str] = []
+    decision = "idle"
+    outcome = None
+
     try:
         await git.assert_not_detached(cell.worktree_path)
 
@@ -80,6 +84,7 @@ async def _process_cell(cell: Cell) -> None:
             await db.update_cell(cell.id, sync_status=SyncStatus.current)
             await notify("cell_updated", {"id": cell.id, "sync_status": "current"})
         if behind:
+            reasons.append("behind_main")
             logger.info(
                 f"Cell {cell.id} ({cell.repo}:{cell.branch}) is behind main, merging"
             )
@@ -105,6 +110,7 @@ async def _process_cell(cell: Cell) -> None:
                     logger.info(f"Cell {cell.id} merged successfully")
             else:
                 has_conflicts = True
+                reasons.append("conflicts")
                 await db.update_cell(cell.id, sync_status=SyncStatus.conflict)
                 await notify("cell_updated", {"id": cell.id, "sync_status": "conflict"})
 
@@ -117,57 +123,62 @@ async def _process_cell(cell: Cell) -> None:
                 await db.update_cell(cell.id, ci_status=ci_status)
                 await notify("cell_updated", {"id": cell.id, "ci_status": ci})
             if ci_status == CIStatus.failing:
+                if "ci_failing" not in reasons:
+                    reasons.append("ci_failing")
                 needs_tend = True
 
             comment_count = await git.get_pr_comment_count(cell.repo, cell.pr_number)
             if comment_count != cell.pr_comment_count:
                 await db.update_cell(cell.id, pr_comment_count=comment_count)
+                reasons.append("new_comments")
+                needs_tend = True
+
+            reaction_count = await git.get_pr_reaction_count(cell.repo, cell.pr_number)
+            if reaction_count != cell.pr_reaction_count:
+                await db.update_cell(cell.id, pr_reaction_count=reaction_count)
+                reasons.append("new_reactions")
                 needs_tend = True
 
         # --- Spawn a tend session if anything changed ---
-        if needs_tend and await _should_attempt(cell.id, "tend"):
+        key = (cell.id, "tend")
+        if needs_tend and key not in _in_flight:
+            decision = "tended"
             logger.info(f"Cell {cell.id} needs fixing, invoking Claude")
-            session = Session(
-                cell_id=cell.id,
-                role=SessionRole.daemon,
-                trigger="tend",
-            )
-            await db.create_session(session)
-
-            system_prompt = claude.orrery_system_prompt(cell.id)
-            prompt = claude.tend_prompt(cell.branch)
-            worktree = str(Path(cell.worktree_path).resolve())
-            allowed_tools = [
-                t.format(worktree=worktree) for t in DAEMON_ALLOWED_TOOLS
-            ]
-
-            task = spawn_session(
-                session.id,
-                cwd=cell.worktree_path,
-                print_mode=True,
-                prompt=prompt,
-                system_prompt=system_prompt,
-                allowed_tools=allowed_tools,
-            )
-            exit_code = await task
-            ok = exit_code == 0
-
-            if ok:
-                push_result = await _push_if_published(cell)
-                sync = (
-                    SyncStatus.current
-                    if push_result is not False
-                    else SyncStatus.failed
+            _in_flight.add(key)
+            try:
+                session = Session(
+                    cell_id=cell.id,
+                    role=SessionRole.daemon,
+                    trigger="tend",
                 )
-            else:
-                sync = SyncStatus.failed
+                await db.create_session(session)
 
-            await db.update_cell(cell.id, sync_status=sync)
-            await notify("cell_updated", {"id": cell.id, "sync_status": sync.value})
+                cmd, cwd = tend_cmd(session.id, cell)
+                task = spawn_session(session.id, cmd, cwd)
+                exit_code = await task
+                ok = exit_code == 0
+                outcome = "succeeded" if ok else "failed"
 
-            await db.update_session(session.id, succeeded=1 if ok else 0)
-            if not ok:
-                logger.error(f"Claude failed to fix issues for cell {cell.id}")
+                if ok:
+                    push_result = await _push_if_published(cell)
+                    sync = (
+                        SyncStatus.current
+                        if push_result is not False
+                        else SyncStatus.failed
+                    )
+                else:
+                    sync = SyncStatus.failed
+
+                await db.update_cell(cell.id, sync_status=sync)
+                await notify("cell_updated", {"id": cell.id, "sync_status": sync.value})
+
+                await db.update_session(session.id, succeeded=1 if ok else 0)
+                if not ok:
+                    logger.error(f"Claude failed to fix issues for cell {cell.id}")
+            finally:
+                _in_flight.discard(key)
+        elif needs_tend:
+            decision = "skipped"
 
         # --- Detect PR for cells that have been pushed but have no PR yet ---
         if not cell.pr_number and await git.has_remote_branch(
@@ -183,7 +194,17 @@ async def _process_cell(cell: Cell) -> None:
                 await notify("cell_updated", {"id": cell.id})
 
     except Exception:
+        decision = "error"
         logger.exception(f"Error processing cell {cell.id}")
+
+    return {
+        "cell_id": cell.id,
+        "repo": cell.repo,
+        "branch": cell.branch,
+        "decision": decision,
+        "reasons": reasons,
+        "outcome": outcome,
+    }
 
 
 async def daemon_loop() -> None:
@@ -192,10 +213,18 @@ async def daemon_loop() -> None:
     while True:
         try:
             cells = await db.list_cells(status=CellStatus.active)
-            logger.info(f"Daemon tick: processing {len(cells)} active cells")
+            logger.info(f"Daemon run: processing {len(cells)} active cells")
 
+            started_at = datetime.now(timezone.utc).isoformat()
+            results = []
             for cell in cells:
-                await process_cell(cell)
+                result = await process_cell(cell)
+                if result is not None:
+                    results.append(result)
+
+            ended_at = datetime.now(timezone.utc).isoformat()
+            run_id = str(uuid.uuid4())
+            await db.create_daemon_run(run_id, started_at, ended_at, results)
 
         except Exception:
             logger.exception("Daemon loop error")
@@ -222,22 +251,8 @@ async def spawn_sortie_session(sortie: Sortie) -> None:
     await db.update_sortie(sortie.id, session_id=session.id)
     await notify("sortie_updated", {"id": sortie.id})
 
-    system_prompt = claude.sortie_system_prompt(
-        sortie.id, exploration_dir, repo_worktrees
-    )
-    worktree_root = str(git.WORKTREE_ROOT.resolve())
-    allowed_tools = [
-        t.format(worktree_root=worktree_root) for t in SORTIE_ALLOWED_TOOLS
-    ]
-
-    task = spawn_session(
-        session.id,
-        cwd=exploration_dir,
-        print_mode=True,
-        prompt=sortie.prompt,
-        system_prompt=system_prompt,
-        allowed_tools=allowed_tools,
-    )
+    cmd, cwd = daemon_sortie_cmd(session.id, sortie, exploration_dir, repo_worktrees)
+    task = spawn_session(session.id, cmd, cwd)
     exit_code = await task
     ok = exit_code == 0
 

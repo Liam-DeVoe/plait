@@ -1,0 +1,25 @@
+author = "Liam-DeVoe"
+
+[repos.hegel-core]
+path = "/Users/tybug/Desktop/Liam/coding/hegel/hegel-core"
+upstream = "hegeldev/hegel-core"
+
+[repos.hegel-typescript]
+path = "/Users/tybug/Desktop/Liam/coding/hegel/typescript"
+upstream = "antithesishq/hegel-typescript"
+
+[repos.hegel-go]
+path = "/Users/tybug/Desktop/Liam/coding/hegel/go"
+upstream = "hegeldev/hegel-go"
+
+[repos.hegel-rust]
+path = "/Users/tybug/Desktop/Liam/coding/hegel/rust"
+upstream = "hegeldev/hegel-rust"
+
+[repos.hegel-cpp]
+path = "/Users/tybug/Desktop/Liam/coding/hegel/cpp"
+upstream = "antithesishq/hegel-cpp"
+
+[repos.hegel-ocaml]
+path = "/Users/tybug/Desktop/Liam/coding/hegel/ocaml"
+upstream = "hegeldev/hegel-ocaml"
