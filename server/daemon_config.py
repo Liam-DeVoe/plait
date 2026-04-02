@@ -2,13 +2,13 @@ from __future__ import annotations
 
 # Permissions granted to daemon-spawned Claude sessions.
 # Each entry is an --allowedTools pattern.
-# Path-based tools use // for absolute paths; the worktree path is
-# substituted at runtime via {worktree}.
+# Path-based tools use // for absolute paths. Since {worktree} expands
+# to an absolute path (starting with /), we use a single / prefix here.
 DAEMON_ALLOWED_TOOLS = [
     "Bash",
-    "Read(//{worktree}/**)",
-    "Edit(//{worktree}/**)",
-    "Write(//{worktree}/**)",
-    "Glob(//{worktree}/**)",
-    "Grep(//{worktree}/**)",
+    "Read(/{worktree}/**)",
+    "Edit(/{worktree}/**)",
+    "Write(/{worktree}/**)",
+    "Glob(/{worktree}/**)",
+    "Grep(/{worktree}/**)",
 ]

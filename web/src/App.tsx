@@ -638,10 +638,12 @@ function CollapsibleSession({
   session,
   cellId,
   onResume,
+  onVSCode,
 }: {
   session: Session;
   cellId: string;
   onResume: () => void;
+  onVSCode: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
 
