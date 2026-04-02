@@ -423,7 +423,10 @@ async def resume_session(cell_id: str, session_id: str):
     await db.update_session(session_id, ended_at=None)
 
     cmd, cwd = resume_cmd(session.id, cell.worktree_path)
-    spawn_session(session.id, cmd, cwd)
+    idle_timeout = (
+        daemon.SESSION_IDLE_TIMEOUT if session.role == SessionRole.daemon else None
+    )
+    spawn_session(session.id, cmd, cwd, idle_timeout=idle_timeout)
 
     session.ended_at = None
     return _session_dict(session)
@@ -630,7 +633,10 @@ async def resume_sortie_session(sortie_id: str, session_id: str):
     exploration_dir = str(git.WORKTREE_ROOT / f"sortie-{sortie_id}")
     await db.update_session(session_id, ended_at=None)
     cmd, cwd = resume_cmd(session.id, exploration_dir)
-    spawn_session(session.id, cmd, cwd)
+    idle_timeout = (
+        daemon.SESSION_IDLE_TIMEOUT if session.role == SessionRole.daemon else None
+    )
+    spawn_session(session.id, cmd, cwd, idle_timeout=idle_timeout)
 
     session.ended_at = None
     return _session_dict(session)

@@ -14,7 +14,6 @@ from pathlib import Path
 from server import claude, db
 from server.daemon_config import DAEMON_ALLOWED_TOOLS, SORTIE_ALLOWED_TOOLS
 from server.models import Cell, Sortie
-
 from server.pty import pty_manager
 
 logger = logging.getLogger(__name__)
