@@ -4,23 +4,23 @@
     "upstream": "hegeldev/hegel-core"
   },
   "hegel-typescript": {
-    "path": "/Users/tybug/Desktop/Liam/coding/hegel/hegel-typescript",
+    "path": "/Users/tybug/Desktop/Liam/coding/hegel/typescript",
     "upstream": "antithesishq/hegel-typescript"
   },
   "hegel-go": {
-    "path": "/Users/tybug/Desktop/Liam/coding/hegel/hegel-go",
+    "path": "/Users/tybug/Desktop/Liam/coding/hegel/go",
     "upstream": "hegeldev/hegel-go"
   },
   "hegel-rust": {
-    "path": "/Users/tybug/Desktop/Liam/coding/hegel/hegel-rust",
+    "path": "/Users/tybug/Desktop/Liam/coding/hegel/rust",
     "upstream": "hegeldev/hegel-rust"
   },
   "hegel-cpp": {
-    "path": "/Users/tybug/Desktop/Liam/coding/hegel/hegel-cpp",
+    "path": "/Users/tybug/Desktop/Liam/coding/hegel/cpp",
     "upstream": "antithesishq/hegel-cpp"
   },
   "hegel-ocaml": {
-    "path": "/Users/tybug/Desktop/Liam/coding/hegel/hegel-ocaml",
+    "path": "/Users/tybug/Desktop/Liam/coding/hegel/ocaml",
     "upstream": "hegeldev/hegel-ocaml"
   }
 }

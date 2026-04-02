@@ -177,6 +177,25 @@ export async function resumeSession(cellId: string, sessionId: string): Promise<
   return res.json();
 }
 
+export async function fetchSortieXtermState(sortieId: string, sessionId: string): Promise<ArrayBuffer> {
+  const res = await fetch(`${BASE}/sorties/${sortieId}/sessions/${sessionId}/xterm-state`);
+  if (!res.ok) {
+    throw new Error("Failed to fetch xterm state");
+  }
+  return res.arrayBuffer();
+}
+
+export async function resumeSortieSession(sortieId: string, sessionId: string): Promise<Session> {
+  const res = await fetch(`${BASE}/sorties/${sortieId}/sessions/${sessionId}/resume`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to resume session");
+  }
+  return res.json();
+}
+
 export function connectWebSocket(onMessage: (data: any) => void): WebSocket {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${protocol}//${window.location.host}/ws`);

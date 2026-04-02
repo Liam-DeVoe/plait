@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { fetchXtermState } from "./api";
 import "@xterm/xterm/css/xterm.css";
 
 const THEME = {
@@ -29,13 +28,13 @@ const THEME = {
 
 interface TerminalProps {
   sessionId: string;
-  cellId: string;
   alive: boolean;
   autoFocus?: boolean;
   onResume: () => Promise<void>;
+  fetchXtermState: () => Promise<ArrayBuffer>;
 }
 
-export default function Terminal({ sessionId, cellId, alive, autoFocus, onResume }: TerminalProps) {
+export default function Terminal({ sessionId, alive, autoFocus, onResume, fetchXtermState }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const resumingRef = useRef(false);
@@ -182,7 +181,7 @@ export default function Terminal({ sessionId, cellId, alive, autoFocus, onResume
       };
     } else {
       // --- REPLAY MODE ---
-      fetchXtermState(cellId, sessionId)
+      fetchXtermState()
         .then((buffer) => term.write(new Uint8Array(buffer)))
         .catch(() => {});
 

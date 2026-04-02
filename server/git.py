@@ -81,6 +81,10 @@ async def create_worktree(repo_id: str, branch: str, cell_id: str) -> str:
     """Create a git worktree for a cell. Returns the worktree path."""
     repo = config.get_repo(repo_id)
     repo_dir = repo.path
+    if not repo_dir.exists():
+        raise RuntimeError(
+            f"Repo path does not exist: {repo_dir}. Clone the repo first."
+        )
     worktree_dir = WORKTREE_ROOT / cell_id
     worktree_dir.parent.mkdir(parents=True, exist_ok=True)
 
@@ -224,7 +228,10 @@ async def get_pr_info_from_url(pr_url: str) -> dict:
     )
     if rc != 0:
         raise RuntimeError(f"Failed to fetch PR info from {pr_url}: {err}")
-    data = json.loads(out)
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        raise RuntimeError(f"Failed to parse PR info from {pr_url}: {out[:200]}")
     data["repo_id"] = repo_id
     data["branch"] = data.pop("headRefName")
     return data

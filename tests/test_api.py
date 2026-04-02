@@ -156,6 +156,43 @@ async def test_create_cell_bad_url(client):
     assert resp.status_code == 400
 
 
+async def test_create_cell_gh_returns_non_json(client):
+    """When gh pr view returns non-JSON output, the API should return 400, not 500."""
+    c, git_env, mock_gh = client
+    from server.config import get_repo
+
+    upstream = get_repo(git_env.repo_id).upstream
+    pr_url = f"https://github.com/{upstream}/pull/99"
+    # gh returns success (rc=0) but non-JSON output
+    mock_gh.set_response("pr view", 0, "Internal Server Error")
+
+    resp = await c.post("/cells", json={"pr_url": pr_url})
+    assert resp.status_code == 400
+
+
+async def test_create_cell_repo_path_missing(client):
+    """When the configured repo path doesn't exist on disk, should return 400, not 500."""
+    c, git_env, mock_gh = client
+    from pathlib import Path
+
+    import server.config as config_module
+    from server.config import Repo
+
+    # Add a second repo whose path doesn't exist
+    config_module._repos["ghost"] = Repo(
+        id="ghost", path=Path("/nonexistent/path"), upstream="org/ghost"
+    )
+    pr_url = "https://github.com/org/ghost/pull/1"
+    mock_gh.set_response(
+        "pr view",
+        0,
+        json.dumps({"number": 1, "url": pr_url, "headRefName": "fix-bug"}),
+    )
+
+    resp = await c.post("/cells", json={"pr_url": pr_url})
+    assert resp.status_code == 400
+
+
 async def test_list_cells_filter_by_status(client):
     create_resp = await _create_cell_via_api(client)
     cell_id = create_resp.json()["id"]
@@ -182,7 +219,7 @@ async def test_create_sortie(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["prompt"] == "update everything"
-    assert data["session_id"] is None  # not yet assigned (background task)
+    assert data["session_id"] is not None  # session created inline with PTY
 
 
 async def test_list_sorties(client):

@@ -28,6 +28,9 @@ import {
   createInteractiveSession,
   deleteSession,
   resumeSession,
+  fetchXtermState,
+  fetchSortieXtermState,
+  resumeSortieSession,
   connectWebSocket,
   type Cell,
   type Session,
@@ -579,10 +582,10 @@ function CellDetailPage() {
                 </div>
                 <Terminal
                   sessionId={selectedSession.id}
-                  cellId={cell.id}
                   alive={selectedSession.alive}
                   autoFocus={selectedSession.id === selectedSessionId}
                   onResume={() => handleResumeSession(selectedSession.id)}
+                  fetchXtermState={() => fetchXtermState(cell.id, selectedSession.id)}
                 />
               </>
             )}
@@ -692,9 +695,9 @@ function CollapsibleSession({
         <div className="collapsible-session__body">
           <Terminal
             sessionId={session.id}
-            cellId={cellId}
             alive={session.alive}
             onResume={async () => onResume()}
+            fetchXtermState={() => fetchXtermState(cellId, session.id)}
           />
         </div>
       )}
@@ -887,19 +890,15 @@ function SortieDetailPage() {
           </div>
         </div>
         {sortie.session && (
-          <details className="sortie-detail__session">
-            <summary className="sortie-detail__session-summary">
-              Session{" "}
-              {sortie.session.ended_at
-                ? sortie.session.succeeded
-                  ? "(succeeded)"
-                  : "(failed)"
-                : "(running...)"}
-            </summary>
-            <pre className="sortie-detail__transcript">
-              {sortie.session.transcript || "(no output yet)"}
-            </pre>
-          </details>
+          <Terminal
+            sessionId={sortie.session.id}
+            alive={sortie.session.alive}
+            onResume={async () => {
+              await resumeSortieSession(sortie.id, sortie.session!.id);
+              load();
+            }}
+            fetchXtermState={() => fetchSortieXtermState(sortie.id, sortie.session!.id)}
+          />
         )}
       </div>
 

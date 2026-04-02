@@ -356,34 +356,38 @@ async def create_session_endpoint(cell_id: str, req: CreateSessionRequest):
     )
     await db.create_session(session)
 
-    _spawn_pty_for_session(session.id, cell.worktree_path, cell.id, prompt=req.prompt)
+    _spawn_pty_for_session(
+        session.id,
+        cwd=cell.worktree_path,
+        prompt=req.prompt,
+        system_prompt=claude.orrery_system_prompt(cell.id),
+    )
 
     return _session_dict(session)
 
 
 def _spawn_pty_for_session(
     session_id: str,
-    worktree_path: str,
-    cell_id: str,
+    cwd: str,
     prompt: str = "",
+    system_prompt: str | None = None,
     resume: bool = False,
 ) -> None:
     """Spawn a PTY running claude for a session and start watching it."""
     if resume:
         cmd = ["claude", "--verbose", "--resume", session_id]
     else:
-        system_prompt = claude.orrery_system_prompt(cell_id)
         cmd = [
             "claude",
             "--verbose",
             "--session-id",
             session_id,
-            "--system-prompt",
-            system_prompt,
         ]
+        if system_prompt:
+            cmd.extend(["--system-prompt", system_prompt])
     pty_manager.spawn(
         session_id,
-        cwd=worktree_path,
+        cwd=cwd,
         cmd=cmd,
     )
     if prompt.strip():
@@ -423,15 +427,17 @@ async def _watch_pty(session_id: str) -> None:
         ended_at=datetime.now(timezone.utc).isoformat(),
     )
 
-    # Look up cell_id for the notification
+    # Look up cell_id/sortie_id for the notification
     conn = await db.get_db()
     try:
         cursor = await conn.execute(
-            "SELECT cell_id FROM sessions WHERE id = ?", (session_id,)
+            "SELECT cell_id, sortie_id FROM sessions WHERE id = ?", (session_id,)
         )
         row = await cursor.fetchone()
-        if row:
+        if row and row["cell_id"]:
             await daemon.notify("cell_updated", {"id": row["cell_id"]})
+        if row and row["sortie_id"]:
+            await daemon.notify("sortie_updated", {"id": row["sortie_id"]})
     finally:
         await conn.close()
 
@@ -453,7 +459,7 @@ async def resume_session(cell_id: str, session_id: str):
     # Reset ended_at so daemon sees it as active
     await db.update_session(session_id, ended_at=None)
 
-    _spawn_pty_for_session(session.id, cell.worktree_path, cell.id, resume=True)
+    _spawn_pty_for_session(session.id, cwd=cell.worktree_path, resume=True)
 
     session.ended_at = None
     return _session_dict(session)
@@ -563,8 +569,35 @@ class CreateSortieRequest(BaseModel):
 async def create_sortie(req: CreateSortieRequest):
     sortie = Sortie(prompt=req.prompt)
     await db.create_sortie(sortie)
-    asyncio.create_task(daemon.spawn_sortie_session(sortie))
-    return asdict(sortie)
+
+    try:
+        repo_worktrees = await git.create_sortie_worktrees(sortie.id)
+    except RuntimeError:
+        raise HTTPException(status_code=500, detail="Failed to create sortie worktrees")
+
+    exploration_dir = str(git.WORKTREE_ROOT / f"sortie-{sortie.id}")
+
+    session = Session(
+        sortie_id=sortie.id,
+        role=SessionRole.user,
+        trigger="sortie",
+    )
+    await db.create_session(session)
+    await db.update_sortie(sortie.id, session_id=session.id)
+
+    system_prompt = claude.sortie_system_prompt(
+        sortie.id, exploration_dir, repo_worktrees
+    )
+    _spawn_pty_for_session(
+        session.id,
+        cwd=exploration_dir,
+        prompt=req.prompt,
+        system_prompt=system_prompt,
+    )
+
+    result = asdict(sortie)
+    result["session_id"] = session.id
+    return result
 
 
 async def _derive_sortie_status(sortie: Sortie, cells: list[Cell]) -> str:
@@ -613,6 +646,33 @@ async def get_sortie(sortie_id: str):
         if session:
             result["session"] = _session_dict(session)
     return result
+
+
+@app.get("/sorties/{sortie_id}/sessions/{session_id}/xterm-state")
+async def get_sortie_xterm_state(sortie_id: str, session_id: str):
+    session = await db.get_session(session_id)
+    if not session or session.sortie_id != sortie_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not session.xterm_state:
+        raise HTTPException(status_code=404, detail="No xterm state available")
+    return Response(content=session.xterm_state, media_type="application/octet-stream")
+
+
+@app.post("/sorties/{sortie_id}/sessions/{session_id}/resume")
+async def resume_sortie_session(sortie_id: str, session_id: str):
+    session = await db.get_session(session_id)
+    if not session or session.sortie_id != sortie_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    if pty_manager.is_alive(session_id):
+        raise HTTPException(status_code=400, detail="Session is already alive")
+
+    exploration_dir = str(git.WORKTREE_ROOT / f"sortie-{sortie_id}")
+    await db.update_session(session_id, ended_at=None)
+    _spawn_pty_for_session(session.id, cwd=exploration_dir, resume=True)
+
+    session.ended_at = None
+    return _session_dict(session)
 
 
 # --- Sortie hook endpoints ---
