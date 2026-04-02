@@ -18,7 +18,9 @@ async def client(init_db, git_env, mock_gh):
         yield c, git_env, mock_gh
 
 
-def _setup_gh_for_pr(mock_gh, git_env, branch="test-branch", pr_number=42):
+def _setup_gh_for_pr(
+    mock_gh, git_env, branch="test-branch", pr_number=42, ci_status="passing"
+):
     """Configure mock_gh to return valid PR info for a test PR URL."""
     from server.config import get_repo
 
@@ -35,6 +37,7 @@ def _setup_gh_for_pr(mock_gh, git_env, branch="test-branch", pr_number=42):
             }
         ),
     )
+    mock_gh.set_response("pr checks", 0, ci_status)
     return pr_url
 
 
@@ -61,6 +64,7 @@ async def test_create_cell(client):
     assert data["branch"] == "test-branch"
     assert data["pr_number"] == 42
     assert data["status"] == "active"
+    assert data["ci_status"] == "passing"
     assert data["worktree_path"]  # non-empty
 
 

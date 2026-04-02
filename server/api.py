@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from server import claude, config, daemon, db, git
 from server.models import (
+    CIStatus,
     Cell,
     CellStatus,
     Session,
@@ -133,6 +134,10 @@ async def create_cell(req: CreateCellRequest):
         cell.worktree_path = await git.create_worktree(cell.repo, cell.branch, cell.id)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    if cell.pr_number:
+        ci = await git.get_ci_status(cell.repo, cell.pr_number)
+        cell.ci_status = CIStatus(ci)
 
     await db.create_cell(cell)
     return asdict(cell)
