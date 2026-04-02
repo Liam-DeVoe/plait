@@ -212,6 +212,51 @@ async def open_in_vscode(cell_id: str):
     return {"status": "opened"}
 
 
+@app.post("/cells/{cell_id}/sessions/{session_id}/vscode")
+async def open_session_in_vscode(cell_id: str, session_id: str):
+    """Stop the web PTY session (if alive) and open VS Code + a terminal
+    that resumes the Claude Code session in the cell's worktree."""
+    cell = await db.get_cell(cell_id)
+    if not cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+
+    sessions = await db.list_sessions(cell_id)
+    session = next((s for s in sessions if s.id == session_id), None)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Stop the PTY if it's still alive
+    if pty_manager.is_alive(session_id):
+        transcript = pty_manager.get_transcript(session_id)
+        xterm_state = pty_manager.get_raw_output(session_id)
+        await pty_manager.terminate(session_id)
+
+        update_kwargs: dict[str, object] = {}
+        if not session.ended_at:
+            update_kwargs["ended_at"] = datetime.now(timezone.utc).isoformat()
+        if transcript:
+            update_kwargs["transcript"] = transcript
+        if xterm_state:
+            update_kwargs["xterm_state"] = xterm_state
+        if update_kwargs:
+            await db.update_session(session_id, **update_kwargs)
+
+    # Open VS Code at the worktree
+    subprocess.Popen(["code", cell.worktree_path])
+
+    # Open a macOS terminal with claude --resume
+    shell_cmd = f"cd '{cell.worktree_path}' && claude --resume {session_id}"
+    subprocess.Popen(
+        [
+            "osascript",
+            "-e",
+            f'tell application "Terminal" to do script "{shell_cmd}"',
+        ]
+    )
+
+    return {"status": "opened"}
+
+
 # --- Session endpoints ---
 
 

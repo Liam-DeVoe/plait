@@ -18,6 +18,7 @@ import {
   triggerSync,
   deleteCell,
   openInVSCode,
+  openSessionInVSCode,
   fetchSorties,
   fetchSortie,
   createSortie,
@@ -495,7 +496,7 @@ function CellDetailPage() {
 
       {aliveSessions.length === 0 && deadSessions.length === 0 ? (
         <div className="muted">
-          No sessions yet. Start one to open a Claude terminal in this worktree.
+          No sessions yet.
         </div>
       ) : (
         <div className="cell-detail__sessions-list">
@@ -509,6 +510,15 @@ function CellDetailPage() {
                 <span className="cell-detail__session-time">
                   {new Date(s.started_at).toLocaleString()}
                 </span>
+                <div
+                  className="btn btn--sm btn--soft-gray cell-detail__vscode-btn"
+                  onClick={async () => {
+                    await openSessionInVSCode(cell.id, s.id);
+                    load();
+                  }}
+                >
+                  VS Code
+                </div>
                 <div
                   className="btn btn--sm btn--soft-red cell-detail__stop-btn"
                   onClick={() => handleStopSession(s.id)}

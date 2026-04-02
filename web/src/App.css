@@ -225,6 +225,15 @@
   background: #bfdbfe;
 }
 
+.btn--soft-gray {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.btn--soft-gray:hover {
+  background: #e5e7eb;
+}
+
 .btn--soft-red {
   background: #fee2e2;
   color: #991b1b;

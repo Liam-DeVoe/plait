@@ -83,6 +83,10 @@ export async function openInVSCode(id: string): Promise<void> {
   await fetch(`${BASE}/cells/${id}/vscode`, { method: "POST" });
 }
 
+export async function openSessionInVSCode(cellId: string, sessionId: string): Promise<void> {
+  await fetch(`${BASE}/cells/${cellId}/sessions/${sessionId}/vscode`, { method: "POST" });
+}
+
 export async function fetchSorties(): Promise<(Sortie & { cell_count: number })[]> {
   const res = await fetch(`${BASE}/sorties`);
   return res.json();
