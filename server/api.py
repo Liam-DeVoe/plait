@@ -249,13 +249,17 @@ async def create_session_endpoint(cell_id: str, req: CreateSessionRequest):
 
 
 def _spawn_pty_for_session(
-    session_id: str, worktree_path: str, prompt: str = ""
+    session_id: str, worktree_path: str, prompt: str = "", resume: bool = False
 ) -> None:
     """Spawn a PTY running claude for a session and start watching it."""
+    if resume:
+        cmd = ["claude", "--resume", session_id]
+    else:
+        cmd = ["claude", "--session-id", session_id]
     pty_manager.spawn(
         session_id,
         cwd=worktree_path,
-        cmd=["claude", "--session-id", session_id],
+        cmd=cmd,
     )
     if prompt.strip():
 
@@ -318,7 +322,7 @@ async def resume_session(cell_id: str, session_id: str):
     # Reset ended_at so daemon sees it as active
     await db.update_session(session_id, ended_at=None)
 
-    _spawn_pty_for_session(session.id, cell.worktree_path)
+    _spawn_pty_for_session(session.id, cell.worktree_path, resume=True)
 
     session.ended_at = None
     return _session_dict(session)

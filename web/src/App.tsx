@@ -453,14 +453,7 @@ function CellDetailPage() {
           {cell.sessions.map((s) => (
             <div key={s.id} className="bg-white rounded-lg shadow p-4">
               <div className="flex items-center gap-3 mb-2">
-                {s.alive ? (
-                  <StatusBadge status="running" label="alive" />
-                ) : (
-                  <StatusBadge
-                    status={s.succeeded === true ? "completed" : s.succeeded === false ? "failed" : "unknown"}
-                    label={s.succeeded === true ? "succeeded" : s.succeeded === false ? "failed" : "ended"}
-                  />
-                )}
+                {s.alive && <StatusBadge status="running" label="alive" />}
                 <span className="text-xs text-gray-500">
                   {s.role} {s.trigger ? `(${s.trigger})` : ""}
                 </span>
