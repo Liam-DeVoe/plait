@@ -106,42 +106,68 @@ async def test_update_session(init_db):
 
 
 async def test_create_and_get_sortie(init_db):
-    sortie = Sortie(prompt="update all repos", repos=["org/a", "org/b"])
+    sortie = Sortie(prompt="update all repos")
     await db.create_sortie(sortie)
 
     fetched = await db.get_sortie(sortie.id)
     assert fetched is not None
     assert fetched.prompt == "update all repos"
-    assert fetched.repos == ["org/a", "org/b"]
+    assert fetched.session_id is None
 
 
 async def test_list_sorties(init_db):
-    await db.create_sortie(Sortie(prompt="first", repos=["a"]))
-    await db.create_sortie(Sortie(prompt="second", repos=["b"]))
+    await db.create_sortie(Sortie(prompt="first"))
+    await db.create_sortie(Sortie(prompt="second"))
 
     sorties = await db.list_sorties()
     assert len(sorties) == 2
 
 
-async def test_sortie_empty_repos(init_db):
-    sortie = Sortie(prompt="empty", repos=[])
+async def test_sortie_session_id(init_db):
+    sortie = Sortie(prompt="test", session_id="sess-123")
     await db.create_sortie(sortie)
     fetched = await db.get_sortie(sortie.id)
     assert fetched is not None
-    assert fetched.repos == []
+    assert fetched.session_id == "sess-123"
 
 
 async def test_update_sortie(init_db):
-    sortie = Sortie(prompt="test", repos=["a"])
+    sortie = Sortie(prompt="test")
     await db.create_sortie(sortie)
 
-    updated = await db.update_sortie(sortie.id, status=SortieStatus.completed)
+    updated = await db.update_sortie(sortie.id, session_id="sess-456")
     assert updated is not None
-    assert updated.status == SortieStatus.completed
+    assert updated.session_id == "sess-456"
+
+
+async def test_get_session(init_db):
+    cell = Cell(repo="org/repo", branch="main", worktree_path="/tmp/wt")
+    await db.create_cell(cell)
+    session = Session(cell_id=cell.id, role=SessionRole.daemon)
+    await db.create_session(session)
+
+    fetched = await db.get_session(session.id)
+    assert fetched is not None
+    assert fetched.id == session.id
+    assert fetched.cell_id == cell.id
+
+    assert await db.get_session("nonexistent") is None
+
+
+async def test_session_with_sortie_id(init_db):
+    sortie = Sortie(prompt="test")
+    await db.create_sortie(sortie)
+    session = Session(sortie_id=sortie.id, role=SessionRole.daemon, trigger="sortie")
+    await db.create_session(session)
+
+    fetched = await db.get_session(session.id)
+    assert fetched is not None
+    assert fetched.sortie_id == sortie.id
+    assert fetched.cell_id is None
 
 
 async def test_list_cells_by_sortie(init_db):
-    sortie = Sortie(prompt="test", repos=["a", "b"])
+    sortie = Sortie(prompt="test")
     await db.create_sortie(sortie)
 
     c1 = Cell(repo="org/a", branch="b1", worktree_path="/tmp/a", sortie_id=sortie.id)
@@ -185,7 +211,8 @@ def st_cell(draw):
 @st.composite
 def st_session(draw):
     return Session(
-        cell_id=draw(st.text(min_size=1, max_size=36)),
+        cell_id=draw(st.none() | st.text(min_size=1, max_size=36)),
+        sortie_id=draw(st.none() | st.text(min_size=1, max_size=36)),
         role=draw(st_session_role),
         trigger=draw(st.none() | st.text(min_size=0, max_size=50)),
         succeeded=draw(st.none() | st.booleans()),
@@ -198,7 +225,7 @@ def st_session(draw):
 def st_sortie(draw):
     return Sortie(
         prompt=draw(st.text(min_size=0, max_size=200)),
-        repos=draw(st.lists(st.text(min_size=1, max_size=50), max_size=10)),
+        session_id=draw(st.none() | st.text(min_size=1, max_size=36)),
         status=draw(st_sortie_status),
     )
 
@@ -228,10 +255,10 @@ async def test_cell_roundtrip(cell: Cell):
 async def test_session_roundtrip(session: Session):
     await db.init_db()
     await db.create_session(session)
-    sessions = await db.list_sessions(session.cell_id)
-    assert len(sessions) >= 1
-    fetched = next(s for s in sessions if s.id == session.id)
+    fetched = await db.get_session(session.id)
+    assert fetched is not None
     assert fetched.cell_id == session.cell_id
+    assert fetched.sortie_id == session.sortie_id
     assert fetched.role == session.role
     assert fetched.trigger == session.trigger
     assert fetched.succeeded == session.succeeded
@@ -248,5 +275,5 @@ async def test_sortie_roundtrip(sortie: Sortie):
     assert fetched is not None
     assert fetched.id == sortie.id
     assert fetched.prompt == sortie.prompt
-    assert fetched.repos == sortie.repos
+    assert fetched.session_id == sortie.session_id
     assert fetched.status == sortie.status

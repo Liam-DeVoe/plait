@@ -557,35 +557,30 @@ async def _cleanup_stale_sessions() -> None:
 
 class CreateSortieRequest(BaseModel):
     prompt: str
-    repos: list[str]
 
 
 @app.post("/sorties")
 async def create_sortie(req: CreateSortieRequest):
-    # Validate all repo IDs exist in config
-    for repo_id in req.repos:
-        try:
-            config.get_repo(repo_id)
-        except KeyError:
-            raise HTTPException(status_code=400, detail=f"Unknown repo: {repo_id!r}")
-
-    sortie = Sortie(prompt=req.prompt, repos=req.repos)
+    sortie = Sortie(prompt=req.prompt)
     await db.create_sortie(sortie)
-
-    # Spawn a cell per repo in the background
-    for repo in req.repos:
-        asyncio.create_task(daemon.spawn_sortie_cell(sortie, repo))
-
+    asyncio.create_task(daemon.spawn_sortie_session(sortie))
     return asdict(sortie)
 
 
-def _derive_sortie_status(sortie: Sortie, cells: list[Cell]) -> str:
-    """Compute sortie status from child cells."""
-    if (
-        len(cells) >= len(sortie.repos)
-        and cells
-        and all(c.status == CellStatus.archived for c in cells)
-    ):
+async def _derive_sortie_status(sortie: Sortie, cells: list[Cell]) -> str:
+    """Compute sortie status from child cells and orchestrator session."""
+    if sortie.session_id:
+        session = await db.get_session(sortie.session_id)
+        if session and session.ended_at is None:
+            return "active"
+    # Session ended (or doesn't exist yet)
+    if not cells:
+        # No cells and session done → completed (nothing to do)
+        if sortie.session_id:
+            return "completed"
+        # Session not created yet → still active
+        return "active"
+    if all(c.status == CellStatus.archived for c in cells):
         return "completed"
     return "active"
 
@@ -597,7 +592,7 @@ async def list_sorties():
     for s in sorties:
         d = asdict(s)
         cells = await db.list_cells_by_sortie(s.id)
-        d["status"] = _derive_sortie_status(s, cells)
+        d["status"] = await _derive_sortie_status(s, cells)
         d["cell_count"] = len(cells)
         result.append(d)
     return result
@@ -611,5 +606,55 @@ async def get_sortie(sortie_id: str):
     child_cells = await db.list_cells_by_sortie(sortie_id)
     result = asdict(sortie)
     result["cells"] = [asdict(c) for c in child_cells]
-    result["status"] = _derive_sortie_status(sortie, child_cells)
+    result["status"] = await _derive_sortie_status(sortie, child_cells)
+    # Include the orchestrator session if it exists
+    if sortie.session_id:
+        session = await db.get_session(sortie.session_id)
+        if session:
+            result["session"] = _session_dict(session)
     return result
+
+
+# --- Sortie hook endpoints ---
+
+
+class CreateSortieCellHook(BaseModel):
+    repo: str
+
+
+@app.post("/hooks/sorties/{sortie_id}/create-cell")
+async def hook_create_sortie_cell(sortie_id: str, req: CreateSortieCellHook):
+    sortie = await db.get_sortie(sortie_id)
+    if not sortie:
+        raise HTTPException(status_code=404, detail="Sortie not found")
+
+    try:
+        config.get_repo(req.repo)
+    except KeyError:
+        raise HTTPException(status_code=400, detail=f"Unknown repo: {req.repo!r}")
+
+    # Check for duplicate cell in this sortie
+    existing = await db.list_cells_by_sortie(sortie_id)
+    if any(c.repo == req.repo for c in existing):
+        raise HTTPException(
+            status_code=400,
+            detail=f"A cell for {req.repo!r} already exists in this sortie",
+        )
+
+    branch = f"sortie/{sortie_id[:8]}/{req.repo}"
+    cell = Cell(
+        sortie_id=sortie_id,
+        repo=req.repo,
+        branch=branch,
+        worktree_path="",
+    )
+
+    try:
+        cell.worktree_path = await git.create_worktree(req.repo, branch, cell.id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await db.create_cell(cell)
+    await daemon.notify("sortie_updated", {"id": sortie_id})
+    await daemon.notify("cell_updated", {"id": cell.id, "status": "active"})
+    return {"cell_id": cell.id, "worktree_path": cell.worktree_path, "branch": branch}

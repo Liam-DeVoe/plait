@@ -36,12 +36,64 @@ def orrery_system_prompt(cell_id: str) -> str:
     )
 
 
+def sortie_system_prompt(
+    sortie_id: str,
+    exploration_dir: str,
+    repo_paths: dict[str, str],
+) -> str:
+    """Generate the system prompt for a sortie orchestrator session."""
+    base = f"http://localhost:{ORRERY_PORT}"
+    repo_list = "\n".join(f"  - {rid}: {path}" for rid, path in repo_paths.items())
+    return (
+        f"You are running a sortie (id: {sortie_id}) in Orrery.\n"
+        "Orrery is a development tool that manages worktrees across multiple repos.\n"
+        "\n"
+        "## Exploration worktrees (READ-ONLY)\n"
+        f"You have read-only worktrees of all repos at origin/main under:\n"
+        f"  {exploration_dir}\n"
+        "\n"
+        f"Repos:\n{repo_list}\n"
+        "\n"
+        "Use these to explore the codebases and understand what changes are needed.\n"
+        "Do NOT modify files in these directories.\n"
+        "\n"
+        "## Creating cells for repos you need to change\n"
+        "When you decide a repo needs changes, create a cell:\n"
+        f"  curl -s -X POST {base}/hooks/sorties/{sortie_id}/create-cell \\\n"
+        "    -H 'Content-Type: application/json' \\\n"
+        '    -d \'{"repo": "<repo_id>"}\'\n'
+        "\n"
+        'This returns JSON: {"cell_id": "...", "worktree_path": "...", '
+        '"branch": "..."}.\n'
+        "The worktree is a fresh branch from origin/main where you can make changes.\n"
+        "\n"
+        "## Working in cell worktrees\n"
+        "After creating a cell, work in its worktree_path to make changes.\n"
+        "When ready to push and create a PR for a cell:\n"
+        "1. Choose a descriptive branch name\n"
+        "2. Rename: `git branch -m <new-name>`\n"
+        f"3. Notify: curl -s -X POST {base}/hooks/cells/<cell_id>/branch-updated "
+        "-H 'Content-Type: application/json' "
+        '-d \'{"branch": "<new-name>"}\'\n'
+        "4. Push: `git push -u origin <new-name>`\n"
+        '5. Create PR: `gh pr create --title "..." --body "..."`\n'
+        f"6. Notify: curl -s -X POST {base}/hooks/cells/<cell_id>/pr-created "
+        "-H 'Content-Type: application/json' "
+        '-d \'{"pr_url": "<url>", "pr_number": <number>}\'\n'
+        "\n"
+        "You can create cells for multiple repos. Work through them one at a time.\n"
+        "When you're done with all repos, push your changes and create PRs, "
+        "then finish.\n"
+    )
+
+
 async def run_claude_headless(
     prompt: str,
     cwd: str | Path,
     session_id: str | None = None,
     system_prompt: str | None = None,
     on_output: Callable[[str], Awaitable[None]] | None = None,
+    allowed_tools: list[str] | None = None,
 ) -> tuple[bool, str]:
     """Run claude in print mode with a prompt. Returns (success, output).
 
@@ -50,10 +102,14 @@ async def run_claude_headless(
 
     If on_output is provided, it is called with the accumulated stdout so far
     each time a new line is read, enabling streaming transcript updates.
+
+    If allowed_tools is provided, uses those directly instead of formatting
+    DAEMON_ALLOWED_TOOLS with the cwd.
     """
-    worktree = str(Path(cwd).resolve())
-    allowed = [t.format(worktree=worktree) for t in DAEMON_ALLOWED_TOOLS]
-    args = ["claude", "-p", prompt, "--verbose", "--allowedTools", *allowed]
+    if allowed_tools is None:
+        worktree = str(Path(cwd).resolve())
+        allowed_tools = [t.format(worktree=worktree) for t in DAEMON_ALLOWED_TOOLS]
+    args = ["claude", "-p", prompt, "--verbose", "--allowedTools", *allowed_tools]
     if session_id:
         args.extend(["--session-id", session_id])
     if system_prompt:

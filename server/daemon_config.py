@@ -12,3 +12,14 @@ DAEMON_ALLOWED_TOOLS = [
     "Glob(/{worktree}/**)",
     "Grep(/{worktree}/**)",
 ]
+
+# Sortie sessions need access to the entire worktrees/ directory
+# (both read-only exploration worktrees and cell worktrees created on-demand).
+SORTIE_ALLOWED_TOOLS = [
+    "Bash",
+    "Read(/{worktree_root}/**)",
+    "Edit(/{worktree_root}/**)",
+    "Write(/{worktree_root}/**)",
+    "Glob(/{worktree_root}/**)",
+    "Grep(/{worktree_root}/**)",
+]

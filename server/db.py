@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from enum import Enum
 from pathlib import Path
 
@@ -39,14 +38,15 @@ CREATE TABLE IF NOT EXISTS cells (
 CREATE TABLE IF NOT EXISTS sorties (
     id TEXT PRIMARY KEY,
     prompt TEXT NOT NULL,
-    repos TEXT NOT NULL,  -- JSON array
+    session_id TEXT,
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
-    cell_id TEXT NOT NULL,
+    cell_id TEXT,
+    sortie_id TEXT,
     role TEXT NOT NULL DEFAULT 'user',
     trigger_name TEXT,
     succeeded INTEGER,
@@ -54,7 +54,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     xterm_state BLOB,
     started_at TEXT NOT NULL,
     ended_at TEXT,
-    FOREIGN KEY (cell_id) REFERENCES cells(id)
+    FOREIGN KEY (cell_id) REFERENCES cells(id),
+    FOREIGN KEY (sortie_id) REFERENCES sorties(id)
 );
 """
 
@@ -68,11 +69,16 @@ async def get_db() -> aiosqlite.Connection:
 
 async def init_db() -> None:
     db = await get_db()
-    try:
-        await db.execute("ALTER TABLE sessions ADD COLUMN xterm_state BLOB")
-        await db.commit()
-    except Exception:
-        pass
+    for migration in [
+        "ALTER TABLE sessions ADD COLUMN xterm_state BLOB",
+        "ALTER TABLE sessions ADD COLUMN sortie_id TEXT",
+        "ALTER TABLE sorties ADD COLUMN session_id TEXT",
+    ]:
+        try:
+            await db.execute(migration)
+            await db.commit()
+        except Exception:
+            pass
     await db.close()
 
 
@@ -189,12 +195,13 @@ async def create_session(session: Session) -> Session:
     try:
         succeeded_val = None if session.succeeded is None else int(session.succeeded)
         await db.execute(
-            """INSERT INTO sessions (id, cell_id, role, trigger_name, succeeded,
-               transcript, xterm_state, started_at, ended_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO sessions (id, cell_id, sortie_id, role, trigger_name,
+               succeeded, transcript, xterm_state, started_at, ended_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session.id,
                 session.cell_id,
+                session.sortie_id,
                 session.role.value,
                 session.trigger,
                 succeeded_val,
@@ -255,11 +262,22 @@ async def delete_session(session_id: str) -> None:
         await db.close()
 
 
+async def get_session(session_id: str) -> Session | None:
+    db = await get_db()
+    try:
+        cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+        row = await cursor.fetchone()
+        return _row_to_session(row) if row else None
+    finally:
+        await db.close()
+
+
 def _row_to_session(row: aiosqlite.Row) -> Session:
     succeeded_raw = row["succeeded"]
     return Session(
         id=row["id"],
         cell_id=row["cell_id"],
+        sortie_id=row["sortie_id"],
         role=SessionRole(row["role"]),
         trigger=row["trigger_name"],
         succeeded=None if succeeded_raw is None else bool(succeeded_raw),
@@ -277,12 +295,12 @@ async def create_sortie(sortie: Sortie) -> Sortie:
     db = await get_db()
     try:
         await db.execute(
-            """INSERT INTO sorties (id, prompt, repos, status, created_at)
+            """INSERT INTO sorties (id, prompt, session_id, status, created_at)
                VALUES (?, ?, ?, ?, ?)""",
             (
                 sortie.id,
                 sortie.prompt,
-                json.dumps(sortie.repos),
+                sortie.session_id,
                 sortie.status.value,
                 sortie.created_at,
             ),
@@ -317,7 +335,7 @@ def _row_to_sortie(row: aiosqlite.Row) -> Sortie:
     return Sortie(
         id=row["id"],
         prompt=row["prompt"],
-        repos=json.loads(row["repos"]),
+        session_id=row["session_id"],
         status=SortieStatus(row["status"]),
         created_at=row["created_at"],
     )

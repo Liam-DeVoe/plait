@@ -57,7 +57,7 @@ class Cell:
 class Sortie:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     prompt: str = ""
-    repos: list[str] = field(default_factory=list)
+    session_id: str | None = None
     status: SortieStatus = SortieStatus.active
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
@@ -67,7 +67,8 @@ class Sortie:
 @dataclass
 class Session:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    cell_id: str = ""
+    cell_id: str | None = None
+    sortie_id: str | None = None
     role: SessionRole = SessionRole.user
     trigger: str | None = None
     succeeded: bool | None = None

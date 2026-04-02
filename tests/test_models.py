@@ -37,8 +37,14 @@ def test_sortie_defaults():
     sortie = Sortie()
     assert sortie.id
     assert sortie.status == SortieStatus.active
-    assert sortie.repos == []
+    assert sortie.session_id is None
     assert sortie.prompt == ""
+
+
+def test_session_sortie_id():
+    session = Session(sortie_id="abc")
+    assert session.sortie_id == "abc"
+    assert session.cell_id is None
 
 
 def test_enum_values():

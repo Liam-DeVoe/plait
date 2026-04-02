@@ -28,6 +28,55 @@ async def fetch_origin(repo_id: str) -> None:
         raise RuntimeError(f"Failed to fetch origin for {repo_id}: {err}")
 
 
+async def create_sortie_worktrees(sortie_id: str) -> dict[str, str]:
+    """Create read-only worktrees for all repos at origin/main.
+
+    Returns a dict mapping repo_id to worktree path.
+    Worktrees are created at worktrees/sortie-{id}/{repo_id}/ using
+    detached HEAD (no branch).
+    """
+    sortie_dir = WORKTREE_ROOT / f"sortie-{sortie_id}"
+    sortie_dir.mkdir(parents=True, exist_ok=True)
+
+    result: dict[str, str] = {}
+    for repo_id, repo in config.get_repos().items():
+        await fetch_origin(repo_id)
+        wt_dir = sortie_dir / repo_id
+        rc, out, err = await run(
+            "git",
+            "worktree",
+            "add",
+            "--detach",
+            str(wt_dir),
+            "origin/main",
+            cwd=repo.path,
+        )
+        if rc != 0:
+            raise RuntimeError(f"Failed to create sortie worktree for {repo_id}: {err}")
+        result[repo_id] = str(wt_dir)
+    return result
+
+
+async def remove_sortie_worktrees(sortie_id: str) -> None:
+    """Remove all exploration worktrees for a sortie."""
+    sortie_dir = WORKTREE_ROOT / f"sortie-{sortie_id}"
+    if not sortie_dir.exists():
+        return
+    for repo_id, repo in config.get_repos().items():
+        wt_dir = sortie_dir / repo_id
+        if wt_dir.exists():
+            await run(
+                "git",
+                "worktree",
+                "remove",
+                "--force",
+                str(wt_dir),
+                cwd=repo.path,
+            )
+    if sortie_dir.exists():
+        sortie_dir.rmdir()
+
+
 async def create_worktree(repo_id: str, branch: str, cell_id: str) -> str:
     """Create a git worktree for a cell. Returns the worktree path."""
     repo = config.get_repo(repo_id)

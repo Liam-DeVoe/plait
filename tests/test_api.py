@@ -177,20 +177,17 @@ async def test_create_sortie(client):
     c, git_env, _ = client
     resp = await c.post(
         "/sorties",
-        json={
-            "prompt": "update everything",
-            "repos": [git_env.repo_id],
-        },
+        json={"prompt": "update everything"},
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["prompt"] == "update everything"
-    assert data["repos"] == [git_env.repo_id]
+    assert data["session_id"] is None  # not yet assigned (background task)
 
 
 async def test_list_sorties(client):
     c, git_env, _ = client
-    await c.post("/sorties", json={"prompt": "first", "repos": [git_env.repo_id]})
+    await c.post("/sorties", json={"prompt": "first"})
     resp = await c.get("/sorties")
     assert resp.status_code == 200
     data = resp.json()
@@ -200,18 +197,67 @@ async def test_list_sorties(client):
 
 
 async def test_sortie_derived_status(client):
-    """Sortie status should be derived from child cell statuses."""
+    """Sortie status should be active when session hasn't been created yet."""
     c, git_env, mock_gh = client
 
-    # Create a sortie — status should be active (no cells archived yet)
     resp = await c.post(
         "/sorties",
-        json={"prompt": "update", "repos": [git_env.repo_id]},
+        json={"prompt": "update"},
     )
     sortie_id = resp.json()["id"]
 
     resp = await c.get(f"/sorties/{sortie_id}")
     assert resp.json()["status"] == "active"
+
+
+async def test_hook_create_sortie_cell(client):
+    """Sortie create-cell hook should create a cell linked to the sortie."""
+    c, git_env, _ = client
+    resp = await c.post("/sorties", json={"prompt": "test"})
+    sortie_id = resp.json()["id"]
+
+    resp = await c.post(
+        f"/hooks/sorties/{sortie_id}/create-cell",
+        json={"repo": git_env.repo_id},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["cell_id"]
+    assert data["worktree_path"]
+    assert data["branch"] == f"sortie/{sortie_id[:8]}/{git_env.repo_id}"
+
+    # Verify cell exists and is linked to sortie
+    resp = await c.get(f"/cells/{data['cell_id']}")
+    assert resp.json()["sortie_id"] == sortie_id
+
+
+async def test_hook_create_sortie_cell_duplicate(client):
+    """Creating a duplicate cell for the same repo in a sortie should fail."""
+    c, git_env, _ = client
+    resp = await c.post("/sorties", json={"prompt": "test"})
+    sortie_id = resp.json()["id"]
+
+    await c.post(
+        f"/hooks/sorties/{sortie_id}/create-cell",
+        json={"repo": git_env.repo_id},
+    )
+    resp = await c.post(
+        f"/hooks/sorties/{sortie_id}/create-cell",
+        json={"repo": git_env.repo_id},
+    )
+    assert resp.status_code == 400
+
+
+async def test_hook_create_sortie_cell_bad_repo(client):
+    c, _, _ = client
+    resp = await c.post("/sorties", json={"prompt": "test"})
+    sortie_id = resp.json()["id"]
+
+    resp = await c.post(
+        f"/hooks/sorties/{sortie_id}/create-cell",
+        json={"repo": "nonexistent"},
+    )
+    assert resp.status_code == 400
 
 
 async def test_hook_branch_updated(client):

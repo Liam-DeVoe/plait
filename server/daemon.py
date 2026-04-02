@@ -293,42 +293,59 @@ async def _fix_ci(cell: Cell, *, force: bool = False) -> None:
         logger.error(f"Claude failed to fix CI for cell {cell.id}")
 
 
-async def spawn_sortie_cell(sortie: Sortie, repo: str) -> None:
-    """Create a cell for a sortie repo and run Claude with the sortie prompt."""
-    branch = f"sortie/{sortie.id[:8]}"
+def _make_sortie_output_callback(session_id: str, sortie_id: str):
+    """Create a throttled callback for streaming sortie Claude output."""
+    last_update = 0.0
 
-    cell = Cell(
-        sortie_id=sortie.id,
-        repo=repo,
-        branch=branch,
-        worktree_path="",
-    )
+    async def callback(transcript: str) -> None:
+        nonlocal last_update
+        now = time.monotonic()
+        if now - last_update < 1.0:
+            return
+        last_update = now
+        await db.update_session(session_id, transcript=transcript)
+        await notify("sortie_updated", {"id": sortie_id, "session_id": session_id})
+
+    return callback
+
+
+async def spawn_sortie_session(sortie: Sortie) -> None:
+    """Spawn the single orchestrator Claude session for a sortie."""
+    from server.daemon_config import SORTIE_ALLOWED_TOOLS
 
     try:
-        cell.worktree_path = await git.create_worktree(repo, branch, cell.id)
+        repo_worktrees = await git.create_sortie_worktrees(sortie.id)
     except RuntimeError:
-        logger.exception(f"Failed to create worktree for sortie cell {repo}")
+        logger.exception(f"Failed to create sortie worktrees for {sortie.id}")
         return
 
-    await db.create_cell(cell)
-    await notify("cell_updated", {"id": cell.id, "status": "active"})
+    exploration_dir = str(git.WORKTREE_ROOT / f"sortie-{sortie.id}")
 
     session = Session(
-        cell_id=cell.id,
+        sortie_id=sortie.id,
         role=SessionRole.daemon,
         trigger="sortie",
     )
     await db.create_session(session)
+    await db.update_sortie(sortie.id, session_id=session.id)
+    await notify("sortie_updated", {"id": sortie.id})
 
-    system_prompt = claude.orrery_system_prompt(cell.id)
-    prompt = sortie.prompt + "\n\nWhen you're done, push your changes and create a PR."
-    on_output = _make_output_callback(session.id, cell.id)
+    system_prompt = claude.sortie_system_prompt(
+        sortie.id, exploration_dir, repo_worktrees
+    )
+    worktree_root = str(git.WORKTREE_ROOT.resolve())
+    allowed_tools = [
+        t.format(worktree_root=worktree_root) for t in SORTIE_ALLOWED_TOOLS
+    ]
+    on_output = _make_sortie_output_callback(session.id, sortie.id)
+
     ok, output = await claude.run_claude_headless(
-        prompt,
-        cwd=cell.worktree_path,
+        sortie.prompt,
+        cwd=exploration_dir,
         session_id=session.id,
         system_prompt=system_prompt,
         on_output=on_output,
+        allowed_tools=allowed_tools,
     )
     ended_at = datetime.now(timezone.utc).isoformat()
 
@@ -338,4 +355,11 @@ async def spawn_sortie_cell(sortie: Sortie, repo: str) -> None:
         transcript=output,
         ended_at=ended_at,
     )
-    await notify("cell_updated", {"id": cell.id})
+
+    # Clean up exploration worktrees (cell worktrees persist)
+    try:
+        await git.remove_sortie_worktrees(sortie.id)
+    except Exception:
+        logger.exception(f"Failed to clean up sortie worktrees for {sortie.id}")
+
+    await notify("sortie_updated", {"id": sortie.id})

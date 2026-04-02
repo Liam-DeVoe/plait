@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from server import db, git
-from server.daemon import process_cell, spawn_sortie_cell
+from server.daemon import process_cell, spawn_sortie_session
 from server.models import (
     Cell,
     CIStatus,
@@ -212,35 +212,31 @@ async def test_ci_fix_not_repeated(git_env, init_db, mock_gh, mock_claude):
     assert len(sessions) == 0
 
 
-async def test_spawn_sortie_cell(git_env, init_db, mock_claude):
-    """spawn_sortie_cell should create a cell and run Claude.
-
-    Claude is responsible for pushing and creating the PR (via hooks),
-    so the daemon only creates the cell and runs Claude.
-    """
-    sortie = Sortie(prompt="add tests", repos=[git_env.repo_id])
+async def test_spawn_sortie_session(git_env, init_db, mock_claude):
+    """spawn_sortie_session should create exploration worktrees and run Claude."""
+    sortie = Sortie(prompt="add tests")
     await db.create_sortie(sortie)
 
     # Mock Claude to succeed
     mock_claude.return_value = (True, "Added tests")
 
-    await spawn_sortie_cell(sortie, git_env.repo_id)
+    await spawn_sortie_session(sortie)
 
-    # Verify cell was created
-    cells = await db.list_cells()
-    assert len(cells) == 1
-    cell = cells[0]
-    assert cell.sortie_id == sortie.id
-    assert cell.repo == git_env.repo_id
-    assert cell.branch == f"sortie/{sortie.id[:8]}"
-    # No PR yet — Claude handles that via hooks
-    assert cell.pr_number is None
+    # Verify sortie was updated with session_id
+    fetched_sortie = await db.get_sortie(sortie.id)
+    assert fetched_sortie.session_id is not None
 
     # Verify session was created and completed
-    sessions = await db.list_sessions(cell.id)
-    assert len(sessions) == 1
-    assert sessions[0].trigger == "sortie"
-    assert sessions[0].succeeded is True
+    session = await db.get_session(fetched_sortie.session_id)
+    assert session is not None
+    assert session.sortie_id == sortie.id
+    assert session.cell_id is None
+    assert session.trigger == "sortie"
+    assert session.succeeded is True
+
+    # Exploration worktrees should be cleaned up after session ends
+    sortie_dir = git.WORKTREE_ROOT / f"sortie-{sortie.id}"
+    assert not sortie_dir.exists()
 
 
 async def test_daemon_stops_after_max_failures(git_env, init_db, mock_claude):

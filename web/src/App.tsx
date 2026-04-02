@@ -706,37 +706,17 @@ function CollapsibleSession({
 
 function CreateSortieForm({ onCreated }: { onCreated: () => void }) {
   const [prompt, setPrompt] = useState("");
-  const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
-  const [repos, setRepos] = useState<Repo[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (open) fetchRepos().then(setRepos);
-  }, [open]);
-
-  const toggleRepo = (id: string) => {
-    setSelectedRepos((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
   const handleSubmit = async () => {
     if (!prompt.trim()) return;
-    if (selectedRepos.size === 0) {
-      setError("Select at least one repo");
-      return;
-    }
     setLoading(true);
     setError(null);
     try {
-      await createSortie(prompt, [...selectedRepos]);
+      await createSortie(prompt);
       setPrompt("");
-      setSelectedRepos(new Set());
       setOpen(false);
       onCreated();
     } catch (err: any) {
@@ -764,18 +744,6 @@ function CreateSortieForm({ onCreated }: { onCreated: () => void }) {
         rows={3}
         className="form__textarea"
       />
-      <div className="form__checkboxes">
-        {repos.map((repo) => (
-          <label key={repo.id} className="form__checkbox-label">
-            <input
-              type="checkbox"
-              checked={selectedRepos.has(repo.id)}
-              onChange={() => toggleRepo(repo.id)}
-            />
-            {repo.id}
-          </label>
-        ))}
-      </div>
       <div className="form__actions">
         <div
           className={`btn btn--blue${loading ? " btn--disabled" : ""}`}
@@ -808,10 +776,7 @@ function SortieRow({ sortie }: { sortie: Sortie & { cell_count: number } }) {
         <div className="sortie-row__prompt">{sortie.prompt}</div>
       </td>
       <td className="table__cell sortie-row__meta">
-        {sortie.repos.length} repo{sortie.repos.length !== 1 && "s"}
-      </td>
-      <td className="table__cell sortie-row__meta">
-        {sortie.cell_count} / {sortie.repos.length}
+        {sortie.cell_count} cell{sortie.cell_count !== 1 && "s"}
       </td>
       <td className="table__cell">
         <StatusBadge status={sortie.status} label={sortie.status} />
@@ -854,7 +819,6 @@ function SortiesPage() {
             <thead className="table__head">
               <tr>
                 <th className="table__header-cell">Prompt</th>
-                <th className="table__header-cell">Repos</th>
                 <th className="table__header-cell">Cells</th>
                 <th className="table__header-cell">Status</th>
                 <th className="table__header-cell">Created</th>
@@ -907,21 +871,36 @@ function SortieDetailPage() {
             <div className="sortie-detail__prompt-box">{sortie.prompt}</div>
           </div>
           <div>
-            <span className="sortie-detail__label">Repos:</span>{" "}
-            {sortie.repos.join(", ")}
-          </div>
-          <div>
             <span className="sortie-detail__label">Created:</span>{" "}
             {new Date(sortie.created_at).toLocaleString()}
           </div>
         </div>
+        {sortie.session && (
+          <details className="sortie-detail__session">
+            <summary className="sortie-detail__session-summary">
+              Session{" "}
+              {sortie.session.ended_at
+                ? sortie.session.succeeded
+                  ? "(succeeded)"
+                  : "(failed)"
+                : "(running...)"}
+            </summary>
+            <pre className="sortie-detail__transcript">
+              {sortie.session.transcript || "(no output yet)"}
+            </pre>
+          </details>
+        )}
       </div>
 
       <div className="sortie-detail__cells-header">
-        Cells ({sortie.cells.length} / {sortie.repos.length})
+        Cells ({sortie.cells.length})
       </div>
       {sortie.cells.length === 0 ? (
-        <div className="muted">Cells are being created...</div>
+        <div className="muted">
+          {sortie.session && !sortie.session.ended_at
+            ? "Session is exploring repos..."
+            : "No repos needed changes."}
+        </div>
       ) : (
         <div className="card card--clipped">
           <table className="table">

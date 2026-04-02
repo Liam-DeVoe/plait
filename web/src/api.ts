@@ -29,10 +29,11 @@ export interface Session {
 export interface Sortie {
   id: string;
   prompt: string;
-  repos: string[];
+  session_id: string | null;
   status: "active" | "completed";
   created_at: string;
   cells?: Cell[];
+  session?: Session;
 }
 
 export interface Repo {
@@ -121,11 +122,11 @@ export async function fetchSortie(id: string): Promise<Sortie & { cells: Cell[] 
   return res.json();
 }
 
-export async function createSortie(prompt: string, repos: string[]): Promise<Sortie> {
+export async function createSortie(prompt: string): Promise<Sortie> {
   const res = await fetch(`${BASE}/sorties`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ prompt, repos }),
+    body: JSON.stringify({ prompt }),
   });
   if (!res.ok) {
     const err = await res.json();
