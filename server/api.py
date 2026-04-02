@@ -666,6 +666,16 @@ async def delete_sortie(sortie_id: str):
     return {"status": "deleted"}
 
 
+@app.post("/sorties/{sortie_id}/vscode")
+async def open_sortie_in_vscode(sortie_id: str):
+    sortie = await db.get_sortie(sortie_id)
+    if not sortie:
+        raise HTTPException(status_code=404, detail="Sortie not found")
+    exploration_dir = str(git.WORKTREE_ROOT / f"sortie-{sortie_id}")
+    subprocess.Popen(["code", exploration_dir])
+    return {"status": "opened"}
+
+
 # --- Sortie hook endpoints ---
 
 

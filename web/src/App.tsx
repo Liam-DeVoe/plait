@@ -28,6 +28,7 @@ import {
   fetchSortie,
   createSortie,
   deleteSortie,
+  openSortieInVSCode,
   createInteractiveSession,
   deleteSession,
   resumeSession,
@@ -1021,6 +1022,12 @@ function SortieDetailPage() {
         <div className="sortie-detail__header">
           <div className="sortie-detail__title">Sortie</div>
           <div className="sortie-detail__actions">
+            <div
+              className="btn btn--md btn--gray"
+              onClick={() => openSortieInVSCode(sortie.id)}
+            >
+              VS Code
+            </div>
             <OverflowMenu
               items={[
                 {
@@ -1064,9 +1071,7 @@ function SortieDetailPage() {
       </div>
       {sortie.cells.length === 0 ? (
         <div className="muted">
-          {sortie.session && !sortie.session.ended_at
-            ? "Session is exploring repos..."
-            : "No repos needed changes."}
+          No cells yet.
         </div>
       ) : (
         <div className="card card--clipped">
