@@ -59,8 +59,26 @@ export default function Terminal({ sessionId, cellId, alive, autoFocus, onResume
     const container = containerRef.current;
 
     // Scroll handling: prevent page scroll while interacting with the terminal.
-    // Only allow passthrough when at a scroll boundary AND idle for COOLDOWN ms.
-    let lastScrollTime = 0;
+    //
+    // Goal: if you scroll inside the terminal and hit a boundary, the entire
+    // remainder of that scroll gesture (including momentum/inertia) is absorbed
+    // — it never leaks through to scroll the page. But if you're already at a
+    // boundary and start a *fresh* scroll gesture, it passes through to the page.
+    //
+    // To distinguish "momentum from a gesture that moved the viewport" from
+    // "a fresh gesture at the boundary," we track two timestamps:
+    //   - lastViewportMoveTime: last wheel event that actually scrolled the
+    //     xterm viewport (i.e., a non-boundary scroll).
+    //   - lastWheelTime: last wheel event of any kind that was NOT a passthrough.
+    //
+    // A boundary scroll passes through to the page only when BOTH cooldowns
+    // have expired — the viewport hasn't moved recently AND there have been no
+    // wheel events (blocked or otherwise) recently. The second condition is what
+    // prevents momentum from leaking: blocked boundary events keep resetting
+    // lastWheelTime, so even after the viewport-move cooldown expires, passthrough
+    // is suppressed until the momentum fully stops.
+    let lastViewportMoveTime = 0;
+    let lastWheelTime = 0;
     const COOLDOWN = 500;
     const onWheel = (e: WheelEvent) => {
       const now = Date.now();
@@ -72,15 +90,20 @@ export default function Terminal({ sessionId, cellId, alive, autoFocus, onResume
       const atBoundary = (scrollingDown && atBottom) || (scrollingUp && atTop);
 
       if (atBoundary) {
-        if (now - lastScrollTime > COOLDOWN) {
-          return; // cooldown expired, let page scroll
+        const freshGesture =
+          now - lastViewportMoveTime > COOLDOWN &&
+          now - lastWheelTime > COOLDOWN;
+        if (freshGesture) {
+          return; // fresh scroll at boundary — let page scroll
         }
-        e.preventDefault(); // within cooldown, block page scroll but don't reset timer
+        e.preventDefault();
+        lastWheelTime = now; // keep blocking until momentum fully stops
         return;
       }
 
       // non-boundary scroll: let xterm handle it (it calls preventDefault itself)
-      lastScrollTime = now;
+      lastViewportMoveTime = now;
+      lastWheelTime = now;
     };
     container.addEventListener("wheel", onWheel, { capture: true, passive: false });
 
