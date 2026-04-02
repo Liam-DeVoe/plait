@@ -405,6 +405,83 @@ function DaemonLog({ runs }: { runs: DaemonRun[] }) {
   );
 }
 
+function CellTable({
+  cells,
+  onSync,
+  onArchive,
+  onDelete,
+  onVSCode,
+}: {
+  cells: Cell[];
+  onSync: (id: string) => void;
+  onArchive: (id: string) => void;
+  onDelete: (id: string) => void;
+  onVSCode: (id: string) => void;
+}) {
+  const [showArchived, setShowArchived] = useState(false);
+  const activeCells = cells.filter((c) => c.status !== "archived");
+  const archivedCells = cells.filter((c) => c.status === "archived");
+
+  const renderRows = (rows: Cell[]) =>
+    rows.map((cell) => (
+      <CellRow
+        key={cell.id}
+        cell={cell}
+        onSync={() => onSync(cell.id)}
+        onArchive={() => onArchive(cell.id)}
+        onDelete={() => onDelete(cell.id)}
+        onVSCode={() => onVSCode(cell.id)}
+      />
+    ));
+
+  if (activeCells.length === 0 && archivedCells.length === 0) {
+    return (
+      <div className="muted" style={{ padding: "12px 16px" }}>
+        No cells
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {activeCells.length > 0 ? (
+        <table className="table">
+          <thead className="table__head">
+            <tr>
+              <th className="table__header-cell">Branch</th>
+              <th className="table__header-cell">PR</th>
+              <th className="table__header-cell">CI</th>
+              <th className="table__header-cell">Tend</th>
+              <th className="table__header-cell">Actions</th>
+            </tr>
+          </thead>
+          <tbody>{renderRows(activeCells)}</tbody>
+        </table>
+      ) : (
+        <div className="muted" style={{ padding: "12px 16px" }}>
+          No active cells
+        </div>
+      )}
+      {archivedCells.length > 0 && (
+        <div
+          className="cells-page__archived-toggle"
+          onClick={() => setShowArchived(!showArchived)}
+        >
+          <span className="cells-page__archived-arrow">
+            {showArchived ? "▾" : "▸"}
+          </span>
+          Archived ({archivedCells.length})
+        </div>
+      )}
+      {showArchived && archivedCells.length > 0 && (
+        <table className="table cells-page__archived-table">
+          <tbody>{renderRows(archivedCells)}</tbody>
+        </table>
+      )}
+    </>
+  );
+}
+
 function CellsPage() {
   const { run } = useOutletContext<LayoutContext>();
   const navigate = useNavigate();
@@ -478,41 +555,19 @@ function CellsPage() {
                   +
                 </div>
               </div>
-              {repoCells.length > 0 ? (
-                <table className="table">
-                  <thead className="table__head">
-                    <tr>
-                      <th className="table__header-cell">Branch</th>
-                      <th className="table__header-cell">PR</th>
-                      <th className="table__header-cell">CI</th>
-                      <th className="table__header-cell">Tend</th>
-                      <th className="table__header-cell">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {repoCells.map((cell) => (
-                      <CellRow
-                        key={cell.id}
-                        cell={cell}
-                        onSync={() => triggerSync(cell.id)}
-                        onArchive={async () => {
-                          await archiveCell(cell.id);
-                          loadCells();
-                        }}
-                        onDelete={async () => {
-                          await deleteCell(cell.id);
-                          loadCells();
-                        }}
-                        onVSCode={() => openInVSCode(cell.id)}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <div className="muted" style={{ padding: "12px 16px" }}>
-                  No cells
-                </div>
-              )}
+              <CellTable
+                cells={repoCells}
+                onSync={(id) => triggerSync(id)}
+                onArchive={async (id) => {
+                  await archiveCell(id);
+                  loadCells();
+                }}
+                onDelete={async (id) => {
+                  await deleteCell(id);
+                  loadCells();
+                }}
+                onVSCode={(id) => openInVSCode(id)}
+              />
             </div>
           ))}
         </div>

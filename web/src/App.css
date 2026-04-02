@@ -470,6 +470,32 @@
   padding: 2px 8px;
 }
 
+.cells-page__archived-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  color: #6b7280;
+  cursor: pointer;
+  border-top: 1px solid #e5e7eb;
+}
+
+.cells-page__archived-toggle:hover {
+  color: #374151;
+}
+
+.cells-page__archived-arrow {
+  font-size: 11px;
+  color: #9ca3af;
+}
+
+.cells-page__archived-table {
+  opacity: 0.5;
+}
+
 /* === CellDetail === */
 .cell-detail__card {
   padding: 24px;
