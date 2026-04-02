@@ -40,28 +40,18 @@ async def create_worktree(repo_id: str, branch: str, cell_id: str) -> str:
         "git", "ls-remote", "--heads", "origin", branch, cwd=repo_dir
     )
     if rc == 0 and branch in out:
-        # Fetch and create worktree from remote branch
+        # Fetch and create worktree with a local branch tracking the remote
         await run("git", "fetch", "origin", branch, cwd=repo_dir)
         rc, out, err = await run(
             "git",
             "worktree",
             "add",
+            "-b",
+            branch,
             str(worktree_dir),
             f"origin/{branch}",
             cwd=repo_dir,
         )
-        if rc != 0:
-            # Try creating from the tracking branch
-            rc, out, err = await run(
-                "git",
-                "worktree",
-                "add",
-                "-b",
-                branch,
-                str(worktree_dir),
-                f"origin/{branch}",
-                cwd=repo_dir,
-            )
     else:
         # Create new branch from origin/main
         await fetch_origin(repo_id)
@@ -84,7 +74,17 @@ async def create_worktree(repo_id: str, branch: str, cell_id: str) -> str:
 
 async def remove_worktree(repo_id: str, worktree_path: str) -> None:
     repo = config.get_repo(repo_id)
-    await run("git", "worktree", "remove", "--force", worktree_path, cwd=repo.path)
+    rc, out, err = await run(
+        "git", "worktree", "remove", "--force", worktree_path, cwd=repo.path
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to remove worktree {worktree_path}: {err}")
+
+
+async def assert_not_detached(worktree_path: str) -> None:
+    """Assert the worktree is on a branch, not in detached HEAD state."""
+    rc, out, err = await run("git", "symbolic-ref", "HEAD", cwd=worktree_path)
+    assert rc == 0, f"Worktree is in detached HEAD state: {worktree_path}"
 
 
 async def is_behind_main(worktree_path: str) -> bool:

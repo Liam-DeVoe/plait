@@ -625,6 +625,10 @@ function CellDetailPage() {
                 session={s}
                 cellId={cell.id}
                 onResume={() => handleResumeSession(s.id)}
+                onVSCode={async () => {
+                  await openSessionInVSCode(cell.id, s.id);
+                  load();
+                }}
               />
             ))}
           </div>
@@ -663,6 +667,15 @@ function CollapsibleSession({
         <span className="collapsible-session__time">
           {new Date(session.started_at).toLocaleString()}
         </span>
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            onVSCode();
+          }}
+          className="btn btn--xs btn--soft-gray collapsible-session__resume"
+        >
+          VS Code
+        </div>
         {!session.alive && (
           <div
             onClick={(e) => {

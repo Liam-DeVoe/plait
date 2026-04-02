@@ -82,6 +82,8 @@ async def _push_if_published(cell: Cell) -> bool | None:
 async def process_cell(cell: Cell, *, force: bool = False) -> None:
     """Process a single cell: check sync status, CI status."""
     try:
+        await git.assert_not_detached(cell.worktree_path)
+
         # Fetch latest from origin
         await git.fetch_origin(cell.repo)
 
