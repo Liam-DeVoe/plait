@@ -68,14 +68,15 @@ async def _push_if_published(cell: Cell) -> bool | None:
 
 
 async def process_cell(cell: Cell) -> None:
-    """Process a single cell: check sync status, CI status."""
+    """Process a single cell: check sync status, CI status, and fix issues."""
     try:
         await git.assert_not_detached(cell.worktree_path)
 
         # Fetch latest from origin
         await git.fetch_origin(cell.repo)
 
-        # Check if behind main
+        # --- Attempt automatic merge if behind main ---
+        has_conflicts = False
         behind = await git.is_behind_main(cell.worktree_path)
         if not behind and cell.sync_status != SyncStatus.current:
             await db.update_cell(cell.id, sync_status=SyncStatus.current)
@@ -87,105 +88,30 @@ async def process_cell(cell: Cell) -> None:
             await db.update_cell(cell.id, sync_status=SyncStatus.syncing)
             await notify("cell_updated", {"id": cell.id, "sync_status": "syncing"})
 
-            success, output = await git.merge_from_main(cell.worktree_path)
+            success, _output = await git.merge_from_main(cell.worktree_path)
 
             if success:
                 # Clean merge — push only if branch is already on remote
                 push_result = await _push_if_published(cell)
-                if push_result is None:
-                    # Local-only cell, merge succeeded locally
-                    await db.update_cell(cell.id, sync_status=SyncStatus.current)
-                    await notify(
-                        "cell_updated", {"id": cell.id, "sync_status": "current"}
-                    )
-                    logger.info(f"Cell {cell.id} merged locally (not yet published)")
-                elif push_result:
-                    await db.update_cell(cell.id, sync_status=SyncStatus.current)
-                    await notify(
-                        "cell_updated", {"id": cell.id, "sync_status": "current"}
-                    )
-                    logger.info(f"Cell {cell.id} merged and pushed successfully")
-                else:
+                if push_result is False:
                     await db.update_cell(cell.id, sync_status=SyncStatus.failed)
                     await notify(
                         "cell_updated", {"id": cell.id, "sync_status": "failed"}
                     )
                     logger.error(f"Cell {cell.id} push failed after merge")
+                else:
+                    await db.update_cell(cell.id, sync_status=SyncStatus.current)
+                    await notify(
+                        "cell_updated", {"id": cell.id, "sync_status": "current"}
+                    )
+                    logger.info(f"Cell {cell.id} merged successfully")
             else:
-                # Conflicts — use Claude to resolve
+                has_conflicts = True
                 await db.update_cell(cell.id, sync_status=SyncStatus.conflict)
                 await notify("cell_updated", {"id": cell.id, "sync_status": "conflict"})
 
-                if not await _should_attempt(cell.id, "merge"):
-                    logger.info(
-                        f"Cell {cell.id}: skipping merge (limit reached or in progress)"
-                    )
-                    return
-
-                logger.info(f"Cell {cell.id} has conflicts, invoking Claude")
-
-                # Create a daemon session record
-                session = Session(
-                    cell_id=cell.id,
-                    role=SessionRole.daemon,
-                    trigger="merge",
-                )
-                await db.create_session(session)
-
-                system_prompt = claude.orrery_system_prompt(cell.id)
-                on_output = _make_output_callback(session.id, cell.id)
-                claude_ok, claude_out = await claude.resolve_conflicts(
-                    cell.worktree_path,
-                    cell.branch,
-                    session_id=session.id,
-                    system_prompt=system_prompt,
-                    on_output=on_output,
-                )
-                ended_at = datetime.now(timezone.utc).isoformat()
-
-                if claude_ok:
-                    push_result = await _push_if_published(cell)
-                    if push_result is None:
-                        await db.update_cell(cell.id, sync_status=SyncStatus.current)
-                        await notify(
-                            "cell_updated",
-                            {"id": cell.id, "sync_status": "current"},
-                        )
-                    elif push_result:
-                        await db.update_cell(cell.id, sync_status=SyncStatus.current)
-                        await notify(
-                            "cell_updated",
-                            {"id": cell.id, "sync_status": "current"},
-                        )
-                    else:
-                        await db.update_cell(cell.id, sync_status=SyncStatus.failed)
-                        await notify(
-                            "cell_updated",
-                            {"id": cell.id, "sync_status": "failed"},
-                        )
-
-                    await db.update_session(
-                        session.id,
-                        succeeded=1,
-                        transcript=claude_out,
-                        ended_at=ended_at,
-                    )
-                else:
-                    await db.update_cell(cell.id, sync_status=SyncStatus.failed)
-                    await notify(
-                        "cell_updated", {"id": cell.id, "sync_status": "failed"}
-                    )
-                    await db.update_session(
-                        session.id,
-                        succeeded=0,
-                        transcript=claude_out,
-                        ended_at=ended_at,
-                    )
-                    logger.error(
-                        f"Claude failed to resolve conflicts for cell {cell.id}"
-                    )
-
-        # Check CI status if cell has a PR
+        # --- Update CI status ---
+        ci_status = None
         if cell.pr_number:
             ci = await git.get_ci_status(cell.repo, cell.pr_number)
             ci_status = CIStatus(ci)
@@ -193,10 +119,53 @@ async def process_cell(cell: Cell) -> None:
                 await db.update_cell(cell.id, ci_status=ci_status)
                 await notify("cell_updated", {"id": cell.id, "ci_status": ci})
 
-            if ci_status == CIStatus.failing:
-                await _fix_ci(cell)
+        # --- Spawn a fix session if anything new needs attention ---
+        needs_fix = has_conflicts or ci_status == CIStatus.failing
 
-        # Fallback: detect PR for cells that have been pushed but have no PR yet
+        if needs_fix and await _should_attempt(cell.id, "fix"):
+            logger.info(f"Cell {cell.id} needs fixing, invoking Claude")
+            session = Session(
+                cell_id=cell.id,
+                role=SessionRole.daemon,
+                trigger="fix",
+            )
+            await db.create_session(session)
+
+            system_prompt = claude.orrery_system_prompt(cell.id)
+            on_output = _make_output_callback(session.id, cell.id)
+            prompt = claude.fix_prompt(cell.branch)
+            ok, output = await claude.run_claude_headless(
+                prompt,
+                cwd=cell.worktree_path,
+                session_id=session.id,
+                system_prompt=system_prompt,
+                on_output=on_output,
+            )
+            ended_at = datetime.now(timezone.utc).isoformat()
+
+            if ok:
+                push_result = await _push_if_published(cell)
+                sync = (
+                    SyncStatus.current
+                    if push_result is not False
+                    else SyncStatus.failed
+                )
+            else:
+                sync = SyncStatus.failed
+
+            await db.update_cell(cell.id, sync_status=sync)
+            await notify("cell_updated", {"id": cell.id, "sync_status": sync.value})
+
+            await db.update_session(
+                session.id,
+                succeeded=1 if ok else 0,
+                transcript=output,
+                ended_at=ended_at,
+            )
+            if not ok:
+                logger.error(f"Claude failed to fix issues for cell {cell.id}")
+
+        # --- Detect PR for cells that have been pushed but have no PR yet ---
         if not cell.pr_number and await git.has_remote_branch(
             cell.worktree_path, cell.branch
         ):
@@ -228,56 +197,6 @@ async def daemon_loop() -> None:
             logger.exception("Daemon loop error")
 
         await asyncio.sleep(POLL_INTERVAL)
-
-
-async def _fix_ci(cell: Cell) -> None:
-    """Spawn Claude to diagnose and fix a CI failure."""
-    if not await _should_attempt(cell.id, "ci_fix"):
-        logger.info(f"Cell {cell.id}: skipping CI fix (limit reached or in progress)")
-        return
-
-    logger.info(f"Cell {cell.id} CI is failing, invoking Claude to fix")
-
-    ci_logs = await git.get_ci_failure_logs(cell.repo, cell.branch)
-
-    session = Session(
-        cell_id=cell.id,
-        role=SessionRole.daemon,
-        trigger="ci_fix",
-    )
-    await db.create_session(session)
-
-    system_prompt = claude.orrery_system_prompt(cell.id)
-    on_output = _make_output_callback(session.id, cell.id)
-    ok, output = await claude.fix_ci(
-        cell.worktree_path,
-        cell.branch,
-        ci_logs,
-        session_id=session.id,
-        system_prompt=system_prompt,
-        on_output=on_output,
-    )
-    ended_at = datetime.now(timezone.utc).isoformat()
-
-    if ok:
-        push_ok, _ = await git.push(cell.worktree_path, cell.branch)
-        await db.update_session(
-            session.id,
-            succeeded=1,
-            transcript=output,
-            ended_at=ended_at,
-        )
-        if push_ok:
-            logger.info(f"Claude fixed CI for cell {cell.id}, pushed")
-        await notify("cell_updated", {"id": cell.id})
-    else:
-        await db.update_session(
-            session.id,
-            succeeded=0,
-            transcript=output,
-            ended_at=ended_at,
-        )
-        logger.error(f"Claude failed to fix CI for cell {cell.id}")
 
 
 def _make_sortie_output_callback(session_id: str, sortie_id: str):

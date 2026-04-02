@@ -62,20 +62,15 @@ You can create cells for multiple repos. Work through them one at a time.
 When you're done with all repos, push your changes and create PRs, then finish.
 """
 
-[resolve_conflicts]
-# Prompt sent to Claude when the daemon detects merge conflicts during rebase.
+[fix]
+# Prompt sent to Claude when the daemon detects the branch needs attention.
+# Claude should investigate the actual state and fix what it finds.
 # Variables: branch
 template = """
-Merge origin/main into the current branch ({branch}). Resolve any merge conflicts to the best of your ability, preserving the intent of both sides. After resolving, make sure the code compiles/passes basic checks. Do NOT push — just complete the merge locally.
-"""
+The branch {branch} needs attention. Investigate and fix any of the following that apply:
 
-[fix_ci]
-# Prompt sent to Claude when CI is failing on a branch.
-# Variables: branch, ci_output
-template = """
-The CI for branch {branch} is failing. Here's the CI output:
+1. **Merge conflicts with main**: If the branch is behind origin/main, merge it and resolve any conflicts, preserving the intent of both sides.
+2. **CI failures**: Check CI status with `gh pr checks`. If failing, look at the failure logs and fix the issue.
 
-{ci_output}
-
-Please diagnose the issue and fix it. Commit your fix.
+After fixing, make sure the code compiles and passes basic checks. Commit your fixes but do NOT push.
 """

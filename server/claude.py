@@ -103,42 +103,7 @@ async def run_claude_headless(
     return success, output
 
 
-async def resolve_conflicts(
-    worktree_path: str,
-    branch: str,
-    session_id: str | None = None,
-    system_prompt: str | None = None,
-    on_output: Callable[[str], Awaitable[None]] | None = None,
-) -> tuple[bool, str]:
-    """Use Claude to merge origin/main and resolve any conflicts."""
+def fix_prompt(branch: str) -> str:
+    """Build a prompt for the consolidated fix session."""
     prompts = _load_prompts()
-    prompt = prompts["resolve_conflicts"]["template"].strip().format(branch=branch)
-    return await run_claude_headless(
-        prompt,
-        cwd=worktree_path,
-        session_id=session_id,
-        system_prompt=system_prompt,
-        on_output=on_output,
-    )
-
-
-async def fix_ci(
-    worktree_path: str,
-    branch: str,
-    ci_output: str,
-    session_id: str | None = None,
-    system_prompt: str | None = None,
-    on_output: Callable[[str], Awaitable[None]] | None = None,
-) -> tuple[bool, str]:
-    """Use Claude to diagnose and fix a CI failure."""
-    prompts = _load_prompts()
-    prompt = (
-        prompts["fix_ci"]["template"].strip().format(branch=branch, ci_output=ci_output)
-    )
-    return await run_claude_headless(
-        prompt,
-        cwd=worktree_path,
-        session_id=session_id,
-        system_prompt=system_prompt,
-        on_output=on_output,
-    )
+    return prompts["fix"]["template"].strip().format(branch=branch)

@@ -99,7 +99,7 @@ async def test_cell_conflict_claude_resolves(git_env, init_db, mock_claude):
     # Verify a daemon session was created
     sessions = await db.list_sessions(cell.id)
     assert len(sessions) == 1
-    assert sessions[0].trigger == "merge"
+    assert sessions[0].trigger == "fix"
     assert sessions[0].succeeded is True
 
 
@@ -182,7 +182,7 @@ async def test_ci_fix_on_failure(git_env, init_db, mock_gh, mock_claude):
     # Verify a ci_fix session was created
     sessions = await db.list_sessions(cell.id)
     assert len(sessions) == 1
-    assert sessions[0].trigger == "ci_fix"
+    assert sessions[0].trigger == "fix"
     assert sessions[0].succeeded is True
     assert sessions[0].transcript == "Fixed the test"
 
@@ -200,9 +200,7 @@ async def test_ci_fix_skipped_while_running(git_env, init_db, mock_gh, mock_clau
     cell.ci_status = CIStatus.failing
 
     # Simulate a running ci_fix session (no ended_at)
-    running_session = Session(
-        cell_id=cell.id, role=SessionRole.daemon, trigger="ci_fix"
-    )
+    running_session = Session(cell_id=cell.id, role=SessionRole.daemon, trigger="fix")
     await db.create_session(running_session)
 
     mock_gh.set_response("pr checks", 0, "build\tfail\t1m")
@@ -228,7 +226,7 @@ async def test_ci_fix_retried_after_previous_failure(
     cell.ci_status = CIStatus.failing
 
     # Previous ci_fix session that ended (failed)
-    prev_session = Session(cell_id=cell.id, role=SessionRole.daemon, trigger="ci_fix")
+    prev_session = Session(cell_id=cell.id, role=SessionRole.daemon, trigger="fix")
     await db.create_session(prev_session)
     await db.update_session(
         prev_session.id, succeeded=0, ended_at="2024-01-01T00:00:00+00:00"
@@ -287,7 +285,7 @@ async def test_merge_retried_after_previous_failure(git_env, init_db, mock_claud
         s = Session(
             cell_id=cell.id,
             role=SessionRole.daemon,
-            trigger="merge",
+            trigger="fix",
             succeeded=False,
             ended_at="2024-01-01T00:00:00+00:00",
         )
