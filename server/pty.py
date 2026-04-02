@@ -161,6 +161,12 @@ class PtyManager:
         except ChildProcessError:
             return False
 
+    def get_raw_output(self, session_id: str) -> bytes:
+        pty_session = self._sessions.get(session_id)
+        if pty_session is None:
+            return b""
+        return bytes(pty_session.output_buffer)
+
     def get_transcript(self, session_id: str) -> str:
         pty_session = self._sessions.get(session_id)
         if pty_session is None:

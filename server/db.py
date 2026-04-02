@@ -51,6 +51,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     trigger_name TEXT,
     succeeded INTEGER,
     transcript TEXT NOT NULL DEFAULT '',
+    xterm_state BLOB,
     started_at TEXT NOT NULL,
     ended_at TEXT,
     FOREIGN KEY (cell_id) REFERENCES cells(id)
@@ -67,6 +68,11 @@ async def get_db() -> aiosqlite.Connection:
 
 async def init_db() -> None:
     db = await get_db()
+    try:
+        await db.execute("ALTER TABLE sessions ADD COLUMN xterm_state BLOB")
+        await db.commit()
+    except Exception:
+        pass
     await db.close()
 
 
@@ -184,8 +190,8 @@ async def create_session(session: Session) -> Session:
         succeeded_val = None if session.succeeded is None else int(session.succeeded)
         await db.execute(
             """INSERT INTO sessions (id, cell_id, role, trigger_name, succeeded,
-               transcript, started_at, ended_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               transcript, xterm_state, started_at, ended_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session.id,
                 session.cell_id,
@@ -193,6 +199,7 @@ async def create_session(session: Session) -> Session:
                 session.trigger,
                 succeeded_val,
                 session.transcript,
+                session.xterm_state,
                 session.started_at,
                 session.ended_at,
             ),
@@ -248,6 +255,7 @@ def _row_to_session(row: aiosqlite.Row) -> Session:
         trigger=row["trigger_name"],
         succeeded=None if succeeded_raw is None else bool(succeeded_raw),
         transcript=row["transcript"],
+        xterm_state=row["xterm_state"],
         started_at=row["started_at"],
         ended_at=row["ended_at"],
     )

@@ -69,9 +69,9 @@ function Layout() {
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">Orrery</h1>
-          </div>
+          <NavLink to="/" className="text-2xl font-bold text-gray-900 hover:text-gray-700">
+            Orrery
+          </NavLink>
           <nav className="flex gap-1 bg-gray-100 rounded-lg p-1">
             <NavLink
               to="/cells"
@@ -343,7 +343,6 @@ function CellDetailPage() {
   const navigate = useNavigate();
   const tick = useOutletContext<number>();
   const [cell, setCell] = useState<(Cell & { sessions: Session[] }) | null>(null);
-  const [prompt, setPrompt] = useState("");
   const [launching, setLaunching] = useState(false);
 
   const load = useCallback(async () => {
@@ -359,8 +358,7 @@ function CellDetailPage() {
     if (!id) return;
     setLaunching(true);
     try {
-      await createInteractiveSession(id, prompt.trim() || undefined);
-      setPrompt("");
+      await createInteractiveSession(id);
       load();
     } finally {
       setLaunching(false);
@@ -425,29 +423,18 @@ function CellDetailPage() {
         </div>
       </div>
 
-      <div className="bg-white rounded-lg shadow p-4 mb-6">
-        <h3 className="text-lg font-semibold mb-3">Launch Session</h3>
-        <div className="space-y-3">
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Optional initial prompt for Claude..."
-            rows={2}
-            className="w-full px-3 py-2 border rounded text-sm resize-y"
-          />
-          <button
-            onClick={handleLaunchSession}
-            disabled={launching}
-            className="px-4 py-2 bg-gray-800 text-white rounded hover:bg-gray-900 text-sm disabled:opacity-50"
-          >
-            {launching ? "Launching..." : "Launch Terminal"}
-          </button>
-        </div>
+      <div className="flex justify-between items-center mb-3">
+        <h3 className="text-lg font-semibold">Sessions</h3>
+        <button
+          onClick={handleLaunchSession}
+          disabled={launching}
+          className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm disabled:opacity-50"
+        >
+          {launching ? "Launching..." : "New Session"}
+        </button>
       </div>
-
-      <h3 className="text-lg font-semibold mb-3">Sessions</h3>
       {cell.sessions.length === 0 ? (
-        <p className="text-gray-500 text-sm">No sessions yet.</p>
+        <p className="text-gray-500 text-sm">No sessions yet. Start one to open a Claude terminal in this worktree.</p>
       ) : (
         <div className="space-y-3">
           {cell.sessions.map((s) => (
@@ -476,13 +463,12 @@ function CellDetailPage() {
                   </button>
                 )}
               </div>
-              {s.alive ? (
-                <Terminal sessionId={s.id} />
-              ) : s.transcript ? (
-                <pre className="text-xs bg-gray-50 p-3 rounded overflow-auto max-h-60">
-                  {s.transcript}
-                </pre>
-              ) : null}
+              <Terminal
+                sessionId={s.id}
+                cellId={cell.id}
+                alive={s.alive}
+                onResume={() => handleResumeSession(s.id)}
+              />
             </div>
           ))}
         </div>
@@ -631,7 +617,7 @@ function SortiesPage() {
 
       {sorties.length === 0 ? (
         <div className="text-center py-12 text-gray-500">
-          <p>No sorties yet. Create one to coordinate work across repos.</p>
+          <p>No sorties yet.</p>
         </div>
       ) : (
         <div className="bg-white rounded-lg shadow overflow-hidden">

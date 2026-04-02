@@ -129,6 +129,14 @@ export async function stopSession(cellId: string, sessionId: string): Promise<vo
   }
 }
 
+export async function fetchXtermState(cellId: string, sessionId: string): Promise<ArrayBuffer> {
+  const res = await fetch(`${BASE}/cells/${cellId}/sessions/${sessionId}/xterm-state`);
+  if (!res.ok) {
+    throw new Error("Failed to fetch xterm state");
+  }
+  return res.arrayBuffer();
+}
+
 export async function resumeSession(cellId: string, sessionId: string): Promise<Session> {
   const res = await fetch(`${BASE}/cells/${cellId}/sessions/${sessionId}/resume`, {
     method: "POST",

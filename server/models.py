@@ -72,6 +72,7 @@ class Session:
     trigger: str | None = None
     succeeded: bool | None = None
     transcript: str = ""
+    xterm_state: bytes | None = None
     started_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 from server import daemon, db, git
@@ -218,6 +219,7 @@ def _session_dict(s: Session) -> dict:
     """Serialize a session, adding runtime 'alive' field."""
     d = asdict(s)
     d["alive"] = pty_manager.is_alive(s.id)
+    d.pop("xterm_state", None)
     return d
 
 
@@ -284,11 +286,13 @@ async def _watch_pty(session_id: str) -> None:
 
     # Final flush
     transcript = pty_manager.get_transcript(session_id)
+    xterm_state = pty_manager.get_raw_output(session_id)
     pty_manager.remove(session_id)
 
     await db.update_session(
         session_id,
         transcript=transcript,
+        xterm_state=xterm_state,
         ended_at=datetime.now(timezone.utc).isoformat(),
     )
 
@@ -343,15 +347,28 @@ async def stop_session(cell_id: str, session_id: str):
         raise HTTPException(status_code=400, detail="Session is not alive")
 
     transcript = pty_manager.get_transcript(session_id)
+    xterm_state = pty_manager.get_raw_output(session_id)
     await pty_manager.terminate(session_id)
     pty_manager.remove(session_id)
 
     updated = await db.update_session(
         session_id,
         transcript=transcript,
+        xterm_state=xterm_state,
         ended_at=datetime.now(timezone.utc).isoformat(),
     )
     return _session_dict(updated) if updated else {}
+
+
+@app.get("/cells/{cell_id}/sessions/{session_id}/xterm-state")
+async def get_xterm_state(cell_id: str, session_id: str):
+    sessions = await db.list_sessions(cell_id)
+    session = next((s for s in sessions if s.id == session_id), None)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    if not session.xterm_state:
+        raise HTTPException(status_code=404, detail="No xterm state available")
+    return Response(content=session.xterm_state, media_type="application/octet-stream")
 
 
 @app.websocket("/ws/sessions/{session_id}")
