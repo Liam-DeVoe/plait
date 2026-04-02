@@ -166,10 +166,7 @@ function CellRow({
   onVSCode: () => void;
 }) {
   const navigate = useNavigate();
-  const needsAttention =
-    cell.ci_status === "failing" ||
-    cell.sync_status === "conflict" ||
-    cell.sync_status === "failed";
+  const needsAttention = cell.ci_status === "failing";
 
   return (
     <tr
@@ -199,8 +196,8 @@ function CellRow({
       </td>
       <td className="table__cell">
         <StatusBadge
-          status={cell.sync_status}
-          label={`Sync: ${cell.sync_status}`}
+          status={cell.tend_status}
+          label={`Tend: ${cell.tend_status}`}
         />
       </td>
       <td className="table__cell">
@@ -481,8 +478,8 @@ function CellDetailPage() {
                 label={`CI: ${cell.ci_status}`}
               />
               <StatusBadge
-                status={cell.sync_status}
-                label={`Sync: ${cell.sync_status}`}
+                status={cell.tend_status}
+                label={`Tend: ${cell.tend_status}`}
               />
             </div>
             {cell.pr_url && (

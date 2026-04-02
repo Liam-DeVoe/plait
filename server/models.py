@@ -45,6 +45,7 @@ class Cell:
     pr_number: int | None = None
     pr_url: str | None = None
     ci_status: CIStatus = CIStatus.unknown
+    pr_comment_count: int = 0
     sync_status: SyncStatus = SyncStatus.current
     status: CellStatus = CellStatus.active
     created_at: str = field(

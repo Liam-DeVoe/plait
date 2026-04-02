@@ -7,7 +7,7 @@ export interface Cell {
   pr_number: number | null;
   pr_url: string | null;
   ci_status: "unknown" | "pending" | "passing" | "failing";
-  sync_status: "current" | "syncing" | "conflict" | "failed";
+  tend_status: "current" | "running";
   status: "active" | "archived";
   created_at: string;
   archived_at: string | null;

@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS cells (
     pr_number INTEGER,
     pr_url TEXT,
     ci_status TEXT NOT NULL DEFAULT 'unknown',
+    pr_comment_count INTEGER NOT NULL DEFAULT 0,
     sync_status TEXT NOT NULL DEFAULT 'current',
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL,
@@ -90,8 +91,9 @@ async def create_cell(cell: Cell) -> Cell:
     try:
         await db.execute(
             """INSERT INTO cells (id, sortie_id, repo, branch, worktree_path,
-               pr_number, pr_url, ci_status, sync_status, status, created_at, archived_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               pr_number, pr_url, ci_status, pr_comment_count, sync_status,
+               status, created_at, archived_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 cell.id,
                 cell.sortie_id,
@@ -101,6 +103,7 @@ async def create_cell(cell: Cell) -> Cell:
                 cell.pr_number,
                 cell.pr_url,
                 cell.ci_status.value,
+                cell.pr_comment_count,
                 cell.sync_status.value,
                 cell.status.value,
                 cell.created_at,

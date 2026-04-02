@@ -122,18 +122,18 @@ async def process_cell(cell: Cell) -> None:
         # --- Spawn a fix session if anything new needs attention ---
         needs_fix = has_conflicts or ci_status == CIStatus.failing
 
-        if needs_fix and await _should_attempt(cell.id, "fix"):
+        if needs_fix and await _should_attempt(cell.id, "tend"):
             logger.info(f"Cell {cell.id} needs fixing, invoking Claude")
             session = Session(
                 cell_id=cell.id,
                 role=SessionRole.daemon,
-                trigger="fix",
+                trigger="tend",
             )
             await db.create_session(session)
 
             system_prompt = claude.orrery_system_prompt(cell.id)
             on_output = _make_output_callback(session.id, cell.id)
-            prompt = claude.fix_prompt(cell.branch)
+            prompt = claude.tend_prompt(cell.branch)
             ok, output = await claude.run_claude_headless(
                 prompt,
                 cwd=cell.worktree_path,

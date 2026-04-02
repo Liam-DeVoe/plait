@@ -140,14 +140,30 @@ async def create_cell(req: CreateCellRequest):
         cell.ci_status = CIStatus(ci)
 
     await db.create_cell(cell)
-    return asdict(cell)
+    return await _cell_dict(cell)
+
+
+async def _tend_status(cell_id: str) -> str:
+    """Derive tend status from sessions: 'running' if a tend session is active."""
+    sessions = await db.list_sessions(cell_id)
+    for s in sessions:
+        if s.trigger == "tend" and s.ended_at is None:
+            return "running"
+    return "current"
+
+
+async def _cell_dict(cell: Cell) -> dict:
+    """Serialize a cell with derived tend_status."""
+    result = asdict(cell)
+    result["tend_status"] = await _tend_status(cell.id)
+    return result
 
 
 @app.get("/cells")
 async def list_cells(status: str | None = None):
     cell_status = CellStatus(status) if status else None
     cells = await db.list_cells(cell_status)
-    return [asdict(c) for c in cells]
+    return [await _cell_dict(c) for c in cells]
 
 
 @app.get("/cells/{cell_id}")
@@ -156,7 +172,7 @@ async def get_cell(cell_id: str):
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
     sessions = await db.list_sessions(cell_id)
-    result = asdict(cell)
+    result = await _cell_dict(cell)
     result["sessions"] = [_session_dict(s) for s in sessions]
     return result
 
@@ -179,7 +195,7 @@ async def archive_cell(cell_id: str):
         archived_at=datetime.now(timezone.utc).isoformat(),
     )
     assert updated is not None
-    return asdict(updated)
+    return await _cell_dict(updated)
 
 
 @app.post("/cells/{cell_id}/reopen")
@@ -203,7 +219,7 @@ async def reopen_cell(cell_id: str):
         archived_at=None,
     )
     assert updated is not None
-    return asdict(updated)
+    return await _cell_dict(updated)
 
 
 @app.post("/cells/{cell_id}/sync")

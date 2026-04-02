@@ -103,7 +103,7 @@ async def run_claude_headless(
     return success, output
 
 
-def fix_prompt(branch: str) -> str:
-    """Build a prompt for the consolidated fix session."""
+def tend_prompt(branch: str) -> str:
+    """Build a prompt for the tend session."""
     prompts = _load_prompts()
-    return prompts["fix"]["template"].strip().format(branch=branch)
+    return prompts["tend"]["template"].strip().format(branch=branch)

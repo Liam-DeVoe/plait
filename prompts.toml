@@ -62,7 +62,7 @@ You can create cells for multiple repos. Work through them one at a time.
 When you're done with all repos, push your changes and create PRs, then finish.
 """
 
-[fix]
+[tend]
 # Prompt sent to Claude when the daemon detects the branch needs attention.
 # Claude should investigate the actual state and fix what it finds.
 # Variables: branch
@@ -72,5 +72,5 @@ The branch {branch} needs attention. Investigate and fix any of the following th
 1. **Merge conflicts with main**: If the branch is behind origin/main, merge it and resolve any conflicts, preserving the intent of both sides.
 2. **CI failures**: Check CI status with `gh pr checks`. If failing, look at the failure logs and fix the issue.
 
-After fixing, make sure the code compiles and passes basic checks. Commit your fixes but do NOT push.
+After fixing, make sure the code compiles and passes basic checks. Then commit and push your fixes.
 """
