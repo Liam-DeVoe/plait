@@ -67,6 +67,18 @@ async def _should_attempt(cell_id: str, trigger: str, *, force: bool = False) ->
     return failed < MAX_DAEMON_ATTEMPTS
 
 
+async def _push_if_published(cell: Cell) -> bool | None:
+    """Push to origin if the branch has been published (exists on remote).
+
+    Returns True if pushed successfully, False if push failed,
+    or None if the branch is local-only (no push attempted).
+    """
+    if not await git.has_remote_branch(cell.worktree_path, cell.branch):
+        return None
+    ok, _ = await git.push(cell.worktree_path, cell.branch)
+    return ok
+
+
 async def process_cell(cell: Cell, *, force: bool = False) -> None:
     """Process a single cell: check sync status, CI status."""
     try:
@@ -88,9 +100,16 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
             success, output = await git.merge_from_main(cell.worktree_path)
 
             if success:
-                # Clean merge, push
-                push_ok, push_out = await git.push(cell.worktree_path, cell.branch)
-                if push_ok:
+                # Clean merge — push only if branch is already on remote
+                push_result = await _push_if_published(cell)
+                if push_result is None:
+                    # Local-only cell, merge succeeded locally
+                    await db.update_cell(cell.id, sync_status=SyncStatus.current)
+                    await notify(
+                        "cell_updated", {"id": cell.id, "sync_status": "current"}
+                    )
+                    logger.info(f"Cell {cell.id} merged locally (not yet published)")
+                elif push_result:
                     await db.update_cell(cell.id, sync_status=SyncStatus.current)
                     await notify(
                         "cell_updated", {"id": cell.id, "sync_status": "current"}
@@ -101,7 +120,7 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
                     await notify(
                         "cell_updated", {"id": cell.id, "sync_status": "failed"}
                     )
-                    logger.error(f"Cell {cell.id} push failed: {push_out}")
+                    logger.error(f"Cell {cell.id} push failed after merge")
             else:
                 # Conflicts — use Claude to resolve
                 await db.update_cell(cell.id, sync_status=SyncStatus.conflict)
@@ -123,26 +142,36 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
                 )
                 await db.create_session(session)
 
+                system_prompt = claude.orrery_system_prompt(cell.id)
                 on_output = _make_output_callback(session.id, cell.id)
                 claude_ok, claude_out = await claude.resolve_conflicts(
                     cell.worktree_path,
                     cell.branch,
                     session_id=session.id,
+                    system_prompt=system_prompt,
                     on_output=on_output,
                 )
                 ended_at = datetime.now(timezone.utc).isoformat()
 
                 if claude_ok:
-                    push_ok, push_out = await git.push(cell.worktree_path, cell.branch)
-                    if push_ok:
+                    push_result = await _push_if_published(cell)
+                    if push_result is None:
                         await db.update_cell(cell.id, sync_status=SyncStatus.current)
                         await notify(
-                            "cell_updated", {"id": cell.id, "sync_status": "current"}
+                            "cell_updated",
+                            {"id": cell.id, "sync_status": "current"},
+                        )
+                    elif push_result:
+                        await db.update_cell(cell.id, sync_status=SyncStatus.current)
+                        await notify(
+                            "cell_updated",
+                            {"id": cell.id, "sync_status": "current"},
                         )
                     else:
                         await db.update_cell(cell.id, sync_status=SyncStatus.failed)
                         await notify(
-                            "cell_updated", {"id": cell.id, "sync_status": "failed"}
+                            "cell_updated",
+                            {"id": cell.id, "sync_status": "failed"},
                         )
 
                     await db.update_session(
@@ -177,6 +206,19 @@ async def process_cell(cell: Cell, *, force: bool = False) -> None:
                 # If CI just started failing, try to fix
                 if ci_status == CIStatus.failing:
                     await _fix_ci(cell, force=force)
+
+        # Fallback: detect PR for cells that have been pushed but have no PR yet
+        if not cell.pr_number and await git.has_remote_branch(
+            cell.worktree_path, cell.branch
+        ):
+            pr_info = await git.find_pr_for_branch(cell.repo, cell.branch)
+            if pr_info:
+                await db.update_cell(
+                    cell.id,
+                    pr_number=pr_info["number"],
+                    pr_url=pr_info["url"],
+                )
+                await notify("cell_updated", {"id": cell.id})
 
     except Exception:
         logger.exception(f"Error processing cell {cell.id}")
@@ -216,12 +258,14 @@ async def _fix_ci(cell: Cell, *, force: bool = False) -> None:
     )
     await db.create_session(session)
 
+    system_prompt = claude.orrery_system_prompt(cell.id)
     on_output = _make_output_callback(session.id, cell.id)
     ok, output = await claude.fix_ci(
         cell.worktree_path,
         cell.branch,
         ci_logs,
         session_id=session.id,
+        system_prompt=system_prompt,
         on_output=on_output,
     )
     ended_at = datetime.now(timezone.utc).isoformat()
@@ -274,46 +318,22 @@ async def spawn_sortie_cell(sortie: Sortie, repo: str) -> None:
     )
     await db.create_session(session)
 
+    system_prompt = claude.orrery_system_prompt(cell.id)
+    prompt = sortie.prompt + "\n\nWhen you're done, push your changes and create a PR."
     on_output = _make_output_callback(session.id, cell.id)
     ok, output = await claude.run_claude_headless(
-        sortie.prompt,
+        prompt,
         cwd=cell.worktree_path,
         session_id=session.id,
+        system_prompt=system_prompt,
         on_output=on_output,
     )
     ended_at = datetime.now(timezone.utc).isoformat()
 
-    if ok:
-        # Push and create PR
-        push_ok, _ = await git.push(cell.worktree_path, branch)
-        if push_ok:
-            try:
-                pr_info = await git.create_pr(
-                    cell.worktree_path,
-                    repo,
-                    title=sortie.prompt[:60],
-                    body=sortie.prompt,
-                )
-                await db.update_cell(
-                    cell.id,
-                    pr_number=pr_info["number"],
-                    pr_url=pr_info["url"],
-                )
-            except RuntimeError:
-                logger.exception(f"Failed to create PR for sortie cell {cell.id}")
-
-        await db.update_session(
-            session.id,
-            succeeded=1,
-            transcript=output,
-            ended_at=ended_at,
-        )
-    else:
-        await db.update_session(
-            session.id,
-            succeeded=0,
-            transcript=output,
-            ended_at=ended_at,
-        )
-
+    await db.update_session(
+        session.id,
+        succeeded=1 if ok else 0,
+        transcript=output,
+        ended_at=ended_at,
+    )
     await notify("cell_updated", {"id": cell.id})

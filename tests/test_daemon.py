@@ -212,20 +212,17 @@ async def test_ci_fix_not_repeated(git_env, init_db, mock_gh, mock_claude):
     assert len(sessions) == 0
 
 
-async def test_spawn_sortie_cell(git_env, init_db, mock_claude, mock_gh):
-    """spawn_sortie_cell should create a cell and run Claude."""
+async def test_spawn_sortie_cell(git_env, init_db, mock_claude):
+    """spawn_sortie_cell should create a cell and run Claude.
+
+    Claude is responsible for pushing and creating the PR (via hooks),
+    so the daemon only creates the cell and runs Claude.
+    """
     sortie = Sortie(prompt="add tests", repos=[git_env.repo_name])
     await db.create_sortie(sortie)
 
     # Mock Claude to succeed
     mock_claude.return_value = (True, "Added tests")
-
-    # Mock PR creation (push will work against test git env)
-    mock_gh.set_response(
-        "pr create",
-        0,
-        f"https://github.com/{git_env.repo_name}/pull/1",
-    )
 
     await spawn_sortie_cell(sortie, git_env.repo_name)
 
@@ -236,7 +233,8 @@ async def test_spawn_sortie_cell(git_env, init_db, mock_claude, mock_gh):
     assert cell.sortie_id == sortie.id
     assert cell.repo == git_env.repo_name
     assert cell.branch == f"sortie/{sortie.id[:8]}"
-    assert cell.pr_number == 1
+    # No PR yet — Claude handles that via hooks
+    assert cell.pr_number is None
 
     # Verify session was created and completed
     sessions = await db.list_sessions(cell.id)
@@ -325,4 +323,5 @@ async def test_manual_sync_bypasses_limit(git_env, init_db, mock_claude):
     sessions = await db.list_sessions(cell.id)
     # Should have MAX_DAEMON_ATTEMPTS + 1 sessions (the new one)
     assert len(sessions) == MAX_DAEMON_ATTEMPTS + 1
-    assert sessions[0].succeeded is True
+    succeeded = [s for s in sessions if s.succeeded is True]
+    assert len(succeeded) == 1

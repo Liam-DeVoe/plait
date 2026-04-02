@@ -214,7 +214,7 @@ async def list_sessions(cell_id: str) -> list[Session]:
     db = await get_db()
     try:
         cursor = await db.execute(
-            "SELECT * FROM sessions WHERE cell_id = ? ORDER BY started_at DESC",
+            "SELECT * FROM sessions WHERE cell_id = ? ORDER BY started_at ASC",
             (cell_id,),
         )
         rows = await cursor.fetchall()
@@ -242,6 +242,15 @@ async def update_session(session_id: str, **kwargs: object) -> Session | None:
         cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
         row = await cursor.fetchone()
         return _row_to_session(row) if row else None
+    finally:
+        await db.close()
+
+
+async def delete_session(session_id: str) -> None:
+    db = await get_db()
+    try:
+        await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+        await db.commit()
     finally:
         await db.close()
 

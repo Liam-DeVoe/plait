@@ -232,6 +232,37 @@ async def get_ci_failure_logs(repo: str, branch: str) -> str:
     return out
 
 
+async def has_remote_branch(worktree_path: str, branch: str) -> bool:
+    """Check if a branch exists on the remote (assumes fetch has been run)."""
+    rc, _, _ = await run(
+        "git", "rev-parse", "--verify", f"origin/{branch}", cwd=worktree_path
+    )
+    return rc == 0
+
+
+async def find_pr_for_branch(repo: str, branch: str) -> dict | None:
+    """Check if a PR exists for a branch. Returns {number, url} or None."""
+    rc, out, err = await run(
+        "gh",
+        "pr",
+        "list",
+        "--head",
+        branch,
+        "--repo",
+        repo,
+        "--json",
+        "number,url",
+        "--limit",
+        "1",
+    )
+    if rc != 0:
+        return None
+    prs = json.loads(out)
+    if not prs:
+        return None
+    return {"number": prs[0]["number"], "url": prs[0]["url"]}
+
+
 async def create_pr(worktree_path: str, repo: str, title: str, body: str) -> dict:
     """Create a PR from the current branch. Returns dict with number and url."""
     rc, out, err = await run(

@@ -123,13 +123,13 @@ export async function createInteractiveSession(cellId: string, prompt?: string):
   return res.json();
 }
 
-export async function stopSession(cellId: string, sessionId: string): Promise<void> {
-  const res = await fetch(`${BASE}/cells/${cellId}/sessions/${sessionId}/stop`, {
-    method: "POST",
+export async function deleteSession(cellId: string, sessionId: string): Promise<void> {
+  const res = await fetch(`${BASE}/cells/${cellId}/sessions/${sessionId}`, {
+    method: "DELETE",
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || "Failed to stop session");
+    throw new Error(err.detail || "Failed to delete session");
   }
 }
 

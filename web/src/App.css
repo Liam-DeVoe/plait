@@ -494,46 +494,121 @@
   font-weight: 600;
 }
 
-.cell-detail__sessions-list > * + * {
-  margin-top: 12px;
+/* === Terminal Panel (VS Code-style) === */
+.terminal-panel {
+  display: flex;
+  gap: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.cell-detail__session-card {
-  padding: 16px;
+.terminal-panel__main {
+  flex: 1;
+  min-width: 0;
 }
 
-.cell-detail__session-meta {
+.terminal-panel__header {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-bottom: 8px;
+  padding: 8px 16px;
+  background: #1e1e1e;
+  border-bottom: 1px solid #333;
 }
 
-.cell-detail__session-role {
-  font-size: 12px;
-  line-height: 16px;
-  color: #6b7280;
-}
-
-.cell-detail__session-time {
+.terminal-panel__header-time {
   font-size: 12px;
   line-height: 16px;
   color: #9ca3af;
+  margin-right: auto;
 }
 
-.cell-detail__stop-btn {
+.terminal-panel__sidebar {
+  width: 160px;
+  flex-shrink: 0;
+  background: #1e1e1e;
+  border-left: 1px solid #333;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+.terminal-panel__new-btn {
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 500;
+  color: #3b8eea;
+  background: rgba(59, 142, 234, 0.1);
+  cursor: pointer;
+  border-bottom: 1px solid #333;
+  transition: background 0.1s;
+}
+
+.terminal-panel__new-btn:hover {
+  background: rgba(59, 142, 234, 0.2);
+}
+
+.terminal-panel__tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  transition: background 0.1s;
+}
+
+.terminal-panel__tab:hover {
+  background: #2a2a2a;
+}
+
+.terminal-panel__tab--selected {
+  background: #252525;
+  border-left-color: #3b8eea;
+}
+
+.terminal-panel__tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6b7280;
+  flex-shrink: 0;
+}
+
+.terminal-panel__tab-dot--alive {
+  background: #0dbc79;
+}
+
+.terminal-panel__tab-label {
+  font-size: 12px;
+  line-height: 16px;
+  color: #d4d4d4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.terminal-panel__tab-time {
+  font-size: 10px;
+  line-height: 14px;
+  color: #6b7280;
   margin-left: auto;
+  flex-shrink: 0;
 }
 
-.cell-detail__dead-title {
+/* === Daemon Sessions === */
+.cell-detail__daemon-title {
   font-size: 14px;
   line-height: 20px;
   font-weight: 500;
   color: #6b7280;
+  margin-top: 24px;
   margin-bottom: 8px;
 }
 
-.cell-detail__dead-list > * + * {
+.cell-detail__daemon-list > * + * {
   margin-top: 8px;
 }
 

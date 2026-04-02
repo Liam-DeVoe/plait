@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from server import daemon, db, git
+from server import claude, daemon, db, git
 from server.models import (
     Cell,
     CellStatus,
@@ -82,31 +82,38 @@ async def websocket_endpoint(ws: WebSocket):
 
 
 class CreateCellRequest(BaseModel):
-    pr_url: str
+    pr_url: str | None = None
+    repo: str | None = None
 
 
 @app.post("/cells")
 async def create_cell(req: CreateCellRequest):
+    if req.pr_url:
+        # Import from existing PR
+        try:
+            pr_info = await git.get_pr_info_from_url(req.pr_url)
+        except RuntimeError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+
+        cell = Cell(
+            repo=pr_info["repo"],
+            branch=pr_info["branch"],
+            worktree_path="",
+            pr_number=pr_info["number"],
+            pr_url=pr_info["url"],
+        )
+    elif req.repo:
+        # Create local cell with generic branch name
+        cell = Cell(
+            repo=req.repo,
+            worktree_path="",
+        )
+        cell.branch = f"cell/{cell.id[:8]}"
+    else:
+        raise HTTPException(status_code=400, detail="Either pr_url or repo is required")
+
     try:
-        pr_info = await git.get_pr_info_from_url(req.pr_url)
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    repo = pr_info["repo"]
-    branch = pr_info["branch"]
-    pr_number = pr_info["number"]
-    pr_url = pr_info["url"]
-
-    cell = Cell(
-        repo=repo,
-        branch=branch,
-        worktree_path="",
-        pr_number=pr_number,
-        pr_url=pr_url,
-    )
-
-    try:
-        cell.worktree_path = await git.create_worktree(repo, branch, cell.id)
+        cell.worktree_path = await git.create_worktree(cell.repo, cell.branch, cell.id)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -264,6 +271,41 @@ end tell"""
     return {"status": "opened"}
 
 
+# --- Hook endpoints (called by Claude inside sessions) ---
+
+
+class BranchUpdatedHook(BaseModel):
+    branch: str
+
+
+@app.post("/hooks/cells/{cell_id}/branch-updated")
+async def hook_branch_updated(cell_id: str, req: BranchUpdatedHook):
+    cell = await db.get_cell(cell_id)
+    if not cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+    await db.update_cell(cell_id, branch=req.branch)
+    await daemon.notify("cell_updated", {"id": cell_id, "branch": req.branch})
+    return {"status": "ok"}
+
+
+class PRCreatedHook(BaseModel):
+    pr_url: str
+    pr_number: int
+
+
+@app.post("/hooks/cells/{cell_id}/pr-created")
+async def hook_pr_created(cell_id: str, req: PRCreatedHook):
+    cell = await db.get_cell(cell_id)
+    if not cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+    await db.update_cell(cell_id, pr_number=req.pr_number, pr_url=req.pr_url)
+    await daemon.notify(
+        "cell_updated",
+        {"id": cell_id, "pr_number": req.pr_number, "pr_url": req.pr_url},
+    )
+    return {"status": "ok"}
+
+
 # --- Session endpoints ---
 
 
@@ -297,19 +339,31 @@ async def create_session_endpoint(cell_id: str, req: CreateSessionRequest):
     )
     await db.create_session(session)
 
-    _spawn_pty_for_session(session.id, cell.worktree_path, prompt=req.prompt)
+    _spawn_pty_for_session(session.id, cell.worktree_path, cell.id, prompt=req.prompt)
 
     return _session_dict(session)
 
 
 def _spawn_pty_for_session(
-    session_id: str, worktree_path: str, prompt: str = "", resume: bool = False
+    session_id: str,
+    worktree_path: str,
+    cell_id: str,
+    prompt: str = "",
+    resume: bool = False,
 ) -> None:
     """Spawn a PTY running claude for a session and start watching it."""
     if resume:
         cmd = ["claude", "--verbose", "--resume", session_id]
     else:
-        cmd = ["claude", "--verbose", "--session-id", session_id]
+        system_prompt = claude.orrery_system_prompt(cell_id)
+        cmd = [
+            "claude",
+            "--verbose",
+            "--session-id",
+            session_id,
+            "--system-prompt",
+            system_prompt,
+        ]
     pty_manager.spawn(
         session_id,
         cwd=worktree_path,
@@ -382,14 +436,14 @@ async def resume_session(cell_id: str, session_id: str):
     # Reset ended_at so daemon sees it as active
     await db.update_session(session_id, ended_at=None)
 
-    _spawn_pty_for_session(session.id, cell.worktree_path, resume=True)
+    _spawn_pty_for_session(session.id, cell.worktree_path, cell.id, resume=True)
 
     session.ended_at = None
     return _session_dict(session)
 
 
-@app.post("/cells/{cell_id}/sessions/{session_id}/stop")
-async def stop_session(cell_id: str, session_id: str):
+@app.delete("/cells/{cell_id}/sessions/{session_id}")
+async def delete_session(cell_id: str, session_id: str):
     cell = await db.get_cell(cell_id)
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
@@ -399,32 +453,14 @@ async def stop_session(cell_id: str, session_id: str):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    # Kill PTY if still running
     if pty_manager.is_alive(session_id):
-        transcript = pty_manager.get_transcript(session_id)
-        xterm_state = pty_manager.get_raw_output(session_id)
         await pty_manager.terminate(session_id)
-    else:
-        # Process already exited but _watch_pty hasn't finalized yet.
-        # Grab whatever state is left and clean up.
-        transcript = pty_manager.get_transcript(session_id)
-        xterm_state = pty_manager.get_raw_output(session_id)
+    elif pty_manager.get(session_id):
         pty_manager.remove(session_id)
 
-    # Only overwrite DB fields if we got fresh data from the PTY buffer;
-    # otherwise _watch_pty (or a previous stop) may have already saved it.
-    update_kwargs: dict[str, object] = {}
-    if not session.ended_at:
-        update_kwargs["ended_at"] = datetime.now(timezone.utc).isoformat()
-    if transcript:
-        update_kwargs["transcript"] = transcript
-    if xterm_state:
-        update_kwargs["xterm_state"] = xterm_state
-
-    if update_kwargs:
-        updated = await db.update_session(session_id, **update_kwargs)
-    else:
-        updated = session
-    return _session_dict(updated) if updated else {}
+    await db.delete_session(session_id)
+    await daemon.notify("cell_updated", {"id": cell_id})
 
 
 @app.get("/cells/{cell_id}/sessions/{session_id}/xterm-state")

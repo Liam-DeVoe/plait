@@ -6,11 +6,41 @@ from pathlib import Path
 
 from server.daemon_config import DAEMON_ALLOWED_TOOLS
 
+ORRERY_PORT = 8000
+
+
+def orrery_system_prompt(cell_id: str) -> str:
+    """Generate the system prompt that tells Claude about Orrery hooks."""
+    base = f"http://localhost:{ORRERY_PORT}"
+    return (
+        f"You are working inside an Orrery cell (id: {cell_id}).\n"
+        "Orrery is a development tool that manages your worktree and tracks your work.\n"
+        "\n"
+        "## When asked to push and/or create a PR:\n"
+        "\n"
+        "1. Choose a descriptive branch name based on your changes "
+        "(e.g. `fix-timeout-handling`, `add-retry-logic`)\n"
+        "2. Rename the current branch: `git branch -m <new-name>`\n"
+        "3. Notify Orrery about the branch rename:\n"
+        f"   curl -s -X POST {base}/hooks/cells/{cell_id}/branch-updated "
+        "-H 'Content-Type: application/json' "
+        '-d \'{"branch": "<new-name>"}\'\n'
+        "4. Push: `git push -u origin <new-name>`\n"
+        '5. Create the PR: `gh pr create --title "..." --body "..."`\n'
+        "6. Notify Orrery about the PR:\n"
+        f"   curl -s -X POST {base}/hooks/cells/{cell_id}/pr-created "
+        "-H 'Content-Type: application/json' "
+        '-d \'{"pr_url": "<url>", "pr_number": <number>}\'\n'
+        "\n"
+        "Always notify Orrery after renaming the branch and after creating the PR.\n"
+    )
+
 
 async def run_claude_headless(
     prompt: str,
     cwd: str | Path,
     session_id: str | None = None,
+    system_prompt: str | None = None,
     on_output: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[bool, str]:
     """Run claude in print mode with a prompt. Returns (success, output).
@@ -26,6 +56,8 @@ async def run_claude_headless(
     args = ["claude", "-p", prompt, "--verbose", "--allowedTools", *allowed]
     if session_id:
         args.extend(["--session-id", session_id])
+    if system_prompt:
+        args.extend(["--system-prompt", system_prompt])
     proc = await asyncio.create_subprocess_exec(
         *args,
         cwd=cwd,
@@ -58,6 +90,7 @@ async def resolve_conflicts(
     worktree_path: str,
     branch: str,
     session_id: str | None = None,
+    system_prompt: str | None = None,
     on_output: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[bool, str]:
     """Use Claude to merge origin/main and resolve any conflicts."""
@@ -69,7 +102,11 @@ async def resolve_conflicts(
         "Do NOT push — just complete the merge locally."
     )
     return await run_claude_headless(
-        prompt, cwd=worktree_path, session_id=session_id, on_output=on_output
+        prompt,
+        cwd=worktree_path,
+        session_id=session_id,
+        system_prompt=system_prompt,
+        on_output=on_output,
     )
 
 
@@ -78,6 +115,7 @@ async def fix_ci(
     branch: str,
     ci_output: str,
     session_id: str | None = None,
+    system_prompt: str | None = None,
     on_output: Callable[[str], Awaitable[None]] | None = None,
 ) -> tuple[bool, str]:
     """Use Claude to diagnose and fix a CI failure."""
@@ -87,5 +125,9 @@ async def fix_ci(
         "Please diagnose the issue and fix it. Commit your fix."
     )
     return await run_claude_headless(
-        prompt, cwd=worktree_path, session_id=session_id, on_output=on_output
+        prompt,
+        cwd=worktree_path,
+        session_id=session_id,
+        system_prompt=system_prompt,
+        on_output=on_output,
     )

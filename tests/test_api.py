@@ -127,6 +127,26 @@ async def test_delete_cell_not_found(client):
     assert resp.status_code == 404
 
 
+async def test_create_local_cell(client):
+    """Creating a cell with just repo should create a local cell with generic branch."""
+    c, git_env, _ = client
+    resp = await c.post("/cells", json={"repo": git_env.repo_name})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["repo"] == git_env.repo_name
+    assert data["branch"].startswith("cell/")
+    assert data["pr_number"] is None
+    assert data["pr_url"] is None
+    assert data["status"] == "active"
+    assert data["worktree_path"]
+
+
+async def test_create_cell_requires_pr_url_or_repo(client):
+    c, _, _ = client
+    resp = await c.post("/cells", json={})
+    assert resp.status_code == 400
+
+
 async def test_create_cell_bad_url(client):
     c, _, _ = client
     resp = await c.post("/cells", json={"pr_url": "not-a-url"})
@@ -189,6 +209,50 @@ async def test_sortie_derived_status(client):
 
     resp = await c.get(f"/sorties/{sortie_id}")
     assert resp.json()["status"] == "active"
+
+
+async def test_hook_branch_updated(client):
+    """Hook should update the cell's branch in the DB."""
+    create_resp = await _create_cell_via_api(client)
+    cell_id = create_resp.json()["id"]
+    c, _, _ = client
+
+    resp = await c.post(
+        f"/hooks/cells/{cell_id}/branch-updated",
+        json={"branch": "fix-timeout-handling"},
+    )
+    assert resp.status_code == 200
+
+    # Verify branch was updated
+    resp = await c.get(f"/cells/{cell_id}")
+    assert resp.json()["branch"] == "fix-timeout-handling"
+
+
+async def test_hook_pr_created(client):
+    """Hook should update the cell's PR info in the DB."""
+    create_resp = await _create_cell_via_api(client)
+    cell_id = create_resp.json()["id"]
+    c, _, _ = client
+
+    resp = await c.post(
+        f"/hooks/cells/{cell_id}/pr-created",
+        json={"pr_url": "https://github.com/org/repo/pull/99", "pr_number": 99},
+    )
+    assert resp.status_code == 200
+
+    # Verify PR info was updated
+    resp = await c.get(f"/cells/{cell_id}")
+    assert resp.json()["pr_number"] == 99
+    assert resp.json()["pr_url"] == "https://github.com/org/repo/pull/99"
+
+
+async def test_hook_cell_not_found(client):
+    c, _, _ = client
+    resp = await c.post(
+        "/hooks/cells/nonexistent/branch-updated",
+        json={"branch": "foo"},
+    )
+    assert resp.status_code == 404
 
 
 async def test_create_session(client, mock_pty):

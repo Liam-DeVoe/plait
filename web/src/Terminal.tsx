@@ -149,6 +149,13 @@ export default function Terminal({ sessionId, cellId, alive, autoFocus, onResume
           }
           return false;
         }
+        // Shift+Enter -> newline without submit (bracketed paste)
+        if (e.shiftKey && e.key === "Enter" && e.type === "keydown") {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "input", data: "\x1b[200~\n\x1b[201~" }));
+          }
+          return false;
+        }
         return true;
       });
 

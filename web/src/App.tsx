@@ -23,7 +23,7 @@ import {
   fetchSortie,
   createSortie,
   createInteractiveSession,
-  stopSession,
+  deleteSession,
   resumeSession,
   connectWebSocket,
   type Cell,
@@ -371,7 +371,7 @@ function CellDetailPage() {
     null,
   );
   const [launching, setLaunching] = useState(false);
-  const [focusSessionId, setFocusSessionId] = useState<string | null>(null);
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -387,16 +387,17 @@ function CellDetailPage() {
     setLaunching(true);
     try {
       const session = await createInteractiveSession(id);
-      setFocusSessionId(session.id);
+      setSelectedSessionId(session.id);
       load();
     } finally {
       setLaunching(false);
     }
   };
 
-  const handleStopSession = async (sessionId: string) => {
+  const handleDeleteSession = async (sessionId: string) => {
     if (!id) return;
-    await stopSession(id, sessionId);
+    await deleteSession(id, sessionId);
+    if (selectedSessionId === sessionId) setSelectedSessionId(null);
     load();
   };
 
@@ -408,8 +409,20 @@ function CellDetailPage() {
 
   if (!cell) return null;
 
-  const aliveSessions = cell.sessions.filter((s) => s.alive);
-  const deadSessions = cell.sessions.filter((s) => !s.alive);
+  const userSessions = cell.sessions.filter((s) => s.role === "user");
+  const daemonSessions = cell.sessions.filter((s) => s.role === "daemon");
+
+  // Auto-select: prefer most recent alive user session, else most recent user session
+  const effectiveSelectedId = (() => {
+    if (selectedSessionId && userSessions.some((s) => s.id === selectedSessionId))
+      return selectedSessionId;
+    const lastAlive = [...userSessions].reverse().find((s) => s.alive);
+    if (lastAlive) return lastAlive.id;
+    if (userSessions.length > 0) return userSessions[userSessions.length - 1].id;
+    return null;
+  })();
+
+  const selectedSession = userSessions.find((s) => s.id === effectiveSelectedId) ?? null;
 
   return (
     <div>
@@ -486,71 +499,101 @@ function CellDetailPage() {
 
       <div className="cell-detail__sessions-header">
         <div className="cell-detail__sessions-title">Sessions</div>
-        <div
-          className={`btn btn--blue${launching ? " btn--disabled" : ""}`}
-          onClick={handleLaunchSession}
-        >
-          {launching ? "Launching..." : "New Session"}
-        </div>
       </div>
 
-      {aliveSessions.length === 0 && deadSessions.length === 0 ? (
-        <div className="muted">
-          No sessions yet.
+      {userSessions.length === 0 ? (
+        <div>
+          <div className="muted" style={{ marginBottom: 12 }}>No sessions yet.</div>
+          <div
+            className={`btn btn--blue${launching ? " btn--disabled" : ""}`}
+            onClick={handleLaunchSession}
+          >
+            {launching ? "Launching..." : "New Session"}
+          </div>
         </div>
       ) : (
-        <div className="cell-detail__sessions-list">
-          {aliveSessions.map((s) => (
-            <div key={s.id} className="card cell-detail__session-card">
-              <div className="cell-detail__session-meta">
-                <StatusBadge status="running" label="alive" />
-                <span className="cell-detail__session-role">
-                  {s.role} {s.trigger ? `(${s.trigger})` : ""}
-                </span>
-                <span className="cell-detail__session-time">
-                  {new Date(s.started_at).toLocaleString()}
-                </span>
-                <div
-                  className="btn btn--sm btn--soft-gray cell-detail__vscode-btn"
-                  onClick={async () => {
-                    await openSessionInVSCode(cell.id, s.id);
-                    load();
-                  }}
-                >
-                  VS Code
+        <div className="terminal-panel">
+          <div className="terminal-panel__main">
+            {selectedSession && (
+              <>
+                <div className="terminal-panel__header">
+                  {selectedSession.alive && (
+                    <div
+                      className="btn btn--sm btn--soft-gray"
+                      onClick={async () => {
+                        await openSessionInVSCode(cell.id, selectedSession.id);
+                        load();
+                      }}
+                    >
+                      VS Code
+                    </div>
+                  )}
+                  {!selectedSession.alive && (
+                    <div
+                      className="btn btn--sm btn--soft-blue"
+                      onClick={() => handleResumeSession(selectedSession.id)}
+                    >
+                      Resume
+                    </div>
+                  )}
+                  <div
+                    className="btn btn--sm btn--soft-red"
+                    onClick={() => handleDeleteSession(selectedSession.id)}
+                  >
+                    Delete
+                  </div>
                 </div>
-                <div
-                  className="btn btn--sm btn--soft-red cell-detail__stop-btn"
-                  onClick={() => handleStopSession(s.id)}
-                >
-                  Stop
-                </div>
+                <Terminal
+                  sessionId={selectedSession.id}
+                  cellId={cell.id}
+                  alive={selectedSession.alive}
+                  autoFocus={selectedSession.id === selectedSessionId}
+                  onResume={() => handleResumeSession(selectedSession.id)}
+                />
+              </>
+            )}
+          </div>
+          <div className="terminal-panel__sidebar">
+            <div
+              className={`terminal-panel__new-btn${launching ? " btn--disabled" : ""}`}
+              onClick={handleLaunchSession}
+            >
+              {launching ? "Launching..." : "+ New Session"}
+            </div>
+            {userSessions.map((s) => (
+              <div
+                key={s.id}
+                className={`terminal-panel__tab${s.id === effectiveSelectedId ? " terminal-panel__tab--selected" : ""}`}
+                onClick={() => setSelectedSessionId(s.id)}
+              >
+                <span
+                  className={`terminal-panel__tab-dot${s.alive ? " terminal-panel__tab-dot--alive" : ""}`}
+                />
+                <span className="terminal-panel__tab-label">
+                  {s.trigger ? s.trigger : "session"}
+                </span>
+                <span className="terminal-panel__tab-time">
+                  {new Date(s.started_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </span>
               </div>
-              <Terminal
-                sessionId={s.id}
+            ))}
+          </div>
+        </div>
+      )}
+
+      {daemonSessions.length > 0 && (
+        <div>
+          <div className="cell-detail__daemon-title">Daemon sessions</div>
+          <div className="cell-detail__daemon-list">
+            {[...daemonSessions].reverse().map((s) => (
+              <CollapsibleSession
+                key={s.id}
+                session={s}
                 cellId={cell.id}
-                alive={s.alive}
-                autoFocus={s.id === focusSessionId}
                 onResume={() => handleResumeSession(s.id)}
               />
-            </div>
-          ))}
-
-          {deadSessions.length > 0 && (
-            <div>
-              <div className="cell-detail__dead-title">Previous sessions</div>
-              <div className="cell-detail__dead-list">
-                {deadSessions.map((s) => (
-                  <CollapsibleSession
-                    key={s.id}
-                    session={s}
-                    cellId={cell.id}
-                    onResume={() => handleResumeSession(s.id)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
+            ))}
+          </div>
         </div>
       )}
     </div>
