@@ -89,18 +89,42 @@ async def create_worktree(repo_id: str, branch: str, cell_id: str) -> str:
         "git", "ls-remote", "--heads", "origin", branch, cwd=repo_dir
     )
     if rc == 0 and branch in out:
-        # Fetch and create worktree with a local branch tracking the remote
+        # Fetch and create worktree tracking the remote branch
         await run("git", "fetch", "origin", branch, cwd=repo_dir)
-        rc, out, err = await run(
-            "git",
-            "worktree",
-            "add",
-            "-b",
-            branch,
-            str(worktree_dir),
-            f"origin/{branch}",
-            cwd=repo_dir,
+        # Check if the local branch already exists (e.g. from a previous checkout)
+        rc2, _, _ = await run(
+            "git", "rev-parse", "--verify", f"refs/heads/{branch}", cwd=repo_dir
         )
+        if rc2 == 0:
+            # Local branch exists — use it directly, then reset to remote
+            rc, out, err = await run(
+                "git",
+                "worktree",
+                "add",
+                str(worktree_dir),
+                branch,
+                cwd=repo_dir,
+            )
+            if rc == 0:
+                await run(
+                    "git",
+                    "reset",
+                    "--hard",
+                    f"origin/{branch}",
+                    cwd=str(worktree_dir),
+                )
+        else:
+            # Create new local branch tracking remote
+            rc, out, err = await run(
+                "git",
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                str(worktree_dir),
+                f"origin/{branch}",
+                cwd=repo_dir,
+            )
     else:
         # Create new branch from origin/main
         await fetch_origin(repo_id)
