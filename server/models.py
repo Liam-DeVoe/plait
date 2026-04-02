@@ -20,9 +20,7 @@ class CIStatus(str, Enum):
 
 class SyncStatus(str, Enum):
     current = "current"
-    syncing = "syncing"
-    conflict = "conflict"
-    failed = "failed"
+    behind = "behind"
 
 
 class SessionRole(str, Enum):

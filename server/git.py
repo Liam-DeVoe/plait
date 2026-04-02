@@ -167,10 +167,14 @@ async def assert_not_detached(worktree_path: str) -> None:
     assert rc == 0, f"Worktree is in detached HEAD state: {worktree_path}"
 
 
-async def is_behind_main(worktree_path: str) -> bool:
-    """Check if the worktree branch is behind origin/main."""
+async def is_behind_main(worktree_path: str, branch: str) -> bool:
+    """Check if the remote branch is behind origin/main."""
     rc, out, err = await run(
-        "git", "rev-list", "--count", "HEAD..origin/main", cwd=worktree_path
+        "git",
+        "rev-list",
+        "--count",
+        f"origin/{branch}..origin/main",
+        cwd=worktree_path,
     )
     if rc != 0:
         return False
