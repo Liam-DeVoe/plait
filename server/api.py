@@ -244,15 +244,22 @@ async def open_session_in_vscode(cell_id: str, session_id: str):
     # Open VS Code at the worktree
     subprocess.Popen(["code", cell.worktree_path])
 
-    # Open a macOS terminal with claude --resume
-    shell_cmd = f"cd '{cell.worktree_path}' && claude --resume {session_id}"
-    subprocess.Popen(
-        [
-            "osascript",
-            "-e",
-            f'tell application "Terminal" to do script "{shell_cmd}"',
-        ]
-    )
+    # Open a new integrated terminal in VS Code and type the resume command.
+    # Uses AppleScript to wait for VS Code, open a terminal (Ctrl+Shift+`),
+    # and type the command.
+    resume_cmd = f"claude --resume {session_id}"
+    applescript = f"""delay 2.5
+tell application "Visual Studio Code" to activate
+delay 0.1
+tell application "System Events"
+    tell process "Code"
+        keystroke ";" using {{command down}}
+        delay 0.1
+        keystroke "{resume_cmd}"
+        keystroke return
+    end tell
+end tell"""
+    subprocess.Popen(["osascript", "-e", applescript])
 
     return {"status": "opened"}
 
