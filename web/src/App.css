@@ -829,14 +829,16 @@
   color: #6b7280;
 }
 
-.sortie-detail__separator td {
-  padding: 0;
-}
-
-.sortie-detail__separator hr {
-  border: none;
-  border-top: 2px solid #d1d5db;
-  margin: 8px 0;
+.sortie-detail__section-header td {
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: #f9fafb;
+  border-top: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
 }
 
 /* === Daemon Log === */

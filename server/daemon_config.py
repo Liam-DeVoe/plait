@@ -11,6 +11,7 @@ DAEMON_ALLOWED_TOOLS = [
     "Write(/{worktree}/**)",
     "Glob(/{worktree}/**)",
     "Grep(/{worktree}/**)",
+    "WebFetch(domain:hegel.dev)",
 ]
 
 # Sortie sessions need access to the entire worktrees/ directory
