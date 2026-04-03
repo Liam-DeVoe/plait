@@ -76,7 +76,7 @@ Three modes:
 Claude sessions call back to Orrery via HTTP hooks to report state changes:
 - `POST /hooks/cells/{id}/branch-updated` — after renaming a branch
 - `POST /hooks/cells/{id}/pr-created` — after creating a PR
-- `POST /hooks/cells/{id}/ci-failure-expected` — suppresses CI-failure as a tend trigger
+- `POST /hooks/cells/{id}/ci-failure-expected` — suppresses CI-failure as a tend trigger until the branch HEAD changes
 - `POST /hooks/sessions/{id}/done` — signals task completion, terminates the PTY
 - `POST /hooks/sorties/{id}/create-cell` — sortie orchestrator creates a cell per repo
 

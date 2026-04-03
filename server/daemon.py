@@ -246,13 +246,21 @@ async def _process_cell(cell: Cell) -> dict:
                         "outcome": None,
                     }
 
+                # --- Clear stale ci_failure_expected when HEAD moves ---
+                if (
+                    cell.ci_failure_expected_sha
+                    and pr_data.head_sha != cell.ci_failure_expected_sha
+                ):
+                    await db.update_cell(cell.id, ci_failure_expected_sha=None)
+                    cell.ci_failure_expected_sha = None
+
                 # --- CI status (REST, using head SHA from PR data) ---
                 ci = await git.get_ci_status_rest(cell.repo, pr_data.head_sha)
                 ci_status = CIStatus(ci)
                 if ci_status != cell.ci_status:
                     await db.update_cell(cell.id, ci_status=ci_status)
                     await notify("cell_updated", {"id": cell.id, "ci_status": ci})
-                if ci_status == CIStatus.failing and not cell.ci_failure_expected:
+                if ci_status == CIStatus.failing and not cell.ci_failure_expected_sha:
                     ci_detail = f"ci: {cell.ci_status.value}\u2192{ci_status.value}"
                     if ci_detail not in reasons:
                         reasons.append(ci_detail)
@@ -306,9 +314,9 @@ async def _process_cell(cell: Cell) -> dict:
             # re-evaluates CI with fresh eyes (it was triggered by a
             # non-CI reason since CI alone can't trigger when the flag
             # is set).
-            if cell.ci_failure_expected:
-                await db.update_cell(cell.id, ci_failure_expected=False)
-                cell.ci_failure_expected = False
+            if cell.ci_failure_expected_sha:
+                await db.update_cell(cell.id, ci_failure_expected_sha=None)
+                cell.ci_failure_expected_sha = None
             decision = "tended"
             logger.info(f"Cell {cell.id} needs fixing, invoking Claude")
             _in_flight.add(key)

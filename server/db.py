@@ -28,7 +28,7 @@ CREATE TABLE IF NOT EXISTS cells (
     pr_number INTEGER,
     pr_url TEXT,
     ci_status TEXT NOT NULL DEFAULT 'unknown',
-    ci_failure_expected INTEGER NOT NULL DEFAULT 0,
+    ci_failure_expected_sha TEXT,
     pr_comment_count INTEGER NOT NULL DEFAULT 0,
     pr_reaction_count INTEGER NOT NULL DEFAULT 0,
     sync_status TEXT NOT NULL DEFAULT 'current',
@@ -87,6 +87,7 @@ async def init_db() -> None:
         "ALTER TABLE cells ADD COLUMN ci_failure_expected INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE sorties DROP COLUMN status",
         "ALTER TABLE cells ADD COLUMN last_activity_at TEXT",
+        "ALTER TABLE cells ADD COLUMN ci_failure_expected_sha TEXT",
     ]:
         try:
             await db.execute(migration)
@@ -104,7 +105,7 @@ async def create_cell(cell: Cell) -> Cell:
     try:
         await db.execute(
             """INSERT INTO cells (id, sortie_id, repo, branch, worktree_path,
-               pr_number, pr_url, ci_status, ci_failure_expected,
+               pr_number, pr_url, ci_status, ci_failure_expected_sha,
                pr_comment_count, pr_reaction_count,
                sync_status, status, created_at, archived_at, archive_reason,
                last_activity_at)
@@ -118,7 +119,7 @@ async def create_cell(cell: Cell) -> Cell:
                 cell.pr_number,
                 cell.pr_url,
                 cell.ci_status.value,
-                int(cell.ci_failure_expected),
+                cell.ci_failure_expected_sha,
                 cell.pr_comment_count,
                 cell.pr_reaction_count,
                 cell.sync_status.value,
@@ -202,7 +203,7 @@ def _row_to_cell(row: aiosqlite.Row) -> Cell:
         pr_number=row["pr_number"],
         pr_url=row["pr_url"],
         ci_status=CIStatus(row["ci_status"]),
-        ci_failure_expected=bool(row["ci_failure_expected"]),
+        ci_failure_expected_sha=row["ci_failure_expected_sha"],
         pr_comment_count=row["pr_comment_count"],
         pr_reaction_count=row["pr_reaction_count"],
         sync_status=SyncStatus(row["sync_status"]),

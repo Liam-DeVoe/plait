@@ -382,12 +382,20 @@ async def hook_pr_created(cell_id: str, req: PRCreatedHook):
 async def hook_ci_failure_expected(cell_id: str):
     """Called by a tend session when it determines CI failures are expected
     (e.g. the PR depends on another unmerged PR). Suppresses CI-failure
-    as a tend trigger until something else changes."""
+    as a tend trigger until the branch HEAD changes."""
     cell = await db.get_cell(cell_id)
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
-    await db.update_cell(cell_id, ci_failure_expected=True)
-    await daemon.notify("cell_updated", {"id": cell_id, "ci_failure_expected": True})
+    rc, sha, _ = await git.run(
+        "git", "rev-parse", "HEAD", cwd=cell.worktree_path
+    )
+    if rc != 0:
+        raise HTTPException(status_code=500, detail="Could not read HEAD")
+    sha = sha.strip()
+    await db.update_cell(cell_id, ci_failure_expected_sha=sha)
+    await daemon.notify(
+        "cell_updated", {"id": cell_id, "ci_failure_expected_sha": sha}
+    )
     return {"status": "ok"}
 
 
