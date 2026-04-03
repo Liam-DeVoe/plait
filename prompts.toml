@@ -151,7 +151,7 @@ The branch {branch} might need attention. Investigate and fix any of the followi
    ```
    gh api repos/OWNER/REPO/issues/comments/COMMENT_ID/reactions --jq '.[] | {{content: .content, user: .user.login}}'
    ```
-   **Skip issue comments that already have a "thumbs up" (👍) reaction** — those have already been addressed. After addressing an issue comment, mark it as handled:
+   **Skip issue comments where the comment author has left a thumbs-up (+1) reaction on their own comment** — that means the author considers it resolved. After addressing an issue comment, mark it as handled:
    ```
    gh api repos/OWNER/REPO/issues/comments/COMMENT_ID/reactions -f content=+1
    ```
