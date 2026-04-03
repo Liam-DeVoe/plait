@@ -259,6 +259,87 @@ async def test_ci_fix_on_failure(git_env, init_db, mock_gh, mock_claude):
     assert sessions[0].succeeded is True
 
 
+async def test_ci_failure_expected_cleared_on_head_change(
+    git_env, init_db, mock_gh, mock_claude
+):
+    """ci_failure_expected_sha should be cleared when the PR's HEAD moves."""
+    git_env.create_branch("ci-expected")
+    git_env.add_commit("file.txt", "content", "add file")
+    git_env.push("ci-expected")
+    git_env.checkout("main")
+
+    cell = await _create_cell_in_db(git_env, "ci-expected", "daemon-ci-expected")
+    await db.update_cell(
+        cell.id,
+        pr_number=150,
+        ci_status=CIStatus.failing,
+        ci_failure_expected_sha="old_sha",
+    )
+    cell.pr_number = 150
+    cell.ci_status = CIStatus.failing
+    cell.ci_failure_expected_sha = "old_sha"
+
+    # PR HEAD has moved to a new SHA
+    _mock_pr_data(
+        mock_gh,
+        pr_number=150,
+        head_sha="new_sha",
+        check_runs=[
+            {"name": "build", "status": "completed", "conclusion": "failure"},
+        ],
+    )
+    mock_claude.return_value = 0
+
+    await process_cell(cell)
+
+    # Flag should be cleared because HEAD changed
+    fetched = await db.get_cell(cell.id)
+    assert fetched.ci_failure_expected_sha is None
+
+    # And Claude should have been invoked to fix the CI failure
+    mock_claude.assert_called_once()
+
+
+async def test_ci_failure_expected_suppresses_when_head_matches(
+    git_env, init_db, mock_gh, mock_claude
+):
+    """ci_failure_expected_sha should suppress tend when HEAD hasn't moved."""
+    git_env.create_branch("ci-suppress")
+    git_env.add_commit("file.txt", "content", "add file")
+    git_env.push("ci-suppress")
+    git_env.checkout("main")
+
+    cell = await _create_cell_in_db(git_env, "ci-suppress", "daemon-ci-suppress")
+    await db.update_cell(
+        cell.id,
+        pr_number=151,
+        ci_status=CIStatus.failing,
+        ci_failure_expected_sha="same_sha",
+    )
+    cell.pr_number = 151
+    cell.ci_status = CIStatus.failing
+    cell.ci_failure_expected_sha = "same_sha"
+
+    # PR HEAD is still the same SHA
+    _mock_pr_data(
+        mock_gh,
+        pr_number=151,
+        head_sha="same_sha",
+        check_runs=[
+            {"name": "build", "status": "completed", "conclusion": "failure"},
+        ],
+    )
+
+    await process_cell(cell)
+
+    # Flag should still be set
+    fetched = await db.get_cell(cell.id)
+    assert fetched.ci_failure_expected_sha == "same_sha"
+
+    # Claude should NOT have been invoked
+    mock_claude.assert_not_called()
+
+
 async def test_ci_fix_skipped_while_running(git_env, init_db, mock_gh, mock_claude):
     """If a ci_fix session is already running, no new fix should be started."""
     git_env.create_branch("ci-norepeat")
