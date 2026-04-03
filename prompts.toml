@@ -124,7 +124,7 @@ recognize those failures as expected and won't waste time trying to fix them.
 # Claude should investigate the actual state and fix what it finds.
 # Variables: branch, author, cell_id, base_url
 template = """
-The branch {branch} needs attention. Investigate and fix any of the following that apply:
+The branch {branch} might need attention. Investigate and fix any of the following that apply:
 
 1. **Merge conflicts with main**: If the branch is behind origin/main, merge it and resolve any conflicts, preserving the intent of both sides.
 2. **CI failures**: Check CI status with `gh pr checks`. If failing, look at the failure logs and fix the issue.
