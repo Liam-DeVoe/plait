@@ -324,25 +324,84 @@ async def get_pr_comment_count(repo_id: str, pr_number: int) -> int:
 
 
 async def get_pr_reaction_count(repo_id: str, pr_number: int) -> int:
-    """Get the total number of reactions on PR comments (issue + review comments)."""
+    """Count reactions by the configured author on others' PR comments.
+
+    Only counts reactions where the reactor is the orrery author AND the
+    comment was written by someone else.  This detects the author
+    acknowledging reviewer feedback.
+    """
+    author = config.get_author()
+    if not author:
+        return 0
     upstream = config.get_repo(repo_id).upstream
+    owner, name = upstream.split("/")
+    query = """
+    query($owner: String!, $name: String!, $pr: Int!) {
+      repository(owner: $owner, name: $name) {
+        pullRequest(number: $pr) {
+          comments(first: 100) {
+            nodes {
+              author { login }
+              reactions(first: 10) {
+                nodes { user { login } }
+              }
+            }
+          }
+          reviews(first: 100) {
+            nodes {
+              comments(first: 100) {
+                nodes {
+                  author { login }
+                  reactions(first: 10) {
+                    nodes { user { login } }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    rc, out, _err = await run(
+        "gh",
+        "api",
+        "graphql",
+        "-F",
+        f"owner={owner}",
+        "-F",
+        f"name={name}",
+        "-F",
+        f"pr={pr_number}",
+        "-f",
+        f"query={query}",
+    )
+    if rc != 0:
+        return 0
+
+    data = json.loads(out)
+    pr_data = data["data"]["repository"]["pullRequest"]
     total = 0
-    for endpoint in [
-        f"repos/{upstream}/issues/{pr_number}/comments",
-        f"repos/{upstream}/pulls/{pr_number}/comments",
-    ]:
-        rc, out, err = await run(
-            "gh",
-            "api",
-            endpoint,
-            "--jq",
-            "[.[].reactions.total_count] | add // 0",
-        )
-        if rc == 0:
-            try:
-                total += int(out.strip())
-            except ValueError:
-                pass
+
+    # Issue comments (top-level PR comments)
+    for comment in pr_data["comments"]["nodes"]:
+        comment_author = (comment.get("author") or {}).get("login")
+        if comment_author == author:
+            continue
+        for reaction in comment["reactions"]["nodes"]:
+            if (reaction.get("user") or {}).get("login") == author:
+                total += 1
+
+    # Review comments
+    for review in pr_data["reviews"]["nodes"]:
+        for comment in review["comments"]["nodes"]:
+            comment_author = (comment.get("author") or {}).get("login")
+            if comment_author == author:
+                continue
+            for reaction in comment["reactions"]["nodes"]:
+                if (reaction.get("user") or {}).get("login") == author:
+                    total += 1
+
     return total
 
 
