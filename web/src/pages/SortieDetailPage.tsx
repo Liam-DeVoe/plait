@@ -149,12 +149,6 @@ export default function SortieDetailPage() {
               </td>
               <td className="table__cell">
                 <StatusBadge
-                  status={cell.ci_status}
-                  label={`CI: ${cell.ci_status}`}
-                />
-              </td>
-              <td className="table__cell">
-                <StatusBadge
                   status={
                     cell.status === "archived"
                       ? cell.archive_reason === "merged" ? "completed" : cell.archive_reason === "closed" ? "closed" : "archived"
@@ -167,6 +161,12 @@ export default function SortieDetailPage() {
                   }
                 />
               </td>
+              <td className="table__cell">
+                <StatusBadge
+                  status={cell.ci_status}
+                  label={`CI: ${cell.ci_status}`}
+                />
+              </td>
             </tr>
           );
 
@@ -177,17 +177,15 @@ export default function SortieDetailPage() {
                   <tr>
                     <th className="table__header-cell">Repo / Branch</th>
                     <th className="table__header-cell">PR</th>
-                    <th className="table__header-cell">CI</th>
                     <th className="table__header-cell">Status</th>
+                    <th className="table__header-cell">CI</th>
                   </tr>
                 </thead>
                 <tbody>
                   {activeCells.map(renderCellRow)}
-                  {activeCells.length > 0 && archivedCells.length > 0 && (
-                    <tr className="sortie-detail__separator">
-                      <td colSpan={4}>
-                        <hr />
-                      </td>
+                  {archivedCells.length > 0 && (
+                    <tr className="sortie-detail__section-header">
+                      <td colSpan={4}>Archived</td>
                     </tr>
                   )}
                   {archivedCells.map(renderCellRow)}

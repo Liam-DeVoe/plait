@@ -835,8 +835,8 @@
 
 .sortie-detail__separator hr {
   border: none;
-  border-top: 1px solid #e5e7eb;
-  margin: 0;
+  border-top: 2px solid #d1d5db;
+  margin: 8px 0;
 }
 
 /* === Daemon Log === */
