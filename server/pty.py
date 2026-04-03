@@ -118,10 +118,17 @@ class PtyManager:
         pty_session = self._sessions.get(session_id)
         if pty_session is None or pty_session.master_fd == -1:
             return
-        try:
-            os.write(pty_session.master_fd, data)
-        except OSError:
-            logger.exception(f"Failed to write to PTY {session_id}")
+        view = memoryview(data)
+        while len(view) > 0:
+            try:
+                n = os.write(pty_session.master_fd, view)
+                view = view[n:]
+            except BlockingIOError:
+                # Kernel buffer full — busy-wait briefly and retry
+                time.sleep(0.01)
+            except OSError:
+                logger.exception(f"Failed to write to PTY {session_id}")
+                break
 
     def resize(self, session_id: str, rows: int, cols: int) -> None:
         pty_session = self._sessions.get(session_id)
