@@ -466,7 +466,8 @@ async def get_pr_data(repo_id: str, pr_number: int) -> PRData | None:
         pr = json.loads(out)
     except json.JSONDecodeError:
         return None
-    state = pr["state"].upper()  # REST returns "open", we want "OPEN"
+    # REST returns "open"/"closed" — merged PRs are "closed" with merged=true
+    state = "MERGED" if pr.get("merged") else pr["state"].upper()
     head_sha = pr["head"]["sha"]
 
     # 2. Review comments with reaction counts (1 REST call)
