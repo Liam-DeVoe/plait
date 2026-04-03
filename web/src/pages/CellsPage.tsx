@@ -177,6 +177,14 @@ function runSummary(run: DaemonRun): string {
   if (skipped > 0) parts.push(`${skipped} skipped`);
   if (errored > 0) parts.push(`${errored} errored`);
   if (idle > 0) parts.push(`${idle} idle`);
+  const throttled = run.results.filter(
+    (r) => r.decision === "throttled",
+  ).length;
+  if (throttled > 0) parts.push(`${throttled} throttled`);
+  const warned = run.results.filter(
+    (r) => r.warnings?.length > 0,
+  ).length;
+  if (warned > 0) parts.push(`${warned} warned`);
 
   return parts.join(", ");
 }
@@ -238,7 +246,8 @@ function DaemonLog({ runs }: { runs: DaemonRun[] }) {
                           ? r.outcome === "succeeded"
                             ? "passing"
                             : "failing"
-                          : r.decision === "skipped"
+                          : r.decision === "skipped" ||
+                              r.decision === "throttled"
                             ? "pending"
                             : r.decision === "error"
                               ? "failing"
@@ -251,6 +260,11 @@ function DaemonLog({ runs }: { runs: DaemonRun[] }) {
                     {r.reasons.length > 0 && (
                       <span className="daemon-log__reasons">
                         {r.reasons.join(", ")}
+                      </span>
+                    )}
+                    {r.warnings?.length > 0 && (
+                      <span className="daemon-log__warnings">
+                        {r.warnings.join(", ")}
                       </span>
                     )}
                   </div>

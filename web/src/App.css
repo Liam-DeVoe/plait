@@ -904,6 +904,11 @@
   font-size: 12px;
 }
 
+.daemon-log__warnings {
+  color: #d97706;
+  font-size: 12px;
+}
+
 /* === Terminal === */
 .terminal__container {
   border-radius: 4px 4px 0 0;

@@ -38,8 +38,9 @@ export interface DaemonRunResult {
   cell_id: string;
   repo: string;
   branch: string;
-  decision: "idle" | "skipped" | "tended" | "error";
+  decision: "idle" | "skipped" | "tended" | "throttled" | "archived" | "error";
   reasons: string[];
+  warnings: string[];
   outcome: "succeeded" | "failed" | null;
 }
 

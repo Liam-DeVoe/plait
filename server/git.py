@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
@@ -299,7 +300,7 @@ async def get_ci_status(repo_id: str, pr_number: int) -> str:
     return "unknown"
 
 
-async def get_pr_comment_count(repo_id: str, pr_number: int) -> int:
+async def get_pr_comment_count(repo_id: str, pr_number: int) -> int | None:
     """Get the total number of comments on a PR (issue comments + review comments)."""
     upstream = config.get_repo(repo_id).upstream
     rc, out, err = await run(
@@ -313,17 +314,17 @@ async def get_pr_comment_count(repo_id: str, pr_number: int) -> int:
         "comments,reviews",
     )
     if rc != 0:
-        return 0
+        return None
     try:
         data = json.loads(out)
     except json.JSONDecodeError:
-        return 0
+        return None
     comments = len(data.get("comments", []))
     reviews = len(data.get("reviews", []))
     return comments + reviews
 
 
-async def get_pr_reaction_count(repo_id: str, pr_number: int) -> int:
+async def get_pr_reaction_count(repo_id: str, pr_number: int) -> int | None:
     """Count reactions by the configured author on others' PR comments.
 
     Only counts reactions where the reactor is the orrery author AND the
@@ -377,7 +378,7 @@ async def get_pr_reaction_count(repo_id: str, pr_number: int) -> int:
         f"query={query}",
     )
     if rc != 0:
-        return 0
+        return None
 
     data = json.loads(out)
     pr_data = data["data"]["repository"]["pullRequest"]
@@ -435,6 +436,154 @@ async def get_pr_latest_comment_time(repo_id: str, pr_number: int) -> datetime |
 
     latest = max(timestamps)
     return datetime.fromisoformat(latest.replace("Z", "+00:00"))
+
+
+@dataclass
+class PRData:
+    """Batched PR data fetched via pure REST API calls."""
+
+    state: str  # "OPEN", "MERGED", "CLOSED"
+    comment_count: int  # issue comments + reviews
+    reaction_count: int  # author's reactions on others' comments
+    latest_comment_time: datetime | None
+    head_sha: str
+
+
+async def get_pr_data(repo_id: str, pr_number: int) -> PRData | None:
+    """Fetch all PR data in one batch using pure REST API (no GraphQL).
+
+    Returns None on any API failure so callers can skip comparisons
+    rather than acting on stale data.
+    """
+    upstream = config.get_repo(repo_id).upstream
+    author = config.get_author()
+
+    # 1. PR metadata: state + head SHA (1 REST call)
+    rc, out, _ = await run("gh", "api", f"repos/{upstream}/pulls/{pr_number}")
+    if rc != 0:
+        return None
+    try:
+        pr = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+    state = pr["state"].upper()  # REST returns "open", we want "OPEN"
+    head_sha = pr["head"]["sha"]
+
+    # 2. Review comments with reaction counts (1 REST call)
+    rc, out, _ = await run("gh", "api", f"repos/{upstream}/pulls/{pr_number}/comments")
+    if rc != 0:
+        return None
+    try:
+        review_comments = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+
+    # 3. Issue comments with reaction counts (1 REST call)
+    rc, out, _ = await run("gh", "api", f"repos/{upstream}/issues/{pr_number}/comments")
+    if rc != 0:
+        return None
+    try:
+        issue_comments = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+
+    # 4. Reviews — for count + timestamps (1 REST call)
+    rc, out, _ = await run("gh", "api", f"repos/{upstream}/pulls/{pr_number}/reviews")
+    if rc != 0:
+        return None
+    try:
+        reviews = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+
+    # Derive comment_count: issue comments + reviews (same as current logic)
+    comment_count = len(issue_comments) + len(reviews)
+
+    # Derive latest_comment_time from all comment/review timestamps
+    timestamps: list[str] = []
+    for c in issue_comments:
+        if "created_at" in c:
+            timestamps.append(c["created_at"])
+    for r in reviews:
+        if "submitted_at" in r:
+            timestamps.append(r["submitted_at"])
+    for c in review_comments:
+        if "created_at" in c:
+            timestamps.append(c["created_at"])
+    latest_comment_time = None
+    if timestamps:
+        latest_ts = max(timestamps)
+        latest_comment_time = datetime.fromisoformat(latest_ts.replace("Z", "+00:00"))
+
+    # Derive reaction_count: author's reactions on non-author comments.
+    # REST comment data includes reactions.total_count, so we only fetch
+    # the full reactors list for comments that actually have reactions.
+    reaction_count = 0
+    if author:
+        for c in review_comments:
+            if (c.get("user") or {}).get("login") == author:
+                continue
+            if (c.get("reactions") or {}).get("total_count", 0) > 0:
+                rc2, out2, _ = await run(
+                    "gh",
+                    "api",
+                    f"repos/{upstream}/pulls/comments/{c['id']}/reactions",
+                )
+                if rc2 == 0:
+                    for r in json.loads(out2):
+                        if (r.get("user") or {}).get("login") == author:
+                            reaction_count += 1
+        for c in issue_comments:
+            if (c.get("user") or {}).get("login") == author:
+                continue
+            if (c.get("reactions") or {}).get("total_count", 0) > 0:
+                rc2, out2, _ = await run(
+                    "gh",
+                    "api",
+                    f"repos/{upstream}/issues/comments/{c['id']}/reactions",
+                )
+                if rc2 == 0:
+                    for r in json.loads(out2):
+                        if (r.get("user") or {}).get("login") == author:
+                            reaction_count += 1
+
+    return PRData(
+        state=state,
+        comment_count=comment_count,
+        reaction_count=reaction_count,
+        latest_comment_time=latest_comment_time,
+        head_sha=head_sha,
+    )
+
+
+async def get_ci_status_rest(repo_id: str, head_sha: str) -> str:
+    """Get CI status for a commit SHA using pure REST API (no GraphQL).
+
+    Returns 'passing', 'failing', 'pending', or 'unknown'.
+    """
+    upstream = config.get_repo(repo_id).upstream
+    rc, out, _ = await run(
+        "gh", "api", f"repos/{upstream}/commits/{head_sha}/check-runs"
+    )
+    if rc != 0:
+        return "unknown"
+
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return "unknown"
+
+    runs = data.get("check_runs", [])
+    if not runs:
+        return "unknown"
+
+    for r in runs:
+        if r.get("conclusion") in ("failure", "timed_out"):
+            return "failing"
+    for r in runs:
+        if r.get("status") != "completed":
+            return "pending"
+    return "passing"
 
 
 async def get_ci_failure_logs(repo_id: str, branch: str) -> str:

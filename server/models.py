@@ -47,6 +47,9 @@ class Cell:
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
     archived_at: str | None = None
+    last_activity_at: str | None = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
 
 
 @dataclass

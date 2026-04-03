@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS cells (
     status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL,
     archived_at TEXT,
+    last_activity_at TEXT,
     FOREIGN KEY (sortie_id) REFERENCES sorties(id)
 );
 
@@ -84,6 +85,7 @@ async def init_db() -> None:
         "ALTER TABLE cells ADD COLUMN pr_reaction_count INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE cells ADD COLUMN ci_failure_expected INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE sorties DROP COLUMN status",
+        "ALTER TABLE cells ADD COLUMN last_activity_at TEXT",
     ]:
         try:
             await db.execute(migration)
@@ -103,8 +105,8 @@ async def create_cell(cell: Cell) -> Cell:
             """INSERT INTO cells (id, sortie_id, repo, branch, worktree_path,
                pr_number, pr_url, ci_status, ci_failure_expected,
                pr_comment_count, pr_reaction_count,
-               sync_status, status, created_at, archived_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               sync_status, status, created_at, archived_at, last_activity_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 cell.id,
                 cell.sortie_id,
@@ -121,6 +123,7 @@ async def create_cell(cell: Cell) -> Cell:
                 cell.status.value,
                 cell.created_at,
                 cell.archived_at,
+                cell.last_activity_at,
             ),
         )
         await db.commit()
@@ -203,6 +206,7 @@ def _row_to_cell(row: aiosqlite.Row) -> Cell:
         status=CellStatus(row["status"]),
         created_at=row["created_at"],
         archived_at=row["archived_at"],
+        last_activity_at=row["last_activity_at"],
     )
 
 

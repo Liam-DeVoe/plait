@@ -27,6 +27,15 @@ SESSION_IDLE_TIMEOUT = (
 )
 PR_ACTIVITY_COOLDOWN = 300  # seconds — wait for PR activity to settle
 
+# Backoff tiers for PR polling.
+# (max_idle_seconds, poll_interval_seconds)
+# Git operations (fetch, merge) always run; only API calls are throttled.
+BACKOFF_TIERS = [
+    (30 * 60, 5 * 60),  # < 30 min since activity: poll every 5 min
+    (6 * 3600, 10 * 60),  # 30 min - 6 hrs: every 10 min
+    (float("inf"), 15 * 60),  # 6+ hrs: every 15 min
+]
+
 # Per-cell locks to prevent concurrent process_cell execution (e.g. daemon
 # daemon run overlapping with an API-triggered sync).
 _cell_locks: dict[str, asyncio.Lock] = {}
@@ -106,8 +115,34 @@ async def process_cell(cell: Cell) -> dict | None:
         return await _process_cell(cell)
 
 
+def _should_throttle(cell: Cell) -> bool:
+    """Check if PR polling should be skipped due to exponential backoff."""
+    if not cell.last_activity_at:
+        return False
+    try:
+        last = datetime.fromisoformat(cell.last_activity_at)
+    except (ValueError, TypeError):
+        return False
+    idle_seconds = (datetime.now(timezone.utc) - last).total_seconds()
+    for max_idle, interval in BACKOFF_TIERS:
+        if idle_seconds < max_idle:
+            # Skip if not enough time has passed since last daemon run.
+            # Use modular arithmetic: skip unless we're within one POLL_INTERVAL
+            # of a multiple of the backoff interval.
+            return idle_seconds % interval > POLL_INTERVAL
+    return False
+
+
+async def _mark_activity(cell: Cell) -> None:
+    """Update last_activity_at to now."""
+    now = datetime.now(timezone.utc).isoformat()
+    await db.update_cell(cell.id, last_activity_at=now)
+    cell.last_activity_at = now
+
+
 async def _process_cell(cell: Cell) -> dict:
     reasons: list[str] = []
+    warnings: list[str] = []
     decision = "idle"
     outcome = None
 
@@ -140,80 +175,107 @@ async def _process_cell(cell: Cell) -> dict:
                 has_conflicts = True
                 reasons.append("conflicts")
 
-        # --- Auto-archive if PR merged/closed ---
+        needs_tend = has_conflicts
+
         if cell.pr_number:
-            pr_state = await git.get_pr_state(cell.repo, cell.pr_number)
-            if pr_state in ("MERGED", "CLOSED"):
-                logger.info(
-                    f"Cell {cell.id} PR #{cell.pr_number} is {pr_state}, archiving"
-                )
-                try:
-                    await git.remove_worktree(cell.repo, cell.worktree_path)
-                except Exception:
-                    logger.warning(f"Failed to remove worktree for cell {cell.id}")
-                await db.update_cell(
-                    cell.id,
-                    status=CellStatus.archived,
-                    archived_at=datetime.now(timezone.utc).isoformat(),
-                )
-                await notify("cell_updated", {"id": cell.id, "status": "archived"})
+            # --- Backoff check: skip expensive API calls for idle cells ---
+            if _should_throttle(cell):
+                decision = "throttled"
                 return {
                     "cell_id": cell.id,
                     "repo": cell.repo,
                     "branch": cell.branch,
-                    "decision": "archived",
-                    "reasons": [f"pr_{pr_state.lower()}"],
-                    "outcome": None,
+                    "decision": decision,
+                    "reasons": reasons,
+                    "warnings": warnings,
+                    "outcome": outcome,
                 }
 
-        # --- Poll PR state ---
-        needs_tend = has_conflicts
-        if cell.pr_number:
-            ci = await git.get_ci_status(cell.repo, cell.pr_number)
-            ci_status = CIStatus(ci)
-            if ci_status != cell.ci_status:
-                await db.update_cell(cell.id, ci_status=ci_status)
-                await notify("cell_updated", {"id": cell.id, "ci_status": ci})
-            if ci_status == CIStatus.failing and not cell.ci_failure_expected:
-                ci_detail = f"ci: {cell.ci_status.value}\u2192{ci_status.value}"
-                if ci_detail not in reasons:
-                    reasons.append(ci_detail)
-                needs_tend = True
+            # --- Fetch all PR data via pure REST (no GraphQL) ---
+            pr_data = await git.get_pr_data(cell.repo, cell.pr_number)
 
-            comment_count = await git.get_pr_comment_count(cell.repo, cell.pr_number)
-            reaction_count = await git.get_pr_reaction_count(cell.repo, cell.pr_number)
-
-            pr_activity_changed = (
-                comment_count != cell.pr_comment_count
-                or reaction_count != cell.pr_reaction_count
-            )
-
-            if pr_activity_changed:
-                # Check cooldown: if the latest PR comment is too recent,
-                # defer so the reviewer can finish their review.
-                latest = await git.get_pr_latest_comment_time(cell.repo, cell.pr_number)
-                elapsed = (
-                    (datetime.now(timezone.utc) - latest).total_seconds()
-                    if latest
-                    else None
-                )
-                if elapsed is not None and elapsed < PR_ACTIVITY_COOLDOWN:
+            if pr_data is None:
+                warnings.append("api_ratelimited")
+                # Skip all PR comparisons — don't act on missing data
+            else:
+                # --- Auto-archive if PR merged/closed ---
+                if pr_data.state in ("MERGED", "CLOSED"):
                     logger.info(
-                        f"Cell {cell.id}: PR activity is {elapsed:.0f}s old, "
-                        f"deferring until {PR_ACTIVITY_COOLDOWN}s cooldown"
+                        f"Cell {cell.id} PR #{cell.pr_number} is "
+                        f"{pr_data.state}, archiving"
                     )
-                else:
-                    if comment_count != cell.pr_comment_count:
-                        reasons.append(
-                            f"comments: {cell.pr_comment_count}\u2192{comment_count}"
-                        )
-                        await db.update_cell(cell.id, pr_comment_count=comment_count)
-                    if reaction_count != cell.pr_reaction_count:
-                        reasons.append(
-                            f"reactions: {cell.pr_reaction_count}\u2192{reaction_count}"
-                        )
-                        await db.update_cell(cell.id, pr_reaction_count=reaction_count)
+                    try:
+                        await git.remove_worktree(cell.repo, cell.worktree_path)
+                    except Exception:
+                        logger.warning(f"Failed to remove worktree for cell {cell.id}")
+                    await db.update_cell(
+                        cell.id,
+                        status=CellStatus.archived,
+                        archived_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                    await notify("cell_updated", {"id": cell.id, "status": "archived"})
+                    return {
+                        "cell_id": cell.id,
+                        "repo": cell.repo,
+                        "branch": cell.branch,
+                        "decision": "archived",
+                        "reasons": [f"pr_{pr_data.state.lower()}"],
+                        "warnings": warnings,
+                        "outcome": None,
+                    }
+
+                # --- CI status (REST, using head SHA from PR data) ---
+                ci = await git.get_ci_status_rest(cell.repo, pr_data.head_sha)
+                ci_status = CIStatus(ci)
+                if ci_status != cell.ci_status:
+                    await db.update_cell(cell.id, ci_status=ci_status)
+                    await notify("cell_updated", {"id": cell.id, "ci_status": ci})
+                if ci_status == CIStatus.failing and not cell.ci_failure_expected:
+                    ci_detail = f"ci: {cell.ci_status.value}\u2192{ci_status.value}"
+                    if ci_detail not in reasons:
+                        reasons.append(ci_detail)
                     needs_tend = True
+
+                # --- Comment / reaction comparison ---
+                pr_activity_changed = (
+                    pr_data.comment_count != cell.pr_comment_count
+                    or pr_data.reaction_count != cell.pr_reaction_count
+                )
+
+                if pr_activity_changed:
+                    elapsed = (
+                        (
+                            datetime.now(timezone.utc) - pr_data.latest_comment_time
+                        ).total_seconds()
+                        if pr_data.latest_comment_time
+                        else None
+                    )
+                    if elapsed is not None and elapsed < PR_ACTIVITY_COOLDOWN:
+                        logger.info(
+                            f"Cell {cell.id}: PR activity is {elapsed:.0f}s "
+                            f"old, deferring until "
+                            f"{PR_ACTIVITY_COOLDOWN}s cooldown"
+                        )
+                    else:
+                        if pr_data.comment_count != cell.pr_comment_count:
+                            reasons.append(
+                                f"comments: {cell.pr_comment_count}"
+                                f"\u2192{pr_data.comment_count}"
+                            )
+                            await db.update_cell(
+                                cell.id,
+                                pr_comment_count=pr_data.comment_count,
+                            )
+                        if pr_data.reaction_count != cell.pr_reaction_count:
+                            reasons.append(
+                                f"reactions: {cell.pr_reaction_count}"
+                                f"\u2192{pr_data.reaction_count}"
+                            )
+                            await db.update_cell(
+                                cell.id,
+                                pr_reaction_count=pr_data.reaction_count,
+                            )
+                        needs_tend = True
 
         # --- Spawn a tend session if anything changed ---
         key = (cell.id, "tend")
@@ -238,6 +300,10 @@ async def _process_cell(cell: Cell) -> dict:
                 _in_flight.discard(key)
         elif needs_tend:
             decision = "skipped"
+
+        # Mark activity if anything happened
+        if decision not in ("idle", "throttled"):
+            await _mark_activity(cell)
 
         # --- Re-derive sync status after merge/push/tend ---
         await _derive_sync_status(cell)
@@ -265,6 +331,7 @@ async def _process_cell(cell: Cell) -> dict:
         "branch": cell.branch,
         "decision": decision,
         "reasons": reasons,
+        "warnings": warnings,
         "outcome": outcome,
     }
 

@@ -16,6 +16,67 @@ from server.models import (
 )
 
 
+def _mock_pr_data(
+    mock_gh,
+    *,
+    pr_number: int = 1,
+    state: str = "open",
+    head_sha: str = "abc123",
+    review_comments: list | None = None,
+    issue_comments: list | None = None,
+    reviews: list | None = None,
+    check_runs: list | None = None,
+):
+    """Set up mock_gh responses for the pure-REST get_pr_data and get_ci_status_rest.
+
+    Uses full endpoint paths to avoid substring collision (e.g. /pulls/99
+    matching /pulls/99/comments). The mock_gh pattern matcher checks
+    ``pattern in key`` so longer patterns are more specific.
+    """
+    # Set sub-endpoints FIRST so the more specific patterns are checked first.
+    # Actually, dict iteration order matches insertion order, and the mock
+    # iterates checking `pattern in key`, so the FIRST match wins.
+    # We need the more-specific patterns (/pulls/N/comments) to be inserted
+    # BEFORE the less-specific one (/pulls/N) — but /pulls/N is a substring
+    # of /pulls/N/comments, not the other way around.
+    #
+    # Solution: for the main PR endpoint, use a pattern that includes the
+    # trailing context. The actual command is:
+    #   gh api repos/testorg/testrepo/pulls/99
+    # which as a joined key ends with "/pulls/99". The sub-endpoints have
+    # "/pulls/99/" (with trailing slash). So we match the main endpoint
+    # with a pattern that won't appear in sub-endpoints.
+
+    mock_gh.set_response(
+        f"/pulls/{pr_number}/comments",
+        0,
+        json.dumps(review_comments or []),
+    )
+    mock_gh.set_response(
+        f"/issues/{pr_number}/comments",
+        0,
+        json.dumps(issue_comments or []),
+    )
+    mock_gh.set_response(
+        f"/pulls/{pr_number}/reviews",
+        0,
+        json.dumps(reviews or []),
+    )
+    if check_runs is not None:
+        mock_gh.set_response(
+            f"/commits/{head_sha}/check-runs",
+            0,
+            json.dumps({"check_runs": check_runs}),
+        )
+
+    # Main PR endpoint last — since /pulls/N is a substring of
+    # /pulls/N/comments, we need the more specific patterns to be checked first.
+    # The mock iterates in insertion order and returns the first match,
+    # so this must come AFTER the sub-endpoint patterns.
+    pr_json = json.dumps({"state": state, "head": {"sha": head_sha}})
+    mock_gh.set_response(f"/pulls/{pr_number}", 0, pr_json)
+
+
 async def _create_cell_in_db(git_env, branch: str, cell_id: str) -> Cell:
     """Helper: create a worktree and DB record for a cell."""
     wt_path = await git.create_worktree(git_env.repo_id, branch, cell_id)
@@ -142,7 +203,14 @@ async def test_ci_status_update(git_env, init_db, mock_gh):
     await db.update_cell(cell.id, pr_number=99)
     cell.pr_number = 99
 
-    mock_gh.set_response("pr checks", 0, "build\tpass\t1m\ntest\tpass\t2m")
+    _mock_pr_data(
+        mock_gh,
+        pr_number=99,
+        check_runs=[
+            {"name": "build", "status": "completed", "conclusion": "success"},
+            {"name": "test", "status": "completed", "conclusion": "success"},
+        ],
+    )
 
     await process_cell(cell)
 
@@ -161,8 +229,13 @@ async def test_ci_fix_on_failure(git_env, init_db, mock_gh, mock_claude):
     await db.update_cell(cell.id, pr_number=100)
     cell.pr_number = 100
 
-    # Mock CI as failing
-    mock_gh.set_response("pr checks", 0, "build\tfail\t1m")
+    _mock_pr_data(
+        mock_gh,
+        pr_number=100,
+        check_runs=[
+            {"name": "build", "status": "completed", "conclusion": "failure"},
+        ],
+    )
     # Mock CI failure logs
     mock_gh.set_response(
         "run list",
@@ -202,7 +275,13 @@ async def test_ci_fix_skipped_while_running(git_env, init_db, mock_gh, mock_clau
     key = (cell.id, "tend")
     daemon._in_flight.add(key)
     try:
-        mock_gh.set_response("pr checks", 0, "build\tfail\t1m")
+        _mock_pr_data(
+            mock_gh,
+            pr_number=101,
+            check_runs=[
+                {"name": "build", "status": "completed", "conclusion": "failure"},
+            ],
+        )
 
         await process_cell(cell)
 
@@ -233,8 +312,20 @@ async def test_ci_fix_retried_after_previous_failure(
         prev_session.id, succeeded=0, ended_at="2024-01-01T00:00:00+00:00"
     )
 
-    mock_gh.set_response("pr checks", 0, "build\tfail\t1m")
-    mock_gh.set_response("pr checks --json", 1, "")
+    _mock_pr_data(
+        mock_gh,
+        pr_number=102,
+        check_runs=[
+            {"name": "build", "status": "completed", "conclusion": "failure"},
+        ],
+    )
+    # Mock CI failure logs
+    mock_gh.set_response(
+        "run list",
+        0,
+        json.dumps([{"databaseId": 999}]),
+    )
+    mock_gh.set_response("run view", 0, "Error: tests failed")
 
     await process_cell(cell)
 
@@ -298,7 +389,7 @@ async def test_auto_archive_on_pr_merged(git_env, init_db, mock_gh):
     await db.update_cell(cell.id, pr_number=200)
     cell.pr_number = 200
 
-    mock_gh.set_response("pr view", 0, "MERGED")
+    _mock_pr_data(mock_gh, pr_number=200, state="merged")
 
     result = await process_cell(cell)
 
@@ -321,7 +412,7 @@ async def test_auto_archive_on_pr_closed(git_env, init_db, mock_gh):
     await db.update_cell(cell.id, pr_number=201)
     cell.pr_number = 201
 
-    mock_gh.set_response("pr view", 0, "CLOSED")
+    _mock_pr_data(mock_gh, pr_number=201, state="closed")
 
     result = await process_cell(cell)
 
@@ -348,15 +439,16 @@ async def test_pr_activity_cooldown_skips_recent(
 
     # New comment created just now — within cooldown window
     recent_time = datetime.now(timezone.utc).isoformat()
-    mock_gh.set_response(
-        "--json comments,reviews",
-        0,
-        json.dumps(
+    _mock_pr_data(
+        mock_gh,
+        pr_number=300,
+        issue_comments=[
             {
-                "comments": [{"createdAt": recent_time}],
-                "reviews": [],
+                "user": {"login": "reviewer"},
+                "created_at": recent_time,
+                "reactions": {"total_count": 0},
             }
-        ),
+        ],
     )
 
     result = await process_cell(cell)
@@ -384,15 +476,16 @@ async def test_pr_activity_cooldown_allows_old(git_env, init_db, mock_gh, mock_c
 
     # Comment from 10 minutes ago — past cooldown window
     old_time = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
-    mock_gh.set_response(
-        "--json comments,reviews",
-        0,
-        json.dumps(
+    _mock_pr_data(
+        mock_gh,
+        pr_number=301,
+        issue_comments=[
             {
-                "comments": [{"createdAt": old_time}],
-                "reviews": [],
+                "user": {"login": "reviewer"},
+                "created_at": old_time,
+                "reactions": {"total_count": 0},
             }
-        ),
+        ],
     )
 
     mock_claude.return_value = 0
