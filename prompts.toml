@@ -166,7 +166,7 @@ Never reply to comments on github; you should treat your interaction with github
 
 After fixing, make sure the code compiles and passes basic checks. Then commit and push your fixes.
 
-**Important**: Never use `git rebase`. Always use `git merge` to incorporate changes from main.
+Always use `git merge` to incorporate changes from main instead of `git rebase`.
 
 Any commits you make should be prefixed with `claude: `, like `claude: COMMIT_MESSAGE`.
 """
