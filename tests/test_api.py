@@ -291,6 +291,28 @@ async def test_hook_create_sortie_cell_bad_repo(client):
     assert resp.status_code == 400
 
 
+async def test_hook_create_cell(client):
+    """Hook should create a standalone cell in the given repo."""
+    c, git_env, _ = client
+    resp = await c.post("/hooks/create-cell", json={"repo": git_env.repo_id})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["cell_id"]
+    assert f"/cells/{data['cell_id']}" in data["url"]
+
+    # Verify cell exists and has no sortie
+    resp = await c.get(f"/cells/{data['cell_id']}")
+    assert resp.status_code == 200
+    assert resp.json()["sortie_id"] is None
+    assert resp.json()["repo"] == git_env.repo_id
+
+
+async def test_hook_create_cell_bad_repo(client):
+    c, _, _ = client
+    resp = await c.post("/hooks/create-cell", json={"repo": "nonexistent"})
+    assert resp.status_code == 400
+
+
 async def test_hook_branch_updated(client):
     """Hook should update the cell's branch in the DB."""
     create_resp = await _create_cell_via_api(client)

@@ -33,6 +33,11 @@ Always notify Orrery after renaming the branch and after creating the PR.
 ## When you are completely done with your task:
 Notify Orrery so it can finalize the session:
   curl -s -X POST {base_url}/hooks/sessions/{session_id}/done
+
+## Creating new cells
+If the user asks you to create a new cell, create one via:
+  curl -s -X POST {base_url}/hooks/create-cell -H 'Content-Type: application/json' -d '{{"repo": "<repo_id>"}}'
+This returns JSON with a `url` field — share that URL with the user so they can navigate to the new cell.
 """
 
 [sortie_system]

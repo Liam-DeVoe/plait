@@ -719,6 +719,31 @@ async def open_sortie_in_vscode(sortie_id: str):
 # --- Sortie hook endpoints ---
 
 
+class CreateCellHook(BaseModel):
+    repo: str
+
+
+@app.post("/hooks/create-cell")
+async def hook_create_cell(req: CreateCellHook):
+    """Called by a cell session to create a new standalone cell in another repo."""
+    try:
+        config.get_repo(req.repo)
+    except KeyError:
+        raise HTTPException(status_code=400, detail=f"Unknown repo: {req.repo!r}")
+
+    cell = Cell(repo=req.repo, worktree_path="")
+    cell.branch = f"cell/{cell.id[:8]}"
+
+    try:
+        cell.worktree_path = await git.create_worktree(req.repo, cell.branch, cell.id)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await db.create_cell(cell)
+    await daemon.notify("cell_updated", {"id": cell.id, "status": "open"})
+    return {"cell_id": cell.id, "url": f"http://localhost:5173/cells/{cell.id}"}
+
+
 class CreateSortieCellHook(BaseModel):
     repo: str
 

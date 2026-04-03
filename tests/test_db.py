@@ -202,9 +202,7 @@ def st_cell(draw):
         sync_status=draw(st_sync_status),
         status=draw(st_cell_status),
         archived_at=draw(st.none() | st.text(min_size=1, max_size=30)),
-        archive_reason=draw(
-            st.none() | st.sampled_from(["merged", "closed"])
-        ),
+        archive_reason=draw(st.none() | st.sampled_from(["merged", "closed"])),
     )
 
 
