@@ -154,7 +154,7 @@ export default function CellDetailPage() {
 
   return (
     <div>
-      <Link to="/cells" className="back-link">
+      <Link to={cell.sortie_id ? `/sorties/${cell.sortie_id}` : "/cells"} className="back-link">
         &larr; Back
       </Link>
       <div className="card cell-detail__card">
