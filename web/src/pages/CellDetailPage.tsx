@@ -110,6 +110,15 @@ export default function CellDetailPage() {
     load();
   }, [load, run]);
 
+  useEffect(() => {
+    if (cell) {
+      document.title = `${cell.branch} | Orrery`;
+    }
+    return () => {
+      document.title = "Orrery";
+    };
+  }, [cell?.branch]);
+
   const handleLaunchSession = async () => {
     if (!id) return;
     setLaunching(true);
