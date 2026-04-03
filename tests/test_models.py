@@ -48,7 +48,7 @@ def test_enum_values():
     assert CellStatus.active.value == "active"
     assert CellStatus.archived.value == "archived"
     assert CIStatus.passing.value == "passing"
-    assert SyncStatus.conflict.value == "conflict"
+    assert SyncStatus.behind.value == "behind"
     assert SessionRole.daemon.value == "daemon"
 
 

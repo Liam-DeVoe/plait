@@ -121,7 +121,7 @@ async def test_cell_conflict_claude_fails(git_env, init_db, mock_claude):
     await process_cell(cell)
 
     fetched = await db.get_cell(cell.id)
-    assert fetched.sync_status == SyncStatus.failed
+    assert fetched.sync_status == SyncStatus.behind
 
     # Verify a failed daemon session was created
     sessions = await db.list_sessions(cell.id)

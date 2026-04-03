@@ -35,23 +35,25 @@ async def test_remove_worktree(git_env):
 
 
 async def test_is_behind_main_when_current(git_env):
+    git_env.create_branch("up-to-date")
+    git_env.checkout("main")
     wt_path = await git.create_worktree(git_env.repo_id, "up-to-date", "cell-4")
-    assert not await git.is_behind_main(wt_path)
+    assert not await git.is_behind_main(wt_path, "up-to-date")
 
 
 async def test_is_behind_main_when_behind(git_env):
-    # Create worktree
-    wt_path = await git.create_worktree(git_env.repo_id, "behind-branch", "cell-5")
-
-    # Add a new commit to main and push it
+    # Create a branch and push it
+    git_env.create_branch("behind-branch")
     git_env.checkout("main")
+
+    # Advance main past the branch
     git_env.add_commit("new_file.txt", "new content", "advance main")
     git_env.push("main")
 
-    # Fetch in the worktree so it knows about the new main
+    wt_path = await git.create_worktree(git_env.repo_id, "behind-branch", "cell-5")
     await git.run("git", "fetch", "origin", cwd=wt_path)
 
-    assert await git.is_behind_main(wt_path)
+    assert await git.is_behind_main(wt_path, "behind-branch")
 
 
 async def test_merge_from_main_clean(git_env):

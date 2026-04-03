@@ -1,7 +1,12 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
+
+const STORAGE_KEY = "orrery:terminal-height";
+const DEFAULT_HEIGHT = 400;
+const MIN_HEIGHT = 150;
+const MAX_HEIGHT = 1200;
 
 const THEME = {
   background: "#252525",
@@ -38,6 +43,34 @@ export default function Terminal({ sessionId, alive, autoFocus, onResume, fetchX
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
   const resumingRef = useRef(false);
+  const [height, setHeight] = useState(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    return saved ? Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, parseInt(saved, 10) || DEFAULT_HEIGHT)) : DEFAULT_HEIGHT;
+  });
+
+  const onResizeHandleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = height;
+    document.body.style.cursor = "ns-resize";
+    document.body.style.userSelect = "none";
+
+    const onMouseMove = (ev: MouseEvent) => {
+      setHeight(Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, startHeight + (ev.clientY - startY))));
+    };
+
+    const onMouseUp = (ev: MouseEvent) => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      const finalHeight = Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, startHeight + (ev.clientY - startY)));
+      localStorage.setItem(STORAGE_KEY, String(finalHeight));
+    };
+
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+  }, [height]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -141,20 +174,26 @@ export default function Terminal({ sessionId, alive, autoFocus, onResume, fetchX
       };
 
       term.attachCustomKeyEventHandler((e) => {
+        if (e.type !== "keydown") return true;
+        const send = (data: string) => {
+          e.preventDefault();
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "input", data }));
+          }
+          return false;
+        };
         // Cmd+Backspace -> kill line (Ctrl+U)
-        if (e.metaKey && e.key === "Backspace" && e.type === "keydown") {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "input", data: "\x15" }));
-          }
-          return false;
-        }
+        if (e.metaKey && e.key === "Backspace") return send("\x15");
+        // Cmd+Left -> beginning of line (Ctrl+A)
+        if (e.metaKey && e.key === "ArrowLeft") return send("\x01");
+        // Cmd+Right -> end of line (Ctrl+E)
+        if (e.metaKey && e.key === "ArrowRight") return send("\x05");
+        // Option+Left -> word back (ESC b)
+        if (e.altKey && e.key === "ArrowLeft") return send("\x1bb");
+        // Option+Right -> word forward (ESC f)
+        if (e.altKey && e.key === "ArrowRight") return send("\x1bf");
         // Shift+Enter -> newline without submit (bracketed paste)
-        if (e.shiftKey && e.key === "Enter" && e.type === "keydown") {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: "input", data: "\x1b[200~\n\x1b[201~" }));
-          }
-          return false;
-        }
+        if (e.shiftKey && e.key === "Enter") return send("\x1b[200~\n\x1b[201~");
         return true;
       });
 
@@ -219,10 +258,13 @@ export default function Terminal({ sessionId, alive, autoFocus, onResume, fetchX
   }, [sessionId, alive, autoFocus]);
 
   return (
-    <div
-      ref={containerRef}
-      style={{ height: "400px", width: "100%", padding: "10px", background: "#252525", boxSizing: "border-box" }}
-      className="terminal__container"
-    />
+    <>
+      <div
+        ref={containerRef}
+        style={{ height: `${height}px`, width: "100%", padding: "10px", background: "#252525", boxSizing: "border-box" }}
+        className="terminal__container"
+      />
+      <div className="terminal__resize-handle" onMouseDown={onResizeHandleMouseDown} />
+    </>
   );
 }

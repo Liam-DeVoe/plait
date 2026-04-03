@@ -22,7 +22,6 @@
 }
 
 .badge--pending,
-.badge--syncing,
 .badge--running {
   background: #fef9c3;
   color: #854d0e;
@@ -30,7 +29,7 @@
 
 .badge--failing,
 .badge--failed,
-.badge--conflict {
+.badge--behind {
   background: #fee2e2;
   color: #991b1b;
 }
@@ -905,6 +904,19 @@
 
 /* === Terminal === */
 .terminal__container {
-  border-radius: 4px;
+  border-radius: 4px 4px 0 0;
   overflow: hidden;
+}
+
+.terminal__resize-handle {
+  height: 4px;
+  cursor: ns-resize;
+  background: #1e1e1e;
+  border-radius: 0 0 4px 4px;
+  transition: background 0.15s;
+}
+
+.terminal__resize-handle:hover,
+.terminal__resize-handle:active {
+  background: #3b8eea;
 }

@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef } from "react";
 
 export const BADGE_STATUSES = new Set([
-  "passing", "current", "active", "pending", "syncing", "running",
-  "failing", "failed", "conflict", "unknown", "archived", "completed",
+  "passing", "current", "active", "pending", "running",
+  "failing", "failed", "behind", "unknown", "archived", "completed",
 ]);
 
 export function StatusBadge({ status, label }: { status: string; label: string }) {

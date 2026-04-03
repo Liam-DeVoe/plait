@@ -54,6 +54,16 @@ async def _push_if_published(cell: Cell) -> bool | None:
     return ok
 
 
+async def _derive_sync_status(cell: Cell) -> None:
+    """Derive sync status from remote refs and update DB if changed."""
+    behind = await git.is_behind_main(cell.worktree_path, cell.branch)
+    sync = SyncStatus.behind if behind else SyncStatus.current
+    if sync != cell.sync_status:
+        await db.update_cell(cell.id, sync_status=sync)
+        await notify("cell_updated", {"id": cell.id, "sync_status": sync.value})
+        cell.sync_status = sync
+
+
 async def tend_cell(cell: Cell) -> bool:
     """Unconditionally spawn a tend session for a cell. Returns True on success."""
     session = Session(
@@ -70,15 +80,10 @@ async def tend_cell(cell: Cell) -> bool:
     ok = exit_code == 0
 
     if ok:
-        push_result = await _push_if_published(cell)
-        sync = SyncStatus.current if push_result is not False else SyncStatus.failed
-    else:
-        sync = SyncStatus.failed
-
-    await db.update_cell(cell.id, sync_status=sync)
-    await notify("cell_updated", {"id": cell.id, "sync_status": sync.value})
+        await _push_if_published(cell)
 
     await db.update_session(session.id, succeeded=1 if ok else 0)
+    await notify("cell_updated", {"id": cell.id})
     if not ok:
         logger.error(f"Claude failed to fix issues for cell {cell.id}")
     return ok
@@ -109,42 +114,28 @@ async def _process_cell(cell: Cell) -> dict:
         # Fetch latest from origin
         await git.fetch_origin(cell.repo)
 
+        # --- Derive sync status from remote refs ---
+        await _derive_sync_status(cell)
+
         # --- Attempt automatic merge if behind main ---
         has_conflicts = False
-        behind = await git.is_behind_main(cell.worktree_path)
-        if not behind and cell.sync_status != SyncStatus.current:
-            await db.update_cell(cell.id, sync_status=SyncStatus.current)
-            await notify("cell_updated", {"id": cell.id, "sync_status": "current"})
-        if behind:
+        if cell.sync_status == SyncStatus.behind:
             reasons.append("behind_main")
             logger.info(
                 f"Cell {cell.id} ({cell.repo}:{cell.branch}) is behind main, merging"
             )
-            await db.update_cell(cell.id, sync_status=SyncStatus.syncing)
-            await notify("cell_updated", {"id": cell.id, "sync_status": "syncing"})
 
             success, _output = await git.merge_from_main(cell.worktree_path)
 
             if success:
-                # Clean merge — push only if branch is already on remote
                 push_result = await _push_if_published(cell)
-                if push_result is False:
-                    await db.update_cell(cell.id, sync_status=SyncStatus.failed)
-                    await notify(
-                        "cell_updated", {"id": cell.id, "sync_status": "failed"}
-                    )
-                    logger.error(f"Cell {cell.id} push failed after merge")
-                else:
-                    await db.update_cell(cell.id, sync_status=SyncStatus.current)
-                    await notify(
-                        "cell_updated", {"id": cell.id, "sync_status": "current"}
-                    )
+                if push_result is not False:
                     logger.info(f"Cell {cell.id} merged successfully")
+                else:
+                    logger.error(f"Cell {cell.id} push failed after merge")
             else:
                 has_conflicts = True
                 reasons.append("conflicts")
-                await db.update_cell(cell.id, sync_status=SyncStatus.conflict)
-                await notify("cell_updated", {"id": cell.id, "sync_status": "conflict"})
 
         # --- Auto-archive if PR merged/closed ---
         if cell.pr_number:
@@ -173,7 +164,7 @@ async def _process_cell(cell: Cell) -> dict:
                 }
 
         # --- Poll PR state ---
-        needs_tend = has_conflicts or behind
+        needs_tend = has_conflicts
         if cell.pr_number:
             ci = await git.get_ci_status(cell.repo, cell.pr_number)
             ci_status = CIStatus(ci)
@@ -218,6 +209,9 @@ async def _process_cell(cell: Cell) -> dict:
                 _in_flight.discard(key)
         elif needs_tend:
             decision = "skipped"
+
+        # --- Re-derive sync status after merge/push/tend ---
+        await _derive_sync_status(cell)
 
         # --- Detect PR for cells that have been pushed but have no PR yet ---
         if not cell.pr_number and await git.has_remote_branch(
