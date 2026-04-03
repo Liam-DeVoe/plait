@@ -4,6 +4,7 @@ import {
   useNavigate,
   useLocation,
   useOutletContext,
+  Link,
 } from "react-router-dom";
 import {
   fetchCell,
@@ -153,9 +154,9 @@ export default function CellDetailPage() {
 
   return (
     <div>
-      <div className="back-link" onClick={() => navigate(-1)}>
+      <Link to="/cells" className="back-link">
         &larr; Back
-      </div>
+      </Link>
       <div className="card cell-detail__card">
         <div className="cell-detail__header">
           <div>

@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { useNavigate, type NavigateFunction } from "react-router-dom";
 
 export const BADGE_STATUSES = new Set([
   "passing", "current", "active", "pending", "running",
@@ -71,4 +72,12 @@ export function timeAgo(iso: string): string {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
+}
+
+export function navigateTo(e: React.MouseEvent, to: string, navigate: NavigateFunction) {
+  if (e.metaKey || e.ctrlKey) {
+    window.open(to, "_blank");
+  } else {
+    navigate(to);
+  }
 }

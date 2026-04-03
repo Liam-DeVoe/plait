@@ -16,7 +16,7 @@ import {
   type DaemonRun,
   type Repo,
 } from "../api";
-import { StatusBadge, OverflowMenu, timeAgo } from "../components/shared";
+import { StatusBadge, OverflowMenu, timeAgo, navigateTo } from "../components/shared";
 import type { LayoutContext } from "../components/Layout";
 
 function CellRow({
@@ -38,7 +38,7 @@ function CellRow({
   return (
     <tr
       className={`cell-row${needsAttention ? " cell-row--attention" : ""}`}
-      onClick={() => navigate(`/cells/${cell.id}`)}
+      onClick={(e) => navigateTo(e, `/cells/${cell.id}`, navigate)}
     >
       <td className="table__cell">
         <div className="cell-row__branch">{cell.branch}</div>

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useParams, useNavigate, useOutletContext } from "react-router-dom";
+import { useParams, useNavigate, useOutletContext, Link } from "react-router-dom";
 import {
   fetchSortie,
   deleteSortie,
@@ -11,7 +11,7 @@ import {
   type Sortie,
 } from "../api";
 import Terminal from "../Terminal";
-import { StatusBadge, OverflowMenu } from "../components/shared";
+import { StatusBadge, OverflowMenu, navigateTo } from "../components/shared";
 import type { LayoutContext } from "../components/Layout";
 
 export default function SortieDetailPage() {
@@ -55,9 +55,9 @@ export default function SortieDetailPage() {
 
   return (
     <div>
-      <div className="back-link" onClick={() => navigate(-1)}>
+      <Link to="/sorties" className="back-link">
         &larr; Back to sorties
-      </div>
+      </Link>
       <div className="card sortie-detail__card">
         <div className="sortie-detail__header">
           <div className="sortie-detail__title">Sortie</div>
@@ -129,7 +129,7 @@ export default function SortieDetailPage() {
                 <tr
                   key={cell.id}
                   className="sortie-detail__cell-row"
-                  onClick={() => navigate(`/cells/${cell.id}`)}
+                  onClick={(e) => navigateTo(e, `/cells/${cell.id}`, navigate)}
                 >
                   <td className="table__cell">
                     <div className="sortie-detail__cell-repo">

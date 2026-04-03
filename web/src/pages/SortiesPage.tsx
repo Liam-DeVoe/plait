@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
 import { fetchSorties, createSortie, type Sortie } from "../api";
+import { navigateTo } from "../components/shared";
 import type { LayoutContext } from "../components/Layout";
 
 function SortieRow({ sortie }: { sortie: Sortie & { cell_count: number } }) {
@@ -8,7 +9,7 @@ function SortieRow({ sortie }: { sortie: Sortie & { cell_count: number } }) {
   return (
     <tr
       className="sortie-row"
-      onClick={() => navigate(`/sorties/${sortie.id}`)}
+      onClick={(e) => navigateTo(e, `/sorties/${sortie.id}`, navigate)}
     >
       <td className="table__cell sortie-row__meta">
         {sortie.cell_count} cell{sortie.cell_count !== 1 && "s"}

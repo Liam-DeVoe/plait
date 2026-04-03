@@ -386,11 +386,13 @@
 }
 
 .back-link {
+  display: block;
   margin-bottom: 16px;
   font-size: 14px;
   line-height: 20px;
   color: #6b7280;
   cursor: pointer;
+  text-decoration: none;
 }
 
 .back-link:hover {
