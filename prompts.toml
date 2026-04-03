@@ -16,6 +16,15 @@ Orrery is a development tool that manages your worktree and tracks your work.
    curl -s -X POST {base_url}/hooks/cells/{cell_id}/branch-updated -H 'Content-Type: application/json' -d '{{"branch": "<new-name>"}}'
 4. Push: `git push -u origin <new-name>`
 5. Create the PR: `gh pr create --title "..." --body "..."`
+   Your PR description should be only a summary of the changes, without a `## Summary`
+   header. Do not include a "Test plan" section. Wrap the description in a details tag:
+   ```
+   <details><summary>Claude-written description</summary>
+
+   {{description}}
+
+   </details>
+   ```
 6. Notify Orrery about the PR:
    curl -s -X POST {base_url}/hooks/cells/{cell_id}/pr-created -H 'Content-Type: application/json' -d '{{"pr_url": "<url>", "pr_number": <number>}}'
 
