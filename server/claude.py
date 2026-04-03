@@ -46,8 +46,13 @@ def sortie_system_prompt(
     )
 
 
-def tend_prompt(branch: str) -> str:
+def tend_prompt(branch: str, cell_id: str) -> str:
     """Build a prompt for the tend session."""
     prompts = _load_prompts()
     author = config.get_author()
-    return prompts["tend"]["template"].strip().format(branch=branch, author=author)
+    base_url = f"http://localhost:{ORRERY_PORT}"
+    return (
+        prompts["tend"]["template"]
+        .strip()
+        .format(branch=branch, author=author, cell_id=cell_id, base_url=base_url)
+    )

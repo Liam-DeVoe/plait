@@ -100,12 +100,20 @@ Use this structure for session prompts:
 The cross-repo context helps the session understand how its work fits into the
 larger effort. The task section should be detailed enough that the session can
 implement without further guidance.
+
+## Expected CI failures
+If you are creating PRs that depend on changes in other repos that haven't been
+merged yet, those PRs will likely have CI failures that are expected and unfixable
+until the dependencies merge. In your session prompts, instruct the session to note
+the expected CI failures in the PR description (e.g. "CI for job X is expected to
+fail until owner/repo#123 merges"). This way, Orrery's automatic tend jobs will
+recognize those failures as expected and won't waste time trying to fix them.
 """
 
 [tend]
 # Prompt sent to Claude when the daemon detects the branch needs attention.
 # Claude should investigate the actual state and fix what it finds.
-# Variables: branch, author
+# Variables: branch, author, cell_id, base_url
 template = """
 The branch {branch} needs attention. Investigate and fix any of the following that apply:
 
@@ -127,6 +135,12 @@ The branch {branch} needs attention. Investigate and fix any of the following th
    ```
 
 Never reply to comments on github; you should treat your interaction with github as read-only except for pushing commits and resolving review threads.
+
+5. **Expected CI failures**: Some CI failures may be expected and unfixable right now — for example, if this PR depends on changes in another PR that hasn't been merged yet. Check the PR description for notes about expected CI failures. If a CI job is failing for an expected reason that you cannot fix, do NOT attempt workarounds or hacks to make it pass. Instead, tell Orrery that CI failures are expected so it stops triggering tend jobs for CI on this cell:
+   ```
+   curl -s -X POST {base_url}/hooks/cells/{cell_id}/ci-failure-expected
+   ```
+   You should still fix any CI failures that are NOT expected — only mark CI as expected if the failures are genuinely expected until an external dependency is resolved.
 
 After fixing, make sure the code compiles and passes basic checks. Then commit and push your fixes.
 

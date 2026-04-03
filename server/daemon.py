@@ -174,7 +174,7 @@ async def _process_cell(cell: Cell) -> dict:
             if ci_status != cell.ci_status:
                 await db.update_cell(cell.id, ci_status=ci_status)
                 await notify("cell_updated", {"id": cell.id, "ci_status": ci})
-            if ci_status == CIStatus.failing:
+            if ci_status == CIStatus.failing and not cell.ci_failure_expected:
                 ci_detail = f"ci: {cell.ci_status.value}\u2192{ci_status.value}"
                 if ci_detail not in reasons:
                     reasons.append(ci_detail)
@@ -218,6 +218,13 @@ async def _process_cell(cell: Cell) -> dict:
         # --- Spawn a tend session if anything changed ---
         key = (cell.id, "tend")
         if needs_tend and key not in _in_flight:
+            # Clear the ci_failure_expected flag so the tend session
+            # re-evaluates CI with fresh eyes (it was triggered by a
+            # non-CI reason since CI alone can't trigger when the flag
+            # is set).
+            if cell.ci_failure_expected:
+                await db.update_cell(cell.id, ci_failure_expected=False)
+                cell.ci_failure_expected = False
             decision = "tended"
             logger.info(f"Cell {cell.id} needs fixing, invoking Claude")
             _in_flight.add(key)

@@ -30,7 +30,7 @@ def tend_cmd(session_id: str, cell: Cell) -> tuple[list[str], str, str]:
     """
     worktree = str(Path(cell.worktree_path).resolve())
     allowed_tools = [t.format(worktree=worktree) for t in DAEMON_ALLOWED_TOOLS]
-    prompt = claude.tend_prompt(cell.branch)
+    prompt = claude.tend_prompt(cell.branch, cell.id)
     return (
         [
             "claude",

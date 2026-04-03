@@ -375,6 +375,19 @@ async def hook_pr_created(cell_id: str, req: PRCreatedHook):
     return {"status": "ok"}
 
 
+@app.post("/hooks/cells/{cell_id}/ci-failure-expected")
+async def hook_ci_failure_expected(cell_id: str):
+    """Called by a tend session when it determines CI failures are expected
+    (e.g. the PR depends on another unmerged PR). Suppresses CI-failure
+    as a tend trigger until something else changes."""
+    cell = await db.get_cell(cell_id)
+    if not cell:
+        raise HTTPException(status_code=404, detail="Cell not found")
+    await db.update_cell(cell_id, ci_failure_expected=True)
+    await daemon.notify("cell_updated", {"id": cell_id, "ci_failure_expected": True})
+    return {"status": "ok"}
+
+
 @app.post("/hooks/sessions/{session_id}/done")
 async def hook_session_done(session_id: str):
     """Called by a session when it has finished its work.

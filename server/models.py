@@ -38,6 +38,7 @@ class Cell:
     pr_number: int | None = None
     pr_url: str | None = None
     ci_status: CIStatus = CIStatus.unknown
+    ci_failure_expected: bool = False
     pr_comment_count: int = 0
     pr_reaction_count: int = 0
     sync_status: SyncStatus = SyncStatus.current
