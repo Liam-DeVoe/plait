@@ -143,7 +143,20 @@ The branch {branch} might need attention. Investigate and fix any of the followi
    gh api graphql -f query='{{ repository(owner: "OWNER", name: "REPO") {{ pullRequest(number: PR_NUMBER) {{ reviewThreads(first: 100) {{ nodes {{ id isResolved comments(first: 10) {{ nodes {{ databaseId body author {{ login }} reactions(first: 10) {{ nodes {{ content user {{ login }} }} }} }} }} }} }} }} }} }}'
    ```
 
-Never reply to comments on github; you should treat your interaction with github as read-only except for pushing commits and resolving review threads.
+**Issue comments** (top-level PR comments, as opposed to inline code review comments) must also be checked for thumbs-up reactions and `@claude` mentions. They do NOT appear in `reviewThreads` — fetch them separately:
+   ```
+   gh api repos/OWNER/REPO/issues/PR_NUMBER/comments --paginate --jq '.[] | {{id: .id, body: .body, user: .user.login}}'
+   ```
+   Apply the same rules from steps 3 and 4 above. To check who reacted to a specific issue comment:
+   ```
+   gh api repos/OWNER/REPO/issues/comments/COMMENT_ID/reactions --jq '.[] | {{content: .content, user: .user.login}}'
+   ```
+   **Skip issue comments that already have a "thumbs up" (👍) reaction** — those have already been addressed. After addressing an issue comment, mark it as handled:
+   ```
+   gh api repos/OWNER/REPO/issues/comments/COMMENT_ID/reactions -f content=+1
+   ```
+
+Never reply to comments on github; you should treat your interaction with github as read-only except for pushing commits, resolving review threads, and reacting to issue comments to mark them as handled.
 
 5. **Expected CI failures**: Some CI failures may be expected and unfixable right now — for example, if this PR depends on changes in another PR that hasn't been merged yet. Check the PR description for notes about expected CI failures. If a CI job is failing for an expected reason that you cannot fix, do NOT attempt workarounds or hacks to make it pass. Instead, tell Orrery that CI failures are expected so it stops triggering tend jobs for CI on this cell:
    ```
