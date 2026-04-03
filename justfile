@@ -1,5 +1,5 @@
 server:
-    .venv/bin/uvicorn server.api:app --reload --port 8000
+    .venv/bin/uvicorn server.api:app --reload --reload-dir server --reload-include prompts.toml --port 8000
 
 web:
     cd web && npm run dev

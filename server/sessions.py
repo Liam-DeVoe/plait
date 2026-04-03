@@ -112,7 +112,17 @@ def spawn_session(
 
         async def _send_initial_input():
             await asyncio.sleep(1.0)
-            pty_manager.write(session_id, (initial_input + "\n").encode())
+            # Wrap in bracketed paste markers so the terminal treats multi-line
+            # text as a single paste.
+            paste_start = "\x1b[200~"
+            paste_end = "\x1b[201~"
+            pty_manager.write(
+                session_id, f"{paste_start}{initial_input}{paste_end}".encode()
+            )
+            # Delay then Enter to submit the pasted text. Claude needs time
+            # to process the paste end marker before accepting Enter.
+            await asyncio.sleep(0.5)
+            pty_manager.write(session_id, b"\r")
 
         asyncio.create_task(_send_initial_input())
 

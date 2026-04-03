@@ -7,6 +7,7 @@ import subprocess
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -393,6 +394,7 @@ async def list_sessions(cell_id: str):
 
 class CreateSessionRequest(BaseModel):
     prompt: str = ""
+    prompt_file: str = ""
 
 
 @app.post("/cells/{cell_id}/sessions")
@@ -401,6 +403,15 @@ async def create_session_endpoint(cell_id: str, req: CreateSessionRequest):
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
 
+    prompt = req.prompt
+    if req.prompt_file:
+        try:
+            prompt = Path(req.prompt_file).read_text()
+        except FileNotFoundError:
+            raise HTTPException(
+                status_code=400, detail=f"Prompt file not found: {req.prompt_file}"
+            )
+
     session = Session(
         cell_id=cell.id,
         role=SessionRole.user,
@@ -408,7 +419,7 @@ async def create_session_endpoint(cell_id: str, req: CreateSessionRequest):
     await db.create_session(session)
 
     cmd, cwd = user_cell_cmd(session.id, cell)
-    spawn_session(session.id, cmd, cwd, initial_input=req.prompt)
+    spawn_session(session.id, cmd, cwd, initial_input=prompt)
 
     return _session_dict(session)
 

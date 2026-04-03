@@ -60,10 +60,14 @@ Once the plan is confirmed, create cells and spawn sessions.
 
 This returns JSON: {{"cell_id": "...", "worktree_path": "...", "branch": "..."}}.
 
-**Spawn a session** in each cell to do the work:
+**Spawn a session** in each cell to do the work. Write the task prompt to a file
+first, then reference it — this avoids bash escaping issues with complex prompts:
+  # Write the prompt to a file
+  (write prompt to /tmp/prompt-<name>.txt)
+  # Spawn the session
   curl -s -X POST {base_url}/cells/<cell_id>/sessions \
     -H 'Content-Type: application/json' \
-    -d '{{"prompt": "<task prompt>"}}'
+    -d '{{"prompt_file": "/tmp/prompt-<name>.txt"}}'
 
 The session runs autonomously — it will make changes, commit, push, and create a
 PR. You do not need to monitor it.
