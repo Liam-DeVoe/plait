@@ -25,6 +25,7 @@ POLL_INTERVAL = 300  # seconds (5 minutes)
 SESSION_IDLE_TIMEOUT = (
     300  # seconds — kill interactive sessions after 5 min of no output
 )
+PR_ACTIVITY_COOLDOWN = 300  # seconds — wait for PR activity to settle
 
 # Per-cell locks to prevent concurrent process_cell execution (e.g. daemon
 # daemon run overlapping with an API-triggered sync).
@@ -178,20 +179,39 @@ async def _process_cell(cell: Cell) -> dict:
                 needs_tend = True
 
             comment_count = await git.get_pr_comment_count(cell.repo, cell.pr_number)
-            if comment_count != cell.pr_comment_count:
-                reasons.append(
-                    f"comments: {cell.pr_comment_count}\u2192{comment_count}"
-                )
-                await db.update_cell(cell.id, pr_comment_count=comment_count)
-                needs_tend = True
-
             reaction_count = await git.get_pr_reaction_count(cell.repo, cell.pr_number)
-            if reaction_count != cell.pr_reaction_count:
-                reasons.append(
-                    f"reactions: {cell.pr_reaction_count}\u2192{reaction_count}"
+
+            pr_activity_changed = (
+                comment_count != cell.pr_comment_count
+                or reaction_count != cell.pr_reaction_count
+            )
+
+            if pr_activity_changed:
+                # Check cooldown: if the latest PR comment is too recent,
+                # defer so the reviewer can finish their review.
+                latest = await git.get_pr_latest_comment_time(cell.repo, cell.pr_number)
+                elapsed = (
+                    (datetime.now(timezone.utc) - latest).total_seconds()
+                    if latest
+                    else None
                 )
-                await db.update_cell(cell.id, pr_reaction_count=reaction_count)
-                needs_tend = True
+                if elapsed is not None and elapsed < PR_ACTIVITY_COOLDOWN:
+                    logger.info(
+                        f"Cell {cell.id}: PR activity is {elapsed:.0f}s old, "
+                        f"deferring until {PR_ACTIVITY_COOLDOWN}s cooldown"
+                    )
+                else:
+                    if comment_count != cell.pr_comment_count:
+                        reasons.append(
+                            f"comments: {cell.pr_comment_count}\u2192{comment_count}"
+                        )
+                        await db.update_cell(cell.id, pr_comment_count=comment_count)
+                    if reaction_count != cell.pr_reaction_count:
+                        reasons.append(
+                            f"reactions: {cell.pr_reaction_count}\u2192{reaction_count}"
+                        )
+                        await db.update_cell(cell.id, pr_reaction_count=reaction_count)
+                    needs_tend = True
 
         # --- Spawn a tend session if anything changed ---
         key = (cell.id, "tend")

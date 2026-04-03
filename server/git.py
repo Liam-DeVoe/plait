@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 from server import config
@@ -343,6 +344,38 @@ async def get_pr_reaction_count(repo_id: str, pr_number: int) -> int:
             except ValueError:
                 pass
     return total
+
+
+async def get_pr_latest_comment_time(repo_id: str, pr_number: int) -> datetime | None:
+    """Get the creation time of the most recent comment or review on a PR."""
+    upstream = config.get_repo(repo_id).upstream
+    rc, out, err = await run(
+        "gh",
+        "pr",
+        "view",
+        str(pr_number),
+        "--repo",
+        upstream,
+        "--json",
+        "comments,reviews",
+    )
+    if rc != 0:
+        return None
+    try:
+        data = json.loads(out)
+    except json.JSONDecodeError:
+        return None
+
+    timestamps: list[str] = []
+    for item in [*data.get("comments", []), *data.get("reviews", [])]:
+        if "createdAt" in item:
+            timestamps.append(item["createdAt"])
+
+    if not timestamps:
+        return None
+
+    latest = max(timestamps)
+    return datetime.fromisoformat(latest.replace("Z", "+00:00"))
 
 
 async def get_ci_failure_logs(repo_id: str, branch: str) -> str:

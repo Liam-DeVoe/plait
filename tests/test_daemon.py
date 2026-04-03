@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from server import daemon, db, git
@@ -329,3 +330,79 @@ async def test_auto_archive_on_pr_closed(git_env, init_db, mock_gh):
 
     fetched = await db.get_cell(cell.id)
     assert fetched.status == CellStatus.archived
+
+
+async def test_pr_activity_cooldown_skips_recent(
+    git_env, init_db, mock_gh, mock_claude
+):
+    """Daemon defers tend when latest PR comment is less than 5 minutes old."""
+    git_env.create_branch("cooldown-branch")
+    git_env.add_commit("file.txt", "content", "add file")
+    git_env.push("cooldown-branch")
+    git_env.checkout("main")
+
+    cell = await _create_cell_in_db(git_env, "cooldown-branch", "daemon-cooldown")
+    await db.update_cell(cell.id, pr_number=300, pr_comment_count=0)
+    cell.pr_number = 300
+    cell.pr_comment_count = 0
+
+    # New comment created just now — within cooldown window
+    recent_time = datetime.now(timezone.utc).isoformat()
+    mock_gh.set_response(
+        "--json comments,reviews",
+        0,
+        json.dumps(
+            {
+                "comments": [{"createdAt": recent_time}],
+                "reviews": [],
+            }
+        ),
+    )
+
+    result = await process_cell(cell)
+
+    # Should NOT have triggered a tend (cooldown active)
+    mock_claude.assert_not_called()
+    assert result["decision"] == "idle"
+
+    # Comment count should NOT have been updated in DB (so next run re-detects)
+    fetched = await db.get_cell(cell.id)
+    assert fetched.pr_comment_count == 0
+
+
+async def test_pr_activity_cooldown_allows_old(git_env, init_db, mock_gh, mock_claude):
+    """Daemon proceeds when latest PR comment is older than cooldown period."""
+    git_env.create_branch("cooldown-ok")
+    git_env.add_commit("file.txt", "content", "add file")
+    git_env.push("cooldown-ok")
+    git_env.checkout("main")
+
+    cell = await _create_cell_in_db(git_env, "cooldown-ok", "daemon-cooldown-ok")
+    await db.update_cell(cell.id, pr_number=301, pr_comment_count=0)
+    cell.pr_number = 301
+    cell.pr_comment_count = 0
+
+    # Comment from 10 minutes ago — past cooldown window
+    old_time = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+    mock_gh.set_response(
+        "--json comments,reviews",
+        0,
+        json.dumps(
+            {
+                "comments": [{"createdAt": old_time}],
+                "reviews": [],
+            }
+        ),
+    )
+
+    mock_claude.return_value = 0
+
+    result = await process_cell(cell)
+
+    # Should have triggered a tend
+    mock_claude.assert_called_once()
+    assert result["decision"] == "tended"
+
+    # Comment count should be updated
+    fetched = await db.get_cell(cell.id)
+    assert fetched.pr_comment_count == 1
