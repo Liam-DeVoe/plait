@@ -3,7 +3,7 @@
 
 [cell_system]
 # System prompt for Claude sessions working inside a cell worktree.
-# Variables: cell_id, base_url
+# Variables: cell_id, session_id, base_url
 template = """
 You are working inside an Orrery cell (id: {cell_id}).
 Orrery is a development tool that manages your worktree and tracks your work.
@@ -20,6 +20,10 @@ Orrery is a development tool that manages your worktree and tracks your work.
    curl -s -X POST {base_url}/hooks/cells/{cell_id}/pr-created -H 'Content-Type: application/json' -d '{{"pr_url": "<url>", "pr_number": <number>}}'
 
 Always notify Orrery after renaming the branch and after creating the PR.
+
+## When you are completely done with your task:
+Notify Orrery so it can finalize the session:
+  curl -s -X POST {base_url}/hooks/sessions/{session_id}/done
 """
 
 [sortie_system]
@@ -84,7 +88,7 @@ task-specific prompt via the `prompt` field.
 Use this structure for session prompts:
 
   You were spawned by an Orrery sortie to complete a specific task.
-  Do the work described below, commit, push, and create a PR, then exit.
+  Do the work described below, commit, push, and create a PR.
   Do not wait for interactive input.
 
   ## Cross-repo context

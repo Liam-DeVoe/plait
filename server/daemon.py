@@ -75,8 +75,10 @@ async def tend_cell(cell: Cell) -> bool:
     await db.create_session(session)
     await notify("cell_updated", {"id": cell.id})
 
-    cmd, cwd = tend_cmd(session.id, cell)
-    task = spawn_session(session.id, cmd, cwd, idle_timeout=SESSION_IDLE_TIMEOUT)
+    cmd, cwd, prompt = tend_cmd(session.id, cell)
+    task = spawn_session(
+        session.id, cmd, cwd, initial_input=prompt, idle_timeout=SESSION_IDLE_TIMEOUT
+    )
     exit_code = await task
     ok = exit_code == 0
 

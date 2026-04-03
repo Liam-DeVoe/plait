@@ -14,14 +14,14 @@ def _load_prompts() -> dict:
     return tomllib.loads(PROMPTS_PATH.read_text())
 
 
-def orrery_system_prompt(cell_id: str) -> str:
+def orrery_system_prompt(cell_id: str, session_id: str) -> str:
     """Generate the system prompt that tells Claude about Orrery hooks."""
     base_url = f"http://localhost:{ORRERY_PORT}"
     prompts = _load_prompts()
     return (
         prompts["cell_system"]["template"]
         .strip()
-        .format(cell_id=cell_id, base_url=base_url)
+        .format(cell_id=cell_id, session_id=session_id, base_url=base_url)
     )
 
 

@@ -22,22 +22,29 @@ logger = logging.getLogger(__name__)
 # Each returns (cmd, cwd) for a specific session type.
 
 
-def tend_cmd(session_id: str, cell: Cell) -> tuple[list[str], str]:
-    """Daemon headless session to fix merge conflicts / CI failures."""
+def tend_cmd(session_id: str, cell: Cell) -> tuple[list[str], str, str]:
+    """Interactive daemon session to fix merge conflicts / CI failures.
+
+    Returns (cmd, cwd, prompt). The prompt should be passed as initial_input
+    to spawn_session rather than baked into the command.
+    """
     worktree = str(Path(cell.worktree_path).resolve())
     allowed_tools = [t.format(worktree=worktree) for t in DAEMON_ALLOWED_TOOLS]
-    return [
-        "claude",
-        "-p",
-        claude.tend_prompt(cell.branch),
-        "--verbose",
-        "--session-id",
-        session_id,
-        "--system-prompt",
-        claude.orrery_system_prompt(cell.id),
-        "--allowedTools",
-        *allowed_tools,
-    ], cell.worktree_path
+    prompt = claude.tend_prompt(cell.branch)
+    return (
+        [
+            "claude",
+            "--verbose",
+            "--session-id",
+            session_id,
+            "--system-prompt",
+            claude.orrery_system_prompt(cell.id, session_id),
+            "--allowedTools",
+            *allowed_tools,
+        ],
+        cell.worktree_path,
+        prompt,
+    )
 
 
 def user_cell_cmd(session_id: str, cell: Cell) -> tuple[list[str], str]:
@@ -49,7 +56,7 @@ def user_cell_cmd(session_id: str, cell: Cell) -> tuple[list[str], str]:
         "--session-id",
         session_id,
         "--system-prompt",
-        claude.orrery_system_prompt(cell.id),
+        claude.orrery_system_prompt(cell.id, session_id),
     ], cell.worktree_path
 
 
@@ -121,7 +128,7 @@ def spawn_session(
             )
             # Delay then Enter to submit the pasted text. Claude needs time
             # to process the paste end marker before accepting Enter.
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1.0)
             pty_manager.write(session_id, b"\r")
 
         asyncio.create_task(_send_initial_input())

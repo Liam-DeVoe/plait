@@ -375,6 +375,19 @@ async def hook_pr_created(cell_id: str, req: PRCreatedHook):
     return {"status": "ok"}
 
 
+@app.post("/hooks/sessions/{session_id}/done")
+async def hook_session_done(session_id: str):
+    """Called by a session when it has finished its work.
+
+    Terminates the PTY process. The watcher task will finalize the transcript
+    and xterm state as usual. The session remains viewable and resumable.
+    """
+    if not pty_manager.is_alive(session_id):
+        raise HTTPException(status_code=404, detail="Session not alive")
+    await pty_manager.terminate(session_id)
+    return {"status": "ok"}
+
+
 # --- Session endpoints ---
 
 
