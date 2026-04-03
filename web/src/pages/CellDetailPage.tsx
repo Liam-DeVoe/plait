@@ -168,7 +168,10 @@ export default function CellDetailPage() {
             </div>
             <div className="cell-detail__badges">
               {cell.status === "archived" && (
-                <StatusBadge status="archived" label="Archived" />
+                <StatusBadge
+                  status={cell.archive_reason === "merged" ? "completed" : "archived"}
+                  label={cell.archive_reason === "merged" ? "Merged" : cell.archive_reason === "closed" ? "Closed" : "Archived"}
+                />
               )}
               <StatusBadge
                 status={cell.ci_status}

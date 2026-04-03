@@ -163,7 +163,7 @@ function runSummary(run: DaemonRun): string {
   const tended = run.results.filter((r) => r.decision === "tended");
   const skipped = run.results.filter((r) => r.decision === "skipped").length;
   const errored = run.results.filter((r) => r.decision === "error").length;
-  const idle = run.results.filter((r) => r.decision === "idle").length;
+  const okCount = run.results.filter((r) => r.decision === "ok").length;
 
   const parts: string[] = [];
   if (tended.length > 0) {
@@ -176,11 +176,11 @@ function runSummary(run: DaemonRun): string {
   }
   if (skipped > 0) parts.push(`${skipped} skipped`);
   if (errored > 0) parts.push(`${errored} errored`);
-  if (idle > 0) parts.push(`${idle} idle`);
-  const throttled = run.results.filter(
-    (r) => r.decision === "throttled",
+  if (okCount > 0) parts.push(`${okCount} ok`);
+  const deferred = run.results.filter(
+    (r) => r.decision === "deferred",
   ).length;
-  if (throttled > 0) parts.push(`${throttled} throttled`);
+  if (deferred > 0) parts.push(`${deferred} deferred`);
   const warned = run.results.filter(
     (r) => r.warnings?.length > 0,
   ).length;
@@ -247,7 +247,7 @@ function DaemonLog({ runs }: { runs: DaemonRun[] }) {
                             ? "passing"
                             : "failing"
                           : r.decision === "skipped" ||
-                              r.decision === "throttled"
+                              r.decision === "deferred"
                             ? "pending"
                             : r.decision === "error"
                               ? "failing"

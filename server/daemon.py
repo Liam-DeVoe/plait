@@ -29,7 +29,7 @@ PR_ACTIVITY_COOLDOWN = 300  # seconds — wait for PR activity to settle
 
 # Backoff tiers for PR polling.
 # (max_idle_seconds, poll_interval_seconds)
-# Git operations (fetch, merge) always run; only API calls are throttled.
+# Git operations (fetch, merge) always run; only API calls are deferred.
 BACKOFF_TIERS = [
     (30 * 60, 5 * 60),  # < 30 min since activity: poll every 5 min
     (6 * 3600, 10 * 60),  # 30 min - 6 hrs: every 10 min
@@ -115,22 +115,40 @@ async def process_cell(cell: Cell) -> dict | None:
         return await _process_cell(cell)
 
 
-def _should_throttle(cell: Cell) -> bool:
-    """Check if PR polling should be skipped due to exponential backoff."""
+# Tracks when each cell was last polled for PR data, keyed by cell ID.
+# In-memory only — resets on server restart (which is fine, we just poll
+# once immediately on restart).
+_last_polled: dict[str, datetime] = {}
+
+
+def _should_defer(cell: Cell) -> bool:
+    """Check if PR polling should be deferred for this cell."""
     if not cell.last_activity_at:
         return False
     try:
-        last = datetime.fromisoformat(cell.last_activity_at)
+        last_activity = datetime.fromisoformat(cell.last_activity_at)
     except (ValueError, TypeError):
         return False
-    idle_seconds = (datetime.now(timezone.utc) - last).total_seconds()
-    for max_idle, interval in BACKOFF_TIERS:
+
+    now = datetime.now(timezone.utc)
+    idle_seconds = (now - last_activity).total_seconds()
+
+    # Determine the appropriate polling interval for this cell's idle time
+    interval = POLL_INTERVAL
+    for max_idle, tier_interval in BACKOFF_TIERS:
         if idle_seconds < max_idle:
-            # Skip if not enough time has passed since last daemon run.
-            # Use modular arithmetic: skip unless we're within one POLL_INTERVAL
-            # of a multiple of the backoff interval.
-            return idle_seconds % interval > POLL_INTERVAL
-    return False
+            interval = tier_interval
+            break
+
+    # If we're in the base tier, never defer
+    if interval <= POLL_INTERVAL:
+        return False
+
+    # Check if enough time has passed since last poll
+    last = _last_polled.get(cell.id)
+    if last is None:
+        return False  # never polled — don't defer first run
+    return (now - last).total_seconds() < interval
 
 
 async def _mark_activity(cell: Cell) -> None:
@@ -143,7 +161,7 @@ async def _mark_activity(cell: Cell) -> None:
 async def _process_cell(cell: Cell) -> dict:
     reasons: list[str] = []
     warnings: list[str] = []
-    decision = "idle"
+    decision = "ok"
     outcome = None
 
     try:
@@ -179,8 +197,8 @@ async def _process_cell(cell: Cell) -> dict:
 
         if cell.pr_number:
             # --- Backoff check: skip expensive API calls for idle cells ---
-            if _should_throttle(cell):
-                decision = "throttled"
+            if _should_defer(cell):
+                decision = "deferred"
                 return {
                     "cell_id": cell.id,
                     "repo": cell.repo,
@@ -190,6 +208,9 @@ async def _process_cell(cell: Cell) -> dict:
                     "warnings": warnings,
                     "outcome": outcome,
                 }
+
+            # Record that we're polling this cell now
+            _last_polled[cell.id] = datetime.now(timezone.utc)
 
             # --- Fetch all PR data via pure REST (no GraphQL) ---
             pr_data = await git.get_pr_data(cell.repo, cell.pr_number)
@@ -212,6 +233,7 @@ async def _process_cell(cell: Cell) -> dict:
                         cell.id,
                         status=CellStatus.archived,
                         archived_at=datetime.now(timezone.utc).isoformat(),
+                        archive_reason=pr_data.state.lower(),
                     )
                     await notify("cell_updated", {"id": cell.id, "status": "archived"})
                     return {
@@ -302,7 +324,7 @@ async def _process_cell(cell: Cell) -> dict:
             decision = "skipped"
 
         # Mark activity if anything happened
-        if decision not in ("idle", "throttled"):
+        if decision not in ("ok", "deferred"):
             await _mark_activity(cell)
 
         # --- Re-derive sync status after merge/push/tend ---

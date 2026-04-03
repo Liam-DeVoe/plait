@@ -399,6 +399,7 @@ async def test_auto_archive_on_pr_merged(git_env, init_db, mock_gh):
     fetched = await db.get_cell(cell.id)
     assert fetched.status == CellStatus.archived
     assert fetched.archived_at is not None
+    assert fetched.archive_reason == "merged"
 
 
 async def test_auto_archive_on_pr_closed(git_env, init_db, mock_gh):
@@ -421,6 +422,7 @@ async def test_auto_archive_on_pr_closed(git_env, init_db, mock_gh):
 
     fetched = await db.get_cell(cell.id)
     assert fetched.status == CellStatus.archived
+    assert fetched.archive_reason == "closed"
 
 
 async def test_pr_activity_cooldown_skips_recent(
@@ -455,7 +457,7 @@ async def test_pr_activity_cooldown_skips_recent(
 
     # Should NOT have triggered a tend (cooldown active)
     mock_claude.assert_not_called()
-    assert result["decision"] == "idle"
+    assert result["decision"] == "ok"
 
     # Comment count should NOT have been updated in DB (so next run re-detects)
     fetched = await db.get_cell(cell.id)

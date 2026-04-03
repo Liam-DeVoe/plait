@@ -227,6 +227,7 @@ async def archive_cell(cell_id: str):
         archived_at=datetime.now(timezone.utc).isoformat(),
     )
     assert updated is not None
+    await daemon.notify("cell_updated", {"id": cell_id, "status": "archived"})
     return await _cell_dict(updated)
 
 
@@ -249,8 +250,10 @@ async def reopen_cell(cell_id: str):
         status=CellStatus.active,
         worktree_path=worktree_path,
         archived_at=None,
+        archive_reason=None,
     )
     assert updated is not None
+    await daemon.notify("cell_updated", {"id": cell_id, "status": "active"})
     return await _cell_dict(updated)
 
 

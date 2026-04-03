@@ -114,60 +114,88 @@ export default function SortieDetailPage() {
           No cells yet.
         </div>
       ) : (
-        <div className="card card--clipped">
-          <table className="table">
-            <thead className="table__head">
-              <tr>
-                <th className="table__header-cell">Repo / Branch</th>
-                <th className="table__header-cell">PR</th>
-                <th className="table__header-cell">CI</th>
-                <th className="table__header-cell">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sortie.cells.map((cell) => (
-                <tr
-                  key={cell.id}
-                  className="sortie-detail__cell-row"
-                  onClick={(e) => navigateTo(e, `/cells/${cell.id}`, navigate)}
-                >
-                  <td className="table__cell">
-                    <div className="sortie-detail__cell-repo">
-                      {cell.repo}
-                    </div>
-                    <div className="sortie-detail__cell-branch">
-                      {cell.branch}
-                    </div>
-                  </td>
-                  <td className="table__cell">
-                    {cell.pr_url ? (
-                      <a
-                        href={cell.pr_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="link"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        #{cell.pr_number}
-                      </a>
-                    ) : (
-                      <span className="cell-row__no-pr">pending</span>
-                    )}
-                  </td>
-                  <td className="table__cell">
-                    <StatusBadge
-                      status={cell.ci_status}
-                      label={`CI: ${cell.ci_status}`}
-                    />
-                  </td>
-                  <td className="table__cell">
-                    <StatusBadge status={cell.status} label={cell.status} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        (() => {
+          const activeCells = sortie.cells.filter((c) => c.status !== "archived");
+          const archivedCells = sortie.cells.filter((c) => c.status === "archived");
+
+          const renderCellRow = (cell: Cell) => (
+            <tr
+              key={cell.id}
+              className="sortie-detail__cell-row"
+              onClick={(e) => navigateTo(e, `/cells/${cell.id}`, navigate)}
+            >
+              <td className="table__cell">
+                <div className="sortie-detail__cell-repo">
+                  {cell.repo}
+                </div>
+                <div className="sortie-detail__cell-branch">
+                  {cell.branch}
+                </div>
+              </td>
+              <td className="table__cell">
+                {cell.pr_url ? (
+                  <a
+                    href={cell.pr_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="link"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    #{cell.pr_number}
+                  </a>
+                ) : (
+                  <span className="cell-row__no-pr">pending</span>
+                )}
+              </td>
+              <td className="table__cell">
+                <StatusBadge
+                  status={cell.ci_status}
+                  label={`CI: ${cell.ci_status}`}
+                />
+              </td>
+              <td className="table__cell">
+                <StatusBadge
+                  status={
+                    cell.status === "archived"
+                      ? cell.archive_reason === "merged" ? "completed" : cell.archive_reason === "closed" ? "closed" : "archived"
+                      : cell.status
+                  }
+                  label={
+                    cell.status === "archived"
+                      ? cell.archive_reason === "merged" ? "merged" : cell.archive_reason === "closed" ? "closed" : "archived"
+                      : cell.status
+                  }
+                />
+              </td>
+            </tr>
+          );
+
+          return (
+            <div className="card card--clipped">
+              <table className="table">
+                <thead className="table__head">
+                  <tr>
+                    <th className="table__header-cell">Repo / Branch</th>
+                    <th className="table__header-cell">PR</th>
+                    <th className="table__header-cell">CI</th>
+                    <th className="table__header-cell">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeCells.map(renderCellRow)}
+                  {activeCells.length > 0 && archivedCells.length > 0 && (
+                    <tr className="sortie-detail__separator">
+                      <td colSpan={4}>
+                        <hr />
+                      </td>
+                    </tr>
+                  )}
+                  {archivedCells.map(renderCellRow)}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()
       )}
     </div>
   );

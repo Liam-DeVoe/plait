@@ -202,6 +202,9 @@ def st_cell(draw):
         sync_status=draw(st_sync_status),
         status=draw(st_cell_status),
         archived_at=draw(st.none() | st.text(min_size=1, max_size=30)),
+        archive_reason=draw(
+            st.none() | st.sampled_from(["merged", "closed"])
+        ),
     )
 
 
@@ -243,6 +246,7 @@ async def test_cell_roundtrip(cell: Cell):
     assert fetched.sync_status == cell.sync_status
     assert fetched.status == cell.status
     assert fetched.archived_at == cell.archived_at
+    assert fetched.archive_reason == cell.archive_reason
 
 
 @given(session=st_session())

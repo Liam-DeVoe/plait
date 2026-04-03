@@ -9,6 +9,7 @@ export interface Cell {
   ci_status: "unknown" | "pending" | "passing" | "failing";
   tend_status: "current" | "running";
   status: "active" | "archived";
+  archive_reason: "merged" | "closed" | null;
   created_at: string;
   archived_at: string | null;
   sessions?: Session[];
@@ -38,7 +39,7 @@ export interface DaemonRunResult {
   cell_id: string;
   repo: string;
   branch: string;
-  decision: "idle" | "skipped" | "tended" | "throttled" | "archived" | "error";
+  decision: "ok" | "skipped" | "tended" | "deferred" | "archived" | "error";
   reasons: string[];
   warnings: string[];
   outcome: "succeeded" | "failed" | null;

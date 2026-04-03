@@ -35,7 +35,8 @@
 }
 
 .badge--unknown,
-.badge--archived {
+.badge--archived,
+.badge--closed {
   background: #f3f4f6;
   color: #1f2937;
 }
@@ -818,6 +819,16 @@
   font-size: 14px;
   line-height: 20px;
   color: #6b7280;
+}
+
+.sortie-detail__separator td {
+  padding: 0;
+}
+
+.sortie-detail__separator hr {
+  border: none;
+  border-top: 1px solid #e5e7eb;
+  margin: 0;
 }
 
 /* === Daemon Log === */
