@@ -84,7 +84,6 @@ async def init_db() -> None:
         "ALTER TABLE sessions ADD COLUMN sortie_id TEXT",
         "ALTER TABLE sorties ADD COLUMN session_id TEXT",
         "ALTER TABLE cells ADD COLUMN pr_reaction_count INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE cells ADD COLUMN ci_failure_expected INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE sorties DROP COLUMN status",
         "ALTER TABLE cells ADD COLUMN last_activity_at TEXT",
         "ALTER TABLE cells ADD COLUMN ci_failure_expected_sha TEXT",
