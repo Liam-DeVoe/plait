@@ -182,7 +182,7 @@ function runSummary(run: DaemonRun): string {
 }
 
 function DaemonLog({ runs }: { runs: DaemonRun[] }) {
-  const [expanded, setExpanded] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   if (runs.length === 0) return null;
 
@@ -203,11 +203,16 @@ function DaemonLog({ runs }: { runs: DaemonRun[] }) {
             <div
               className="daemon-log__run-header"
               onClick={() =>
-                setExpanded(expanded === run.id ? null : run.id)
+                setExpanded((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(run.id)) next.delete(run.id);
+                  else next.add(run.id);
+                  return next;
+                })
               }
             >
               <span className="daemon-log__run-arrow">
-                {expanded === run.id ? "▾" : "▸"}
+                {expanded.has(run.id) ? "▾" : "▸"}
               </span>
               <span className="daemon-log__run-time">
                 {timeAgo(run.started_at)}
@@ -216,7 +221,7 @@ function DaemonLog({ runs }: { runs: DaemonRun[] }) {
                 {runSummary(run)}
               </span>
             </div>
-            {expanded === run.id && (
+            {expanded.has(run.id) && (
               <div className="daemon-log__run-details">
                 {run.results.map((r) => (
                   <div key={r.cell_id} className="daemon-log__cell-result">
