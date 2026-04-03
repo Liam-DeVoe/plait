@@ -8,7 +8,7 @@ export interface Cell {
   pr_url: string | null;
   ci_status: "unknown" | "pending" | "passing" | "failing";
   tend_status: "current" | "running";
-  status: "active" | "archived";
+  status: "open" | "archived";
   archive_reason: "merged" | "closed" | null;
   created_at: string;
   archived_at: string | null;

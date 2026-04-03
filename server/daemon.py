@@ -360,7 +360,7 @@ async def _process_cell(cell: Cell) -> dict:
 
 async def run_once() -> None:
     """Process all active cells once and record the results."""
-    cells = await db.list_cells(status=CellStatus.active)
+    cells = await db.list_cells(status=CellStatus.open)
     logger.info(f"Daemon run: processing {len(cells)} active cells")
 
     started_at = datetime.now(timezone.utc).isoformat()

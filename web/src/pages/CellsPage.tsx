@@ -332,7 +332,7 @@ function CellTable({
         </table>
       ) : (
         <div className="muted" style={{ padding: "12px 16px" }}>
-          No active cells
+          No open cells
         </div>
       )}
       {archivedCells.length > 0 && (

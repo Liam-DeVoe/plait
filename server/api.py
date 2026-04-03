@@ -247,13 +247,13 @@ async def reopen_cell(cell_id: str):
 
     updated = await db.update_cell(
         cell_id,
-        status=CellStatus.active,
+        status=CellStatus.open,
         worktree_path=worktree_path,
         archived_at=None,
         archive_reason=None,
     )
     assert updated is not None
-    await daemon.notify("cell_updated", {"id": cell_id, "status": "active"})
+    await daemon.notify("cell_updated", {"id": cell_id, "status": "open"})
     return await _cell_dict(updated)
 
 
@@ -757,5 +757,5 @@ async def hook_create_sortie_cell(sortie_id: str, req: CreateSortieCellHook):
 
     await db.create_cell(cell)
     await daemon.notify("sortie_updated", {"id": sortie_id})
-    await daemon.notify("cell_updated", {"id": cell.id, "status": "active"})
+    await daemon.notify("cell_updated", {"id": cell.id, "status": "open"})
     return {"cell_id": cell.id, "worktree_path": cell.worktree_path, "branch": branch}

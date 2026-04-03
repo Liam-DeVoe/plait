@@ -10,15 +10,19 @@
 }
 
 .badge--passing,
-.badge--current,
-.badge--completed {
+.badge--current {
   background: #dcfce7;
   color: #166534;
 }
 
-.badge--active {
-  background: #dbeafe;
-  color: #1e40af;
+.badge--completed {
+  background: #fbefff;
+  color: #8250df;
+}
+
+.badge--open {
+  background: #dafbe1;
+  color: #1a7f37;
 }
 
 .badge--pending,
@@ -34,9 +38,13 @@
   color: #991b1b;
 }
 
-.badge--unknown,
-.badge--archived,
 .badge--closed {
+  background: #ffebe9;
+  color: #d1242f;
+}
+
+.badge--unknown,
+.badge--archived {
   background: #f3f4f6;
   color: #1f2937;
 }

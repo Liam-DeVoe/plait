@@ -24,7 +24,7 @@ async def test_create_and_get_cell(init_db):
     assert fetched is not None
     assert fetched.repo == "org/repo"
     assert fetched.branch == "main"
-    assert fetched.status == CellStatus.active
+    assert fetched.status == CellStatus.open
 
 
 async def test_list_cells_empty(init_db):
@@ -40,7 +40,7 @@ async def test_list_cells_filter_by_status(init_db):
     await db.create_cell(active)
     await db.create_cell(archived)
 
-    active_cells = await db.list_cells(status=CellStatus.active)
+    active_cells = await db.list_cells(status=CellStatus.open)
     assert len(active_cells) == 1
     assert active_cells[0].id == active.id
 

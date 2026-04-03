@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS cells (
     pr_comment_count INTEGER NOT NULL DEFAULT 0,
     pr_reaction_count INTEGER NOT NULL DEFAULT 0,
     sync_status TEXT NOT NULL DEFAULT 'current',
-    status TEXT NOT NULL DEFAULT 'active',
+    status TEXT NOT NULL DEFAULT 'open',
     created_at TEXT NOT NULL,
     archived_at TEXT,
     archive_reason TEXT,

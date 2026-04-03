@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **Orrery** -- the tool itself
 - **Sortie** -- a cross-repo initiative (e.g. "make this change across all repos"). Spawns one cell per repo.
-- **Cell** -- a per-repo unit of work. Contains a git worktree, branch, PR link, CI status, and sessions. Lifecycle: active -> archived (on merge) -> optionally re-opened.
+- **Cell** -- a per-repo unit of work. Contains a git worktree, branch, PR link, CI status, and sessions. Lifecycle: open -> archived (on merge) -> optionally re-opened.
 - **Session** -- a Claude conversation scoped to a cell's worktree. Created by the daemon (tend, sortie triggers) or by the user via the API.
 - **Daemon** -- the background async task that polls every 5 minutes, processing all active cells: rebasing behind-main branches, checking CI status, and spawning Claude to fix failures.
 

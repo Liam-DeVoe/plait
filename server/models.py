@@ -7,7 +7,7 @@ from enum import Enum
 
 
 class CellStatus(str, Enum):
-    active = "active"
+    open = "open"
     archived = "archived"
 
 
@@ -42,7 +42,7 @@ class Cell:
     pr_comment_count: int = 0
     pr_reaction_count: int = 0
     sync_status: SyncStatus = SyncStatus.current
-    status: CellStatus = CellStatus.active
+    status: CellStatus = CellStatus.open
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

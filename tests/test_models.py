@@ -12,7 +12,7 @@ from server.models import (
 def test_cell_defaults():
     cell = Cell()
     assert cell.id  # non-empty UUID
-    assert cell.status == CellStatus.active
+    assert cell.status == CellStatus.open
     assert cell.ci_status == CIStatus.unknown
     assert cell.sync_status == SyncStatus.current
     assert cell.sortie_id is None
@@ -45,7 +45,7 @@ def test_session_sortie_id():
 
 
 def test_enum_values():
-    assert CellStatus.active.value == "active"
+    assert CellStatus.open.value == "open"
     assert CellStatus.archived.value == "archived"
     assert CIStatus.passing.value == "passing"
     assert SyncStatus.behind.value == "behind"

@@ -63,7 +63,7 @@ async def test_create_cell(client):
     assert data["repo"] == client[1].repo_id
     assert data["branch"] == "test-branch"
     assert data["pr_number"] == 42
-    assert data["status"] == "active"
+    assert data["status"] == "open"
     assert data["ci_status"] == "passing"
     assert data["worktree_path"]  # non-empty
 
@@ -144,7 +144,7 @@ async def test_create_local_cell(client):
     assert data["branch"].startswith("cell/")
     assert data["pr_number"] is None
     assert data["pr_url"] is None
-    assert data["status"] == "active"
+    assert data["status"] == "open"
     assert data["worktree_path"]
 
 
@@ -204,8 +204,8 @@ async def test_list_cells_filter_by_status(client):
     # Archive the cell
     await c.post(f"/cells/{cell_id}/archive")
 
-    # Filter active — should be empty
-    resp = await c.get("/cells?status=active")
+    # Filter open — should be empty
+    resp = await c.get("/cells?status=open")
     assert len(resp.json()) == 0
 
     # Filter archived — should have one
