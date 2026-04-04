@@ -15,7 +15,7 @@ def _load_prompts() -> dict:
 
 
 def write_cell_claude_md(worktree_path: str, cell_id: str) -> None:
-    """Append orrery instructions to the worktree's .claude/CLAUDE.md.
+    """Append orrery instructions to the worktree's CLAUDE.local.md.
 
     This ensures any Claude session in the worktree — whether spawned by
     orrery or launched manually — knows about orrery hooks.
@@ -28,12 +28,10 @@ def write_cell_claude_md(worktree_path: str, cell_id: str) -> None:
         .format(cell_id=cell_id, base_url=base_url)
     )
 
-    claude_dir = Path(worktree_path) / ".claude"
-    claude_dir.mkdir(parents=True, exist_ok=True)
-    claude_md = claude_dir / "CLAUDE.md"
+    claude_local = Path(worktree_path) / "CLAUDE.local.md"
 
-    existing = claude_md.read_text() if claude_md.exists() else ""
-    with claude_md.open("a") as f:
+    existing = claude_local.read_text() if claude_local.exists() else ""
+    with claude_local.open("a") as f:
         if existing and not existing.endswith("\n"):
             f.write("\n")
         f.write(f"\n{content}\n")

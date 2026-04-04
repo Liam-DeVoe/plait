@@ -2,7 +2,7 @@
 # Templates use Python str.format() syntax: {variable_name}.
 
 [cell_claude_md]
-# Written to .claude/CLAUDE.md in the worktree at cell creation time.
+# Written to CLAUDE.local.md in the worktree at cell creation time.
 # This ensures ANY Claude session (orrery-spawned or manual) gets these instructions.
 # Variables: cell_id, base_url
 template = """
