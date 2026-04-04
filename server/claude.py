@@ -14,14 +14,39 @@ def _load_prompts() -> dict:
     return tomllib.loads(PROMPTS_PATH.read_text())
 
 
-def orrery_system_prompt(cell_id: str, session_id: str) -> str:
-    """Generate the system prompt that tells Claude about Orrery hooks."""
+def write_cell_claude_md(worktree_path: str, cell_id: str) -> None:
+    """Append orrery instructions to the worktree's .claude/CLAUDE.md.
+
+    This ensures any Claude session in the worktree — whether spawned by
+    orrery or launched manually — knows about orrery hooks.
+    """
+    base_url = f"http://localhost:{ORRERY_PORT}"
+    prompts = _load_prompts()
+    content = (
+        prompts["cell_claude_md"]["template"]
+        .strip()
+        .format(cell_id=cell_id, base_url=base_url)
+    )
+
+    claude_dir = Path(worktree_path) / ".claude"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+    claude_md = claude_dir / "CLAUDE.md"
+
+    existing = claude_md.read_text() if claude_md.exists() else ""
+    with claude_md.open("a") as f:
+        if existing and not existing.endswith("\n"):
+            f.write("\n")
+        f.write(f"\n{content}\n")
+
+
+def orrery_system_prompt(session_id: str) -> str:
+    """Generate the session-scoped system prompt (done hook)."""
     base_url = f"http://localhost:{ORRERY_PORT}"
     prompts = _load_prompts()
     return (
         prompts["cell_system"]["template"]
         .strip()
-        .format(cell_id=cell_id, session_id=session_id, base_url=base_url)
+        .format(session_id=session_id, base_url=base_url)
     )
 
 

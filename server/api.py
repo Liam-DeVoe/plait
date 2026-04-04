@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 
-from server import config, daemon, db, git
+from server import claude, config, daemon, db, git
 from server.models import (
     Cell,
     CellStatus,
@@ -163,6 +163,8 @@ async def create_cell(req: CreateCellRequest):
         cell.worktree_path = await git.create_worktree(cell.repo, cell.branch, cell.id)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    claude.write_cell_claude_md(cell.worktree_path, cell.id)
 
     if cell.pr_number:
         ci = await git.get_ci_status(cell.repo, cell.pr_number)
@@ -743,6 +745,8 @@ async def hook_create_cell(req: CreateCellHook):
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    claude.write_cell_claude_md(cell.worktree_path, cell.id)
+
     await db.create_cell(cell)
     await daemon.notify("cell_updated", {"id": cell.id, "status": "open"})
     return {"cell_id": cell.id, "url": f"http://localhost:5173/cells/{cell.id}"}
@@ -783,6 +787,8 @@ async def hook_create_sortie_cell(sortie_id: str, req: CreateSortieCellHook):
         cell.worktree_path = await git.create_worktree(req.repo, branch, cell.id)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+    claude.write_cell_claude_md(cell.worktree_path, cell.id)
 
     await db.create_cell(cell)
     await daemon.notify("sortie_updated", {"id": sortie_id})

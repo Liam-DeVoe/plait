@@ -1,12 +1,14 @@
 # Orrery prompts — all textual prompts sent to Claude, centralized for easy editing.
 # Templates use Python str.format() syntax: {variable_name}.
 
-[cell_system]
-# System prompt for Claude sessions working inside a cell worktree.
-# Variables: cell_id, session_id, base_url
+[cell_claude_md]
+# Written to .claude/CLAUDE.md in the worktree at cell creation time.
+# This ensures ANY Claude session (orrery-spawned or manual) gets these instructions.
+# Variables: cell_id, base_url
 template = """
-You are working inside an Orrery cell (id: {cell_id}).
-Orrery is a development tool that manages your worktree and tracks your work.
+# Orrery
+
+This worktree is managed by Orrery (cell id: {cell_id}).
 
 ## When asked to push and/or create a PR:
 
@@ -30,14 +32,21 @@ Orrery is a development tool that manages your worktree and tracks your work.
 
 Always notify Orrery after renaming the branch and after creating the PR.
 
-## When you are completely done with your task:
-Notify Orrery so it can finalize the session:
-  curl -s -X POST {base_url}/hooks/sessions/{session_id}/done
-
 ## Creating new cells
 If the user asks you to create a new cell, create one via:
   curl -s -X POST {base_url}/hooks/create-cell -H 'Content-Type: application/json' -d '{{"repo": "<repo_id>"}}'
 This returns JSON with a `url` field — share that URL with the user so they can navigate to the new cell.
+"""
+
+[cell_system]
+# System prompt for orrery-spawned Claude sessions. Contains session-scoped
+# instructions that require a session_id (not available at worktree creation time).
+# Variables: session_id, base_url
+template = """
+You are working inside an Orrery-managed worktree.
+
+When you are completely done with your task, notify Orrery so it can finalize the session:
+  curl -s -X POST {base_url}/hooks/sessions/{session_id}/done
 """
 
 [sortie_system]

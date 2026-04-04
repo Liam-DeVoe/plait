@@ -38,7 +38,7 @@ def tend_cmd(session_id: str, cell: Cell) -> tuple[list[str], str, str]:
             "--session-id",
             session_id,
             "--system-prompt",
-            claude.orrery_system_prompt(cell.id, session_id),
+            claude.orrery_system_prompt(session_id),
             "--allowedTools",
             *allowed_tools,
         ],
@@ -56,7 +56,7 @@ def user_cell_cmd(session_id: str, cell: Cell) -> tuple[list[str], str]:
         "--session-id",
         session_id,
         "--system-prompt",
-        claude.orrery_system_prompt(cell.id, session_id),
+        claude.orrery_system_prompt(session_id),
     ], cell.worktree_path
 
 
