@@ -9,10 +9,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
-from pathlib import Path
 
 from server import claude, db
-from server.daemon_config import DAEMON_ALLOWED_TOOLS
 from server.models import Cell
 from server.pty import pty_manager
 
@@ -28,19 +26,16 @@ def tend_cmd(session_id: str, cell: Cell) -> tuple[list[str], str, str]:
     Returns (cmd, cwd, prompt). The prompt should be passed as initial_input
     to spawn_session rather than baked into the command.
     """
-    worktree = str(Path(cell.worktree_path).resolve())
-    allowed_tools = [t.format(worktree=worktree) for t in DAEMON_ALLOWED_TOOLS]
     prompt = claude.tend_prompt(cell.branch, cell.id)
     return (
         [
             "claude",
             "--verbose",
+            "--dangerously-skip-permissions",
             "--session-id",
             session_id,
             "--system-prompt",
             claude.orrery_system_prompt(session_id),
-            "--allowedTools",
-            *allowed_tools,
         ],
         cell.worktree_path,
         prompt,

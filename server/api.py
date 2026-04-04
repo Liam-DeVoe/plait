@@ -4,6 +4,8 @@ import asyncio
 import json
 import logging
 import subprocess
+
+logging.basicConfig(level=logging.INFO)
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone

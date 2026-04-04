@@ -96,8 +96,6 @@ async def tend_cell(cell: Cell) -> bool:
 
     await db.update_session(session.id, succeeded=1 if ok else 0)
     await notify("cell_updated", {"id": cell.id})
-    if not ok:
-        logger.error(f"Claude failed to fix issues for cell {cell.id}")
     return ok
 
 
