@@ -60,7 +60,7 @@ export default function SortieDetailPage() {
       </Link>
       <div className="card sortie-detail__card">
         <div className="sortie-detail__header">
-          <div className="sortie-detail__title">Sortie</div>
+          <div className="sortie-detail__title">{sortie.name || "Sortie"}</div>
           <div className="sortie-detail__actions">
             <div
               className="btn btn--md btn--gray"

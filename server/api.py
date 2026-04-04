@@ -754,6 +754,20 @@ async def hook_create_cell(req: CreateCellHook):
     return {"cell_id": cell.id, "url": f"http://localhost:5173/cells/{cell.id}"}
 
 
+class SetSortieNameHook(BaseModel):
+    name: str
+
+
+@app.post("/hooks/sorties/{sortie_id}/set-name")
+async def hook_set_sortie_name(sortie_id: str, req: SetSortieNameHook):
+    sortie = await db.get_sortie(sortie_id)
+    if not sortie:
+        raise HTTPException(status_code=404, detail="Sortie not found")
+    await db.update_sortie(sortie_id, name=req.name)
+    await daemon.notify("sortie_updated", {"id": sortie_id, "name": req.name})
+    return {"status": "ok"}
+
+
 class CreateSortieCellHook(BaseModel):
     repo: str
 

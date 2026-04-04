@@ -11,6 +11,9 @@ function SortieRow({ sortie }: { sortie: Sortie & { cell_count: number } }) {
       className="sortie-row"
       onClick={(e) => navigateTo(e, `/sorties/${sortie.id}`, navigate)}
     >
+      <td className="table__cell sortie-row__name">
+        {sortie.name || <span className="muted">{sortie.id.slice(0, 8)}</span>}
+      </td>
       <td className="table__cell sortie-row__meta">
         {sortie.cell_count} cell{sortie.cell_count !== 1 && "s"}
       </td>
@@ -68,6 +71,7 @@ export default function SortiesPage() {
           <table className="table">
             <thead className="table__head">
               <tr>
+                <th className="table__header-cell">Name</th>
                 <th className="table__header-cell">Cells</th>
                 <th className="table__header-cell">Created</th>
               </tr>

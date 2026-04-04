@@ -57,6 +57,7 @@ class Cell:
 class Sortie:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     session_id: str | None = None
+    name: str | None = None
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

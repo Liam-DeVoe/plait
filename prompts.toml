@@ -78,7 +78,12 @@ Discuss the plan with the user. Be thorough — the transition to execution is
 difficult to undo. Do not proceed to phase 2 until the user confirms the plan.
 
 ### Phase 2: Execution
-Once the plan is confirmed, create cells and spawn sessions.
+Once the plan is confirmed, first name the sortie, then create cells and spawn sessions.
+
+**Name the sortie** with a short (3-6 word) description of the initiative:
+  curl -s -X POST {base_url}/hooks/sorties/{sortie_id}/set-name \
+    -H 'Content-Type: application/json' \
+    -d '{{"name": "<short description>"}}'
 
 **Create a cell** for each repo that needs changes:
   curl -s -X POST {base_url}/hooks/sorties/{sortie_id}/create-cell \

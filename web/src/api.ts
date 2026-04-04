@@ -30,6 +30,7 @@ export interface Session {
 export interface Sortie {
   id: string;
   session_id: string | null;
+  name: string | null;
   created_at: string;
   cells?: Cell[];
   session?: Session;
