@@ -1,11 +1,39 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, useOutletContext } from "react-router-dom";
-import { fetchSorties, createSortie, type Sortie } from "../api";
-import { navigateTo } from "../components/shared";
+import {
+  fetchSorties,
+  createSortie,
+  archiveSortie,
+  unarchiveSortie,
+  deleteSortie,
+  type Sortie,
+} from "../api";
+import { OverflowMenu, navigateTo } from "../components/shared";
 import type { LayoutContext } from "../components/Layout";
 
-function SortieRow({ sortie }: { sortie: Sortie & { cell_count: number } }) {
+function SortieRow({
+  sortie,
+  onArchive,
+  onUnarchive,
+  onDelete,
+}: {
+  sortie: Sortie & { cell_count: number };
+  onArchive: () => void;
+  onUnarchive: () => void;
+  onDelete: () => void;
+}) {
   const navigate = useNavigate();
+
+  const menuItems = sortie.is_archived
+    ? [
+        { label: "Unarchive", onClick: onUnarchive },
+        { label: "Delete", onClick: onDelete, danger: true },
+      ]
+    : [
+        { label: "Archive", onClick: onArchive },
+        { label: "Delete", onClick: onDelete, danger: true },
+      ];
+
   return (
     <tr
       className="sortie-row"
@@ -20,6 +48,11 @@ function SortieRow({ sortie }: { sortie: Sortie & { cell_count: number } }) {
       <td className="table__cell sortie-row__date">
         {new Date(sortie.created_at).toLocaleDateString()}
       </td>
+      <td className="table__cell">
+        <div className="sortie-row__actions" onClick={(e) => e.stopPropagation()}>
+          <OverflowMenu items={menuItems} />
+        </div>
+      </td>
     </tr>
   );
 }
@@ -31,6 +64,7 @@ export default function SortiesPage() {
     [],
   );
   const [creating, setCreating] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   const loadSorties = useCallback(async () => {
     setSorties(await fetchSorties());
@@ -50,6 +84,9 @@ export default function SortiesPage() {
     }
   };
 
+  const activeSorties = sorties.filter((s) => !s.is_archived);
+  const archivedSorties = sorties.filter((s) => s.is_archived);
+
   return (
     <>
       <div className="page-header">
@@ -68,20 +105,77 @@ export default function SortiesPage() {
         </div>
       ) : (
         <div className="card card--clipped">
-          <table className="table">
-            <thead className="table__head">
-              <tr>
-                <th className="table__header-cell">Name</th>
-                <th className="table__header-cell">Cells</th>
-                <th className="table__header-cell">Created</th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorties.map((s) => (
-                <SortieRow key={s.id} sortie={s} />
-              ))}
-            </tbody>
-          </table>
+          {activeSorties.length > 0 ? (
+            <table className="table">
+              <thead className="table__head">
+                <tr>
+                  <th className="table__header-cell">Name</th>
+                  <th className="table__header-cell">Cells</th>
+                  <th className="table__header-cell">Created</th>
+                  <th className="table__header-cell"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {activeSorties.map((s) => (
+                  <SortieRow
+                    key={s.id}
+                    sortie={s}
+                    onArchive={async () => {
+                      await archiveSortie(s.id);
+                      loadSorties();
+                    }}
+                    onUnarchive={async () => {
+                      await unarchiveSortie(s.id);
+                      loadSorties();
+                    }}
+                    onDelete={async () => {
+                      await deleteSortie(s.id);
+                      loadSorties();
+                    }}
+                  />
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="muted" style={{ padding: "12px 16px" }}>
+              No active sorties
+            </div>
+          )}
+          {archivedSorties.length > 0 && (
+            <div
+              className="sorties-page__archived-toggle"
+              onClick={() => setShowArchived(!showArchived)}
+            >
+              <span className="sorties-page__archived-arrow">
+                {showArchived ? "▾" : "▸"}
+              </span>
+              Archived ({archivedSorties.length})
+            </div>
+          )}
+          {showArchived && archivedSorties.length > 0 && (
+            <table className="table sorties-page__archived-table">
+              <tbody>
+                {archivedSorties.map((s) => (
+                  <SortieRow
+                    key={s.id}
+                    sortie={s}
+                    onArchive={async () => {
+                      await archiveSortie(s.id);
+                      loadSorties();
+                    }}
+                    onUnarchive={async () => {
+                      await unarchiveSortie(s.id);
+                      loadSorties();
+                    }}
+                    onDelete={async () => {
+                      await deleteSortie(s.id);
+                      loadSorties();
+                    }}
+                  />
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       )}
     </>

@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useNavigate, useOutletContext, Link } from "react-router-dom";
 import {
   fetchSortie,
+  archiveSortie,
+  unarchiveSortie,
   deleteSortie,
   openSortieInVSCode,
   fetchSortieXtermState,
@@ -70,6 +72,21 @@ export default function SortieDetailPage() {
             </div>
             <OverflowMenu
               items={[
+                sortie.is_archived
+                  ? {
+                      label: "Unarchive",
+                      onClick: async () => {
+                        await unarchiveSortie(sortie.id);
+                        load();
+                      },
+                    }
+                  : {
+                      label: "Archive",
+                      onClick: async () => {
+                        await archiveSortie(sortie.id);
+                        load();
+                      },
+                    },
                 {
                   label: "Delete",
                   onClick: async () => {

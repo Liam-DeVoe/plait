@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS sorties (
     id TEXT PRIMARY KEY,
     session_id TEXT,
     name TEXT,
+    archived INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
 
@@ -89,6 +90,7 @@ async def init_db() -> None:
         "ALTER TABLE cells ADD COLUMN last_activity_at TEXT",
         "ALTER TABLE cells ADD COLUMN ci_failure_expected_sha TEXT",
         "ALTER TABLE sorties ADD COLUMN name TEXT",
+        "ALTER TABLE sorties ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
     ]:
         try:
             await db.execute(migration)
@@ -324,12 +326,13 @@ async def create_sortie(sortie: Sortie) -> Sortie:
     db = await get_db()
     try:
         await db.execute(
-            """INSERT INTO sorties (id, session_id, name, created_at)
-               VALUES (?, ?, ?, ?)""",
+            """INSERT INTO sorties (id, session_id, name, archived, created_at)
+               VALUES (?, ?, ?, ?, ?)""",
             (
                 sortie.id,
                 sortie.session_id,
                 sortie.name,
+                int(sortie.archived),
                 sortie.created_at,
             ),
         )
@@ -364,6 +367,7 @@ def _row_to_sortie(row: aiosqlite.Row) -> Sortie:
         id=row["id"],
         session_id=row["session_id"],
         name=row["name"],
+        archived=bool(row["archived"]),
         created_at=row["created_at"],
     )
 
@@ -405,12 +409,13 @@ async def list_cells_by_sortie(sortie_id: str) -> list[Cell]:
 async def delete_sortie(sortie_id: str) -> None:
     conn = await get_db()
     try:
+        # Delete sortie-level sessions (orchestrator etc)
         await conn.execute("DELETE FROM sessions WHERE sortie_id = ?", (sortie_id,))
+        # Detach cells — they continue to exist independently
         await conn.execute(
-            "DELETE FROM sessions WHERE cell_id IN (SELECT id FROM cells WHERE sortie_id = ?)",
+            "UPDATE cells SET sortie_id = NULL WHERE sortie_id = ?",
             (sortie_id,),
         )
-        await conn.execute("DELETE FROM cells WHERE sortie_id = ?", (sortie_id,))
         await conn.execute("DELETE FROM sorties WHERE id = ?", (sortie_id,))
         await conn.commit()
     finally:

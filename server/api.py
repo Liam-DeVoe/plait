@@ -586,6 +586,16 @@ async def _cleanup_stale_sessions() -> None:
 # --- Sortie endpoints ---
 
 
+def _sortie_dict(sortie: Sortie, cells: list[Cell]) -> dict:
+    """Serialize a sortie with derived is_archived field."""
+    d = asdict(sortie)
+    all_cells_archived = len(cells) > 0 and all(
+        c.status == CellStatus.archived for c in cells
+    )
+    d["is_archived"] = sortie.archived or all_cells_archived
+    return d
+
+
 @app.post("/sorties")
 async def create_sortie():
     sortie = Sortie()
@@ -614,8 +624,8 @@ async def list_sorties():
     sorties = await db.list_sorties()
     result = []
     for s in sorties:
-        d = asdict(s)
         cells = await db.list_cells_by_sortie(s.id)
+        d = _sortie_dict(s, cells)
         d["cell_count"] = len(cells)
         result.append(d)
     return result
@@ -627,7 +637,7 @@ async def get_sortie(sortie_id: str):
     if not sortie:
         raise HTTPException(status_code=404, detail="Sortie not found")
     child_cells = await db.list_cells_by_sortie(sortie_id)
-    result = asdict(sortie)
+    result = _sortie_dict(sortie, child_cells)
     result["cells"] = [asdict(c) for c in child_cells]
     # Include the orchestrator session if it exists
     if sortie.session_id:
@@ -686,6 +696,28 @@ async def start_sortie_session(sortie_id: str, session_id: str):
     return _session_dict(session)
 
 
+@app.post("/sorties/{sortie_id}/archive")
+async def archive_sortie(sortie_id: str):
+    sortie = await db.get_sortie(sortie_id)
+    if not sortie:
+        raise HTTPException(status_code=404, detail="Sortie not found")
+    updated = await db.update_sortie(sortie_id, archived=True)
+    assert updated is not None
+    await daemon.notify("sortie_updated", {"id": sortie_id})
+    return _sortie_dict(updated, await db.list_cells_by_sortie(sortie_id))
+
+
+@app.post("/sorties/{sortie_id}/unarchive")
+async def unarchive_sortie(sortie_id: str):
+    sortie = await db.get_sortie(sortie_id)
+    if not sortie:
+        raise HTTPException(status_code=404, detail="Sortie not found")
+    updated = await db.update_sortie(sortie_id, archived=False)
+    assert updated is not None
+    await daemon.notify("sortie_updated", {"id": sortie_id})
+    return _sortie_dict(updated, await db.list_cells_by_sortie(sortie_id))
+
+
 @app.delete("/sorties/{sortie_id}")
 async def delete_sortie(sortie_id: str):
     sortie = await db.get_sortie(sortie_id)
@@ -695,14 +727,6 @@ async def delete_sortie(sortie_id: str):
     # Kill orchestrator session PTY if alive
     if sortie.session_id and pty_manager.is_alive(sortie.session_id):
         await pty_manager.terminate(sortie.session_id)
-
-    # Remove child cell worktrees
-    cells = await db.list_cells_by_sortie(sortie_id)
-    for cell in cells:
-        try:
-            await git.remove_worktree(cell.repo, cell.worktree_path)
-        except Exception:
-            pass
 
     # Remove sortie exploration worktrees
     try:

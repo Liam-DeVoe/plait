@@ -31,6 +31,8 @@ export interface Sortie {
   id: string;
   session_id: string | null;
   name: string | null;
+  archived: boolean;
+  is_archived: boolean;
   created_at: string;
   cells?: Cell[];
   session?: Session;
@@ -154,6 +156,16 @@ export async function createSortie(): Promise<Sortie> {
     const err = await res.json();
     throw new Error(err.detail || "Failed to create sortie");
   }
+  return res.json();
+}
+
+export async function archiveSortie(id: string): Promise<Sortie> {
+  const res = await fetch(`${BASE}/sorties/${id}/archive`, { method: "POST" });
+  return res.json();
+}
+
+export async function unarchiveSortie(id: string): Promise<Sortie> {
+  const res = await fetch(`${BASE}/sorties/${id}/unarchive`, { method: "POST" });
   return res.json();
 }
 
