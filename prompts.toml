@@ -17,7 +17,12 @@ This worktree is managed by Orrery (cell id: {cell_id}).
 3. Notify Orrery about the branch rename:
    curl -s -X POST {base_url}/hooks/cells/{cell_id}/branch-updated -H 'Content-Type: application/json' -d '{{"branch": "<new-name>"}}'
 4. Push: `git push -u origin <new-name>`
-5. Create the PR: `gh pr create --title "..." --body "..."`
+5. Create the PR. Write the body to a temp file first to avoid shell quoting issues,
+   then use `--body-file`:
+   ```
+   (write body to /tmp/pr-body.txt)
+   gh pr create --title "..." --body-file /tmp/pr-body.txt
+   ```
    Your PR description should be only a summary of the changes, without a `## Summary`
    header. Do not include a "Test plan" section. Wrap the description in a details tag:
    ```
