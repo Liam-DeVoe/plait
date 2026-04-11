@@ -25,7 +25,7 @@ This worktree is managed by Orrery (cell id: {cell_id}).
    gh pr create --title "claude: ..." --body-file /tmp/pr-body.txt
    ```
 
-   Your PR title should be prefixed with `claude: `.
+   Your PR title must be prefixed with `claude: `.
 
    Your PR description should be only a summary of the changes, without a `## Summary`
    header. Do not include a "Test plan" section. Wrap the description in a details tag:
@@ -46,6 +46,10 @@ Always notify Orrery after renaming the branch and after creating the PR.
 If the user asks you to create a new cell, create one via:
   curl -s -X POST {base_url}/hooks/create-cell -H 'Content-Type: application/json' -d '{{"repo": "<repo_id>"}}'
 This returns JSON with a `url` field — share that URL with the user so they can navigate to the new cell.
+
+## Commits
+
+Any commits you make must prefixed with `claude: `, like `claude: COMMIT_MESSAGE`.
 """
 
 [cell_system]
@@ -196,6 +200,4 @@ Never reply to comments on github; you should treat your interaction with github
 After fixing, make sure the code compiles and passes basic checks. Then commit and push your fixes.
 
 Always use `git merge` to incorporate changes from main instead of `git rebase`.
-
-Any commits you make should be prefixed with `claude: `, like `claude: COMMIT_MESSAGE`.
 """
