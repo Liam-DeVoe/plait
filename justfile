@@ -1,5 +1,5 @@
 server *args:
-    .venv/bin/uvicorn server.api:app {{ args }} --port 8000
+    .venv/bin/uvicorn server.api:app {{ args }} --port 57381
 
 web:
     cd web && npm run dev

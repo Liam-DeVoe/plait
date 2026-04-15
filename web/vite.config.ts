@@ -6,11 +6,11 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8000',
+        target: 'http://localhost:57381',
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
-      '/ws/sessions': { target: 'ws://localhost:8000', ws: true },
-      '/ws': { target: 'ws://localhost:8000', ws: true },
+      '/ws/sessions': { target: 'ws://localhost:57381', ws: true },
+      '/ws': { target: 'ws://localhost:57381', ws: true },
     },
   },
 })

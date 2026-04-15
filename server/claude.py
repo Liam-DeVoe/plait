@@ -6,7 +6,7 @@ import tomllib
 
 from server import config
 
-ORRERY_PORT = 8000
+ORRERY_PORT = 57381
 PROMPTS_PATH = Path(__file__).parent.parent / "prompts.toml"
 
 
