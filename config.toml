@@ -18,7 +18,7 @@ upstream = "hegeldev/hegel-rust"
 
 [repos.hegel-cpp]
 path = "/Users/tybug/Desktop/Liam/coding/hegel/cpp"
-upstream = "antithesishq/hegel-cpp"
+upstream = "hegeldev/hegel-cpp"
 
 [repos.hegel-ocaml]
 path = "/Users/tybug/Desktop/Liam/coding/hegel/ocaml"
