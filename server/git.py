@@ -30,6 +30,32 @@ async def fetch_origin(repo_id: str) -> None:
         raise RuntimeError(f"Failed to fetch origin for {repo_id}: {err}")
 
 
+_main_branch_cache: dict[str, str] = {}
+
+
+async def main_branch(repo_id: str) -> str:
+    """Return the default branch of `origin` for the given repo.
+
+    Resolved via `git symbolic-ref refs/remotes/origin/HEAD` and cached
+    for the lifetime of the process.
+    """
+    if repo_id in _main_branch_cache:
+        return _main_branch_cache[repo_id]
+    repo = config.get_repo(repo_id)
+    rc, out, err = await run(
+        "git", "symbolic-ref", "refs/remotes/origin/HEAD", cwd=repo.path
+    )
+    if rc != 0:
+        raise RuntimeError(
+            f"Could not resolve default branch for {repo_id}: {err}. "
+            f"Try `git remote set-head origin --auto` in {repo.path}."
+        )
+    # Output is like "refs/remotes/origin/main"
+    name = out.strip().rsplit("/", 1)[-1]
+    _main_branch_cache[repo_id] = name
+    return name
+
+
 async def create_sortie_worktrees(sortie_id: str) -> dict[str, str]:
     """Create read-only worktrees for all repos at origin/main.
 
@@ -42,6 +68,7 @@ async def create_sortie_worktrees(sortie_id: str) -> dict[str, str]:
 
     async def _create_one(repo_id: str, repo: config.Repo) -> tuple[str, str]:
         await fetch_origin(repo_id)
+        mb = await main_branch(repo_id)
         wt_dir = sortie_dir / repo_id
         rc, out, err = await run(
             "git",
@@ -49,7 +76,7 @@ async def create_sortie_worktrees(sortie_id: str) -> dict[str, str]:
             "add",
             "--detach",
             str(wt_dir),
-            "origin/main",
+            f"origin/{mb}",
             cwd=repo.path,
         )
         if rc != 0:
@@ -135,8 +162,9 @@ async def create_worktree(repo_id: str, branch: str, cell_id: str) -> str:
                 cwd=repo_dir,
             )
     else:
-        # Create new branch from origin/main
+        # Create new branch from origin/<main_branch>
         await fetch_origin(repo_id)
+        mb = await main_branch(repo_id)
         rc, out, err = await run(
             "git",
             "worktree",
@@ -144,7 +172,7 @@ async def create_worktree(repo_id: str, branch: str, cell_id: str) -> str:
             "-b",
             branch,
             str(worktree_dir),
-            "origin/main",
+            f"origin/{mb}",
             cwd=repo_dir,
         )
 
@@ -169,13 +197,14 @@ async def assert_not_detached(worktree_path: str) -> None:
     assert rc == 0, f"Worktree is in detached HEAD state: {worktree_path}"
 
 
-async def is_behind_main(worktree_path: str, branch: str) -> bool:
-    """Check if the remote branch is behind origin/main."""
+async def is_behind_main(repo_id: str, worktree_path: str, branch: str) -> bool:
+    """Check if the remote branch is behind the repo's main branch."""
+    mb = await main_branch(repo_id)
     rc, out, err = await run(
         "git",
         "rev-list",
         "--count",
-        f"origin/{branch}..origin/main",
+        f"origin/{branch}..origin/{mb}",
         cwd=worktree_path,
     )
     if rc != 0:
@@ -183,16 +212,17 @@ async def is_behind_main(worktree_path: str, branch: str) -> bool:
     return int(out.strip()) > 0
 
 
-async def merge_from_main(worktree_path: str) -> tuple[bool, str]:
-    """Attempt to merge origin/main into the worktree branch.
+async def merge_from_main(repo_id: str, worktree_path: str) -> tuple[bool, str]:
+    """Attempt to merge the repo's main branch into the worktree branch.
     Returns (success, output)."""
+    mb = await main_branch(repo_id)
     # Fetch latest main
-    rc, out, err = await run("git", "fetch", "origin", "main", cwd=worktree_path)
+    rc, out, err = await run("git", "fetch", "origin", mb, cwd=worktree_path)
     if rc != 0:
         return False, f"fetch failed: {err}"
 
     rc, out, err = await run(
-        "git", "merge", "origin/main", "--no-edit", cwd=worktree_path
+        "git", "merge", f"origin/{mb}", "--no-edit", cwd=worktree_path
     )
     if rc == 0:
         return True, out

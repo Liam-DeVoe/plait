@@ -69,7 +69,7 @@ def sortie_system_prompt(
     )
 
 
-def tend_prompt(branch: str, cell_id: str) -> str:
+def tend_prompt(branch: str, cell_id: str, main_branch: str) -> str:
     """Build a prompt for the tend session."""
     prompts = _load_prompts()
     author = config.get_author()
@@ -77,5 +77,11 @@ def tend_prompt(branch: str, cell_id: str) -> str:
     return (
         prompts["tend"]["template"]
         .strip()
-        .format(branch=branch, author=author, cell_id=cell_id, base_url=base_url)
+        .format(
+            branch=branch,
+            author=author,
+            cell_id=cell_id,
+            base_url=base_url,
+            main_branch=main_branch,
+        )
     )

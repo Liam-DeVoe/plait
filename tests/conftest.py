@@ -103,6 +103,7 @@ def _git_env_template(tmp_path_factory) -> Path:
     _git("add", "README.md", cwd=clone)
     _git("commit", "-m", "initial", cwd=clone)
     _git("push", "-u", "origin", "main", cwd=clone)
+    _git("remote", "set-head", "origin", "--auto", cwd=clone)
 
     return template
 
@@ -148,10 +149,13 @@ def git_env(tmp_path, _git_env_template) -> GitEnv:
         },
     }
 
+    git_module._main_branch_cache.clear()
+
     yield env
 
     git_module.WORKTREE_ROOT = original_worktree_root
     config_module._data = original_data
+    git_module._main_branch_cache.clear()
 
 
 # --- Mock gh CLI ---

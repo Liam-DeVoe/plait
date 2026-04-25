@@ -66,7 +66,7 @@ async def _push_if_published(cell: Cell) -> bool | None:
 
 async def _derive_sync_status(cell: Cell) -> None:
     """Derive sync status from remote refs and update DB if changed."""
-    behind = await git.is_behind_main(cell.worktree_path, cell.branch)
+    behind = await git.is_behind_main(cell.repo, cell.worktree_path, cell.branch)
     sync = SyncStatus.behind if behind else SyncStatus.current
     if sync != cell.sync_status:
         await db.update_cell(cell.id, sync_status=sync)
@@ -84,7 +84,7 @@ async def tend_cell(cell: Cell) -> bool:
     await db.create_session(session)
     await notify("cell_updated", {"id": cell.id})
 
-    cmd, cwd, prompt = tend_cmd(session.id, cell)
+    cmd, cwd, prompt = await tend_cmd(session.id, cell)
     task = spawn_session(
         session.id, cmd, cwd, initial_input=prompt, idle_timeout=SESSION_IDLE_TIMEOUT
     )
@@ -179,7 +179,7 @@ async def _process_cell(cell: Cell) -> dict:
                 f"Cell {cell.id} ({cell.repo}:{cell.branch}) is behind main, merging"
             )
 
-            success, _output = await git.merge_from_main(cell.worktree_path)
+            success, _output = await git.merge_from_main(cell.repo, cell.worktree_path)
 
             if success:
                 push_result = await _push_if_published(cell)

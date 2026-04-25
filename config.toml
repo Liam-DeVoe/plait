@@ -27,3 +27,7 @@ upstream = "hegeldev/hegel-ocaml"
 [repos.website]
 path = "/Users/tybug/Desktop/Liam/coding/hegel/website"
 upstream = "hegeldev/website"
+
+[repos.hypothesis]
+path = "/Users/tybug/Desktop/Liam/coding/hypothesis"
+upstream = "liam-devoe/hypothesis"

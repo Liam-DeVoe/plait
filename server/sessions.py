@@ -10,7 +10,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from server import claude, db
+from server import claude, db, git
 from server.models import Cell
 from server.pty import pty_manager
 
@@ -20,13 +20,14 @@ logger = logging.getLogger(__name__)
 # Each returns (cmd, cwd) for a specific session type.
 
 
-def tend_cmd(session_id: str, cell: Cell) -> tuple[list[str], str, str]:
+async def tend_cmd(session_id: str, cell: Cell) -> tuple[list[str], str, str]:
     """Interactive daemon session to fix merge conflicts / CI failures.
 
     Returns (cmd, cwd, prompt). The prompt should be passed as initial_input
     to spawn_session rather than baked into the command.
     """
-    prompt = claude.tend_prompt(cell.branch, cell.id)
+    mb = await git.main_branch(cell.repo)
+    prompt = claude.tend_prompt(cell.branch, cell.id, mb)
     return (
         [
             "claude",
