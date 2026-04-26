@@ -100,28 +100,66 @@ async def test_cell_current_no_action(git_env, init_db):
     assert fetched.sync_status == SyncStatus.current
 
 
-async def test_cell_clean_merge(git_env, init_db):
-    """If cell is behind main and merge is clean, it should merge and push."""
-    # Create branch with its own commit
+async def test_cell_clean_merge_no_action(git_env, init_db, mock_claude):
+    """A clean merge from main should NOT be performed by the daemon.
+
+    Auto-merging clean would produce noisy merge commits on the PR. The
+    daemon only acts when there's a real conflict; a behind-but-mergeable
+    branch stays `behind` until the user (or a later tend) decides to
+    merge.
+    """
     git_env.create_branch("feature")
     git_env.add_commit("feature.txt", "feature work", "add feature")
     git_env.push("feature")
     git_env.checkout("main")
 
-    # Advance main
     git_env.add_commit("main.txt", "main work", "advance main")
     git_env.push("main")
 
     cell = await _create_cell_in_db(git_env, "feature", "daemon-2")
 
+    head_before = await git.run("git", "rev-parse", "HEAD", cwd=cell.worktree_path)
+
     await process_cell(cell)
 
     fetched = await db.get_cell(cell.id)
-    assert fetched.sync_status == SyncStatus.current
+    assert fetched.sync_status == SyncStatus.behind
 
-    # Verify the worktree has both files
-    assert (Path(cell.worktree_path) / "feature.txt").exists()
-    assert (Path(cell.worktree_path) / "main.txt").exists()
+    # Worktree HEAD should be unchanged — no merge was done.
+    head_after = await git.run("git", "rev-parse", "HEAD", cwd=cell.worktree_path)
+    assert head_before == head_after
+    assert not (Path(cell.worktree_path) / "main.txt").exists()
+
+    # No tend session was spawned.
+    mock_claude.assert_not_called()
+    sessions = await db.list_sessions(cell.id)
+    assert sessions == []
+
+
+async def test_cell_release_md_conflict_skipped(git_env, init_db, mock_claude):
+    """A RELEASE.md-only conflict shouldn't trigger a tend session.
+
+    The release job will eventually delete RELEASE.md from main, so the
+    conflict resolves itself. Tending now would either spin or produce a
+    merge commit that has to be undone.
+    """
+    git_env.create_branch("release-conflict")
+    git_env.add_commit("RELEASE.md", "branch release", "add release on branch")
+    git_env.push("release-conflict")
+    git_env.checkout("main")
+
+    git_env.add_commit("RELEASE.md", "main release", "add release on main")
+    git_env.push("main")
+
+    cell = await _create_cell_in_db(git_env, "release-conflict", "daemon-rel")
+
+    await process_cell(cell)
+
+    fetched = await db.get_cell(cell.id)
+    assert fetched.sync_status == SyncStatus.behind
+    mock_claude.assert_not_called()
+    sessions = await db.list_sessions(cell.id)
+    assert sessions == []
 
 
 async def test_cell_conflict_claude_resolves(git_env, init_db, mock_claude):

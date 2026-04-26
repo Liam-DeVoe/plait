@@ -69,11 +69,22 @@ def sortie_system_prompt(
     )
 
 
-def tend_prompt(branch: str, cell_id: str, main_branch: str) -> str:
-    """Build a prompt for the tend session."""
+def tend_prompt(branch: str, cell_id: str, main_branch: str, has_conflict: bool) -> str:
+    """Build a prompt for the tend session.
+
+    `has_conflict` selects between two mutually-exclusive merge sections:
+    one tells Claude to perform the merge and resolve conflicts, the other
+    tells Claude to leave behind-main alone. The daemon is authoritative
+    about which case we're in, so the prompt never asks Claude to figure
+    that out itself.
+    """
     prompts = _load_prompts()
     author = config.get_author()
     base_url = f"http://localhost:{ORRERY_PORT}"
+    section_key = "merge_conflict" if has_conflict else "merge_skip"
+    merge_section = (
+        prompts["tend"][section_key]["template"].strip().format(main_branch=main_branch)
+    )
     return (
         prompts["tend"]["template"]
         .strip()
@@ -83,5 +94,6 @@ def tend_prompt(branch: str, cell_id: str, main_branch: str) -> str:
             cell_id=cell_id,
             base_url=base_url,
             main_branch=main_branch,
+            merge_section=merge_section,
         )
     )

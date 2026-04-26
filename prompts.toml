@@ -155,14 +155,27 @@ recognize those failures as expected and won't waste time trying to fix them.
 [tend]
 # Prompt sent to Claude when the daemon detects the branch needs attention.
 # Claude should investigate the actual state and fix what it finds.
-# Variables: branch, author, cell_id, base_url, main_branch
+#
+# {merge_section} is filled by claude.tend_prompt() with one of two
+# mutually-exclusive snippets:
+#   - tend.merge_conflict       — when the daemon detected real conflicts
+#   - tend.merge_skip           — when the branch is current or has only
+#                                 transient conflicts (or no conflicts at all)
+#
+# The daemon is authoritative about which case we're in, so the prompt
+# never asks Claude to figure that out.
+#
+# Variables: branch, author, cell_id, base_url, main_branch, merge_section
 template = """
-The branch {branch} might need attention. Investigate and fix any of the following that apply:
+The branch {branch} might need attention.
 
-1. **Merge conflicts with main**: If the branch is behind origin/{main_branch}, merge it and resolve any conflicts, preserving the intent of both sides.
-2. **CI failures**: Check CI status with `gh pr checks`. If failing, look at the failure logs and fix the issue.
-3. **Thumbs-up reactions from {author}**: Check PR comments for any that have a thumbs-up (+1) reaction from `{author}`. A thumbs-up means the user agrees with that comment — you should fix the code according to what the comment says. **Skip comments whose review thread is already resolved** — only act on unresolved threads. After you've addressed a +1'd comment, resolve its review thread with the graphql mutation below.
-4. **`@claude` mentions from {author}**: Check PR comments for any from `{author}` that mention `@claude`. These are direct instructions for you — follow them. **Skip comments whose review thread is already resolved.** After addressing the comment, resolve its review thread with:
+{merge_section}
+
+Investigate and fix any of the following that apply:
+
+1. **CI failures**: Check CI status with `gh pr checks`. If failing, look at the failure logs and fix the issue.
+2. **Thumbs-up reactions from {author}**: Check PR comments for any that have a thumbs-up (+1) reaction from `{author}`. A thumbs-up means the user agrees with that comment — you should fix the code according to what the comment says. **Skip comments whose review thread is already resolved** — only act on unresolved threads. After you've addressed a +1'd comment, resolve its review thread with the graphql mutation below.
+3. **`@claude` mentions from {author}**: Check PR comments for any from `{author}` that mention `@claude`. These are direct instructions for you — follow them. **Skip comments whose review thread is already resolved.** After addressing the comment, resolve its review thread with:
    ```
    gh api graphql -f query='mutation {{ resolveReviewThread(input: {{threadId: "THREAD_NODE_ID"}}) {{ thread {{ isResolved }} }} }}'
    ```
@@ -180,7 +193,7 @@ The branch {branch} might need attention. Investigate and fix any of the followi
    ```
    gh api repos/OWNER/REPO/issues/PR_NUMBER/comments --paginate --jq '.[] | {{id: .id, body: .body, user: .user.login}}'
    ```
-   Apply the same rules from steps 3 and 4 above. To check who reacted to a specific issue comment:
+   Apply the same rules from steps 2 and 3 above. To check who reacted to a specific issue comment:
    ```
    gh api repos/OWNER/REPO/issues/comments/COMMENT_ID/reactions --jq '.[] | {{content: .content, user: .user.login}}'
    ```
@@ -191,13 +204,27 @@ The branch {branch} might need attention. Investigate and fix any of the followi
 
 Never reply to comments on github; you should treat your interaction with github as read-only except for pushing commits, resolving review threads, and reacting to issue comments to mark them as handled.
 
-5. **Expected CI failures**: Some CI failures may be expected and unfixable right now — for example, if this PR depends on changes in another PR that hasn't been merged yet. Check the PR description for notes about expected CI failures. If a CI job is failing for an expected reason that you cannot fix, do NOT attempt workarounds or hacks to make it pass. Instead, tell Orrery that CI failures are expected so it stops triggering tend jobs for CI on this cell:
+4. **Expected CI failures**: Some CI failures may be expected and unfixable right now — for example, if this PR depends on changes in another PR that hasn't been merged yet. Check the PR description for notes about expected CI failures. If a CI job is failing for an expected reason that you cannot fix, do NOT attempt workarounds or hacks to make it pass. Instead, tell Orrery that CI failures are expected so it stops triggering tend jobs for CI on this cell:
    ```
    curl -s -X POST {base_url}/hooks/cells/{cell_id}/ci-failure-expected
    ```
    You should still fix any CI failures that are NOT expected — only mark CI as expected if the failures are genuinely expected until an external dependency is resolved.
 
 After fixing, make sure the code compiles and passes basic checks. Then commit and push your fixes.
+"""
 
-Always use `git merge` to incorporate changes from {main_branch} instead of `git rebase`.
+[tend.merge_conflict]
+# Inserted into the tend prompt when the daemon detected real (non-ignored)
+# merge conflicts. Tells Claude to perform the merge and resolve.
+template = """
+Merging `origin/{main_branch}` into this branch will conflict. Run `git merge origin/{main_branch}`, resolve the conflicts (preserving the intent of both sides), and commit the merge before continuing.
+"""
+
+[tend.merge_skip]
+# Inserted into the tend prompt when the daemon did NOT detect actionable
+# conflicts. Pre-empts Claude's instinct to merge from main during CI/comment
+# work — that would produce noisy merge commits the daemon went out of its
+# way to avoid.
+template = """
+Being behind `origin/{main_branch}` without conflicts is a normal, accepted state for a PR — do not merge from `origin/{main_branch}` during this session, even if a CI log or a reviewer comment suggests otherwise.
 """

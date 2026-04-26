@@ -212,24 +212,49 @@ async def is_behind_main(repo_id: str, worktree_path: str, branch: str) -> bool:
     return int(out.strip()) > 0
 
 
-async def merge_from_main(repo_id: str, worktree_path: str) -> tuple[bool, str]:
-    """Attempt to merge the repo's main branch into the worktree branch.
-    Returns (success, output)."""
-    mb = await main_branch(repo_id)
-    # Fetch latest main
-    rc, out, err = await run("git", "fetch", "origin", mb, cwd=worktree_path)
-    if rc != 0:
-        return False, f"fetch failed: {err}"
+async def check_merge_conflicts(
+    repo_id: str,
+    worktree_path: str,
+    ignore: frozenset[str] = frozenset(),
+) -> list[str]:
+    """Return the list of paths that would conflict on a merge from origin/main.
 
-    rc, out, err = await run(
-        "git", "merge", f"origin/{mb}", "--no-edit", cwd=worktree_path
+    Uses `git merge-tree --write-tree` to compute the merge against the
+    object database without touching the working tree, index, or HEAD.
+    No commit is created and nothing is pushed.
+
+    Paths in `ignore` are filtered out of the returned list. They're still
+    detected as conflicts internally — callers use this to skip transient
+    conflicts they don't want to act on (e.g. `RELEASE.md` files that get
+    deleted by an upcoming release job).
+    """
+    mb = await main_branch(repo_id)
+    rc, _, err = await run("git", "fetch", "origin", mb, cwd=worktree_path)
+    if rc != 0:
+        raise RuntimeError(f"fetch failed: {err}")
+
+    rc, out, _ = await run(
+        "git",
+        "merge-tree",
+        "--write-tree",
+        "--name-only",
+        "-z",
+        "HEAD",
+        f"origin/{mb}",
+        cwd=worktree_path,
     )
     if rc == 0:
-        return True, out
+        return []
 
-    # Merge had conflicts — abort it so Claude can try
-    await run("git", "merge", "--abort", cwd=worktree_path)
-    return False, f"conflicts: {err}"
+    # `-z` output: <tree-oid>\0<path1>\0<path2>\0...\0\0<info-messages>\0
+    # The conflicted-file section ends at the first empty (double-NUL) field.
+    parts = out.split("\0")
+    conflicts: list[str] = []
+    for p in parts[1:]:
+        if p == "":
+            break
+        conflicts.append(p)
+    return [c for c in conflicts if c not in ignore]
 
 
 async def push(worktree_path: str, branch: str) -> tuple[bool, str]:

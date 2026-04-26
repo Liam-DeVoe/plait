@@ -74,8 +74,14 @@ async def _derive_sync_status(cell: Cell) -> None:
         cell.sync_status = sync
 
 
-async def tend_cell(cell: Cell) -> bool:
-    """Unconditionally spawn a tend session for a cell. Returns True on success."""
+async def tend_cell(cell: Cell, has_conflict: bool = False) -> bool:
+    """Unconditionally spawn a tend session for a cell. Returns True on success.
+
+    `has_conflict` tells Claude (via the prompt) whether to perform a
+    merge from main and resolve conflicts, or to leave merge-from-main
+    alone. The daemon is authoritative about this — Claude never has to
+    figure it out.
+    """
     session = Session(
         cell_id=cell.id,
         role=SessionRole.daemon,
@@ -84,7 +90,7 @@ async def tend_cell(cell: Cell) -> bool:
     await db.create_session(session)
     await notify("cell_updated", {"id": cell.id})
 
-    cmd, cwd, prompt = await tend_cmd(session.id, cell)
+    cmd, cwd, prompt = await tend_cmd(session.id, cell, has_conflict)
     task = spawn_session(
         session.id, cmd, cwd, initial_input=prompt, idle_timeout=SESSION_IDLE_TIMEOUT
     )
@@ -171,25 +177,31 @@ async def _process_cell(cell: Cell) -> dict:
         # --- Derive sync status from remote refs ---
         await _derive_sync_status(cell)
 
-        # --- Attempt automatic merge if behind main ---
+        # --- Detect (but don't perform) a merge if behind main ---
+        # We deliberately don't create the merge commit ourselves: clean
+        # merges produce noisy "Merge remote-tracking branch ..." commits
+        # on the PR for no real benefit. Conflicts still need a tend
+        # session — Claude does the actual merge there.
+        #
+        # Conflicts in transient release-marker files are ignored: another
+        # PR was merged but the release job hasn't yet cut a release that
+        # deletes the file from main. Acting on these conflicts is wasted
+        # work — they resolve themselves once the release job runs.
         has_conflicts = False
         if cell.sync_status == SyncStatus.behind:
             reasons.append("behind_main")
-            logger.info(
-                f"Cell {cell.id} ({cell.repo}:{cell.branch}) is behind main, merging"
+            conflicts = await git.check_merge_conflicts(
+                cell.repo,
+                cell.worktree_path,
+                ignore=frozenset({"RELEASE.md", "RELEASE.rst"}),
             )
-
-            success, _output = await git.merge_from_main(cell.repo, cell.worktree_path)
-
-            if success:
-                push_result = await _push_if_published(cell)
-                if push_result is not False:
-                    logger.info(f"Cell {cell.id} merged successfully")
-                else:
-                    logger.error(f"Cell {cell.id} push failed after merge")
-            else:
+            if conflicts:
+                logger.info(
+                    f"Cell {cell.id} ({cell.repo}:{cell.branch}) "
+                    f"has merge conflicts with main: {', '.join(conflicts)}"
+                )
                 has_conflicts = True
-                reasons.append("conflicts")
+                reasons.append(f"conflicts: {', '.join(conflicts)}")
 
         needs_tend = has_conflicts
 
@@ -319,7 +331,7 @@ async def _process_cell(cell: Cell) -> dict:
             logger.info(f"Cell {cell.id} needs fixing, invoking Claude")
             _in_flight.add(key)
             try:
-                ok = await tend_cell(cell)
+                ok = await tend_cell(cell, has_conflict=has_conflicts)
                 outcome = "succeeded" if ok else "failed"
             except Exception:
                 outcome = "failed"

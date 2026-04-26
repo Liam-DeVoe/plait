@@ -56,30 +56,32 @@ async def test_is_behind_main_when_behind(git_env):
     assert await git.is_behind_main(git_env.repo_id, wt_path, "behind-branch")
 
 
-async def test_merge_from_main_clean(git_env):
+async def test_check_merge_conflicts_clean(git_env):
     # Create a branch with its own commit
     git_env.create_branch("feature")
     git_env.add_commit("feature.txt", "feature", "add feature")
     git_env.push("feature")
     git_env.checkout("main")
 
-    # Advance main
+    # Advance main with a non-conflicting change
     git_env.add_commit("main_change.txt", "main stuff", "advance main")
     git_env.push("main")
 
-    # Create worktree from the feature branch
     wt_path = await git.create_worktree(git_env.repo_id, "feature", "cell-6")
 
-    # Merge should succeed (no conflicts)
-    success, output = await git.merge_from_main(git_env.repo_id, wt_path)
-    assert success
+    # No conflict expected — and the working tree must NOT have changed
+    conflicts = await git.check_merge_conflicts(git_env.repo_id, wt_path)
+    assert conflicts == []
 
-    # Verify the worktree has both files
+    # No merge commit should have been created (HEAD still points at the
+    # original branch tip, not a merge), and the working tree is clean.
     assert (Path(wt_path) / "feature.txt").exists()
-    assert (Path(wt_path) / "main_change.txt").exists()
+    assert not (Path(wt_path) / "main_change.txt").exists()
+    _, out, _ = await git.run("git", "status", "--porcelain", cwd=wt_path)
+    assert out.strip() == ""
 
 
-async def test_merge_from_main_with_conflict(git_env):
+async def test_check_merge_conflicts_with_conflict(git_env):
     # Create a branch that edits README.md
     git_env.create_branch("conflicting")
     git_env.add_commit("README.md", "branch version", "edit readme on branch")
@@ -90,17 +92,58 @@ async def test_merge_from_main_with_conflict(git_env):
     git_env.add_commit("README.md", "main version", "edit readme on main")
     git_env.push("main")
 
-    # Create worktree from the conflicting branch
     wt_path = await git.create_worktree(git_env.repo_id, "conflicting", "cell-7")
 
-    # Merge should fail (conflict on README.md)
-    success, output = await git.merge_from_main(git_env.repo_id, wt_path)
-    assert not success
-    assert "conflicts" in output.lower()
+    conflicts = await git.check_merge_conflicts(git_env.repo_id, wt_path)
+    assert conflicts == ["README.md"]
 
-    # Verify merge was aborted (working tree is clean)
-    rc, out, err = await git.run("git", "status", "--porcelain", cwd=wt_path)
+    # Working tree is untouched — no in-progress merge.
+    _, out, _ = await git.run("git", "status", "--porcelain", cwd=wt_path)
     assert out.strip() == ""
+
+
+async def test_check_merge_conflicts_ignores_listed_paths(git_env):
+    """Paths in `ignore` are filtered out of the returned conflict list."""
+    git_env.create_branch("ignore-branch")
+    git_env.add_commit("RELEASE.md", "branch release notes", "add release on branch")
+    git_env.push("ignore-branch")
+    git_env.checkout("main")
+
+    git_env.add_commit("RELEASE.md", "main release notes", "add release on main")
+    git_env.push("main")
+
+    wt_path = await git.create_worktree(git_env.repo_id, "ignore-branch", "cell-ignore")
+
+    # Without ignore: conflict shows up.
+    assert await git.check_merge_conflicts(git_env.repo_id, wt_path) == ["RELEASE.md"]
+
+    # With ignore: filtered out.
+    assert (
+        await git.check_merge_conflicts(
+            git_env.repo_id, wt_path, ignore=frozenset({"RELEASE.md"})
+        )
+        == []
+    )
+
+
+async def test_check_merge_conflicts_ignore_with_other_conflict(git_env):
+    """An ignored path is filtered, but other conflicts are still reported."""
+    git_env.create_branch("mixed-branch")
+    git_env.add_commit("RELEASE.md", "branch release", "add release on branch")
+    git_env.add_commit("README.md", "branch readme", "edit readme on branch")
+    git_env.push("mixed-branch")
+    git_env.checkout("main")
+
+    git_env.add_commit("RELEASE.md", "main release", "add release on main")
+    git_env.add_commit("README.md", "main readme", "edit readme on main")
+    git_env.push("main")
+
+    wt_path = await git.create_worktree(git_env.repo_id, "mixed-branch", "cell-mixed")
+
+    conflicts = await git.check_merge_conflicts(
+        git_env.repo_id, wt_path, ignore=frozenset({"RELEASE.md"})
+    )
+    assert conflicts == ["README.md"]
 
 
 async def test_push(git_env):

@@ -20,14 +20,19 @@ logger = logging.getLogger(__name__)
 # Each returns (cmd, cwd) for a specific session type.
 
 
-async def tend_cmd(session_id: str, cell: Cell) -> tuple[list[str], str, str]:
+async def tend_cmd(
+    session_id: str, cell: Cell, has_conflict: bool
+) -> tuple[list[str], str, str]:
     """Interactive daemon session to fix merge conflicts / CI failures.
+
+    `has_conflict` tells the prompt whether to instruct Claude to merge
+    from main (and resolve conflicts) or to leave the branch alone.
 
     Returns (cmd, cwd, prompt). The prompt should be passed as initial_input
     to spawn_session rather than baked into the command.
     """
     mb = await git.main_branch(cell.repo)
-    prompt = claude.tend_prompt(cell.branch, cell.id, mb)
+    prompt = claude.tend_prompt(cell.branch, cell.id, mb, has_conflict)
     return (
         [
             "claude",
