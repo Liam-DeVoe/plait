@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import tomllib
@@ -7,7 +8,9 @@ import tomllib
 from server import config
 
 ORRERY_PORT = 57381
-PROMPTS_PATH = Path(__file__).parent.parent / "prompts.toml"
+ORRERY_ROOT = Path(__file__).parent.parent
+PROMPTS_PATH = ORRERY_ROOT / "prompts.toml"
+CLAUDE_FILES_SRC = ORRERY_ROOT / "claude_files"
 
 
 def _load_prompts() -> dict:
@@ -15,11 +18,14 @@ def _load_prompts() -> dict:
 
 
 def write_cell_claude_md(worktree_path: str, cell_id: str) -> None:
-    """Append orrery instructions to the worktree's CLAUDE.local.md.
+    """Install orrery's per-cell Claude config into the worktree.
 
-    This ensures any Claude session in the worktree — whether spawned by
-    orrery or launched manually — knows about orrery hooks.
+    Writes CLAUDE.local.md with hook instructions, and copies orrery's
+    bundled skills and agents into worktree/.claude/ so every Claude
+    session in the worktree (orrery-spawned or manual) sees them. This
+    keeps orrery self-contained — no dependency on ~/.claude.
     """
+    worktree = Path(worktree_path)
     base_url = f"http://localhost:{ORRERY_PORT}"
     prompts = _load_prompts()
     content = (
@@ -28,13 +34,14 @@ def write_cell_claude_md(worktree_path: str, cell_id: str) -> None:
         .format(cell_id=cell_id, base_url=base_url)
     )
 
-    claude_local = Path(worktree_path) / "CLAUDE.local.md"
-
+    claude_local = worktree / "CLAUDE.local.md"
     existing = claude_local.read_text() if claude_local.exists() else ""
     with claude_local.open("a") as f:
         if existing and not existing.endswith("\n"):
             f.write("\n")
         f.write(f"\n{content}\n")
+
+    shutil.copytree(CLAUDE_FILES_SRC, worktree / ".claude", dirs_exist_ok=True)
 
 
 def orrery_system_prompt(session_id: str) -> str:

@@ -12,12 +12,19 @@ This worktree is managed by Orrery (cell id: {cell_id}).
 
 ## When asked to push and/or create a PR:
 
-1. Choose a descriptive branch name based on your changes (e.g. `fix-timeout-handling`, `add-retry-logic`)
-2. Rename the current branch: `git branch -m <new-name>`
-3. Notify Orrery about the branch rename:
+1. **Self-review your changes first.** Spawn the `code-reviewer` subagent (via the Agent tool, `subagent_type="code-reviewer"`). Your prompt should be a short context paragraph: the goal of the change, anything you tried and rejected, anything specific the reviewer should focus on or skip.
+
+   The subagent returns a list of findings. For each finding:
+   - if you agree, fix it before pushing
+   - if you disagree, leave the code as-is and note both the finding and your reason in the PR description so the human reviewer sees both
+
+   Do this once — single pass, not a loop.
+2. Choose a descriptive branch name based on your changes (e.g. `fix-timeout-handling`, `add-retry-logic`)
+3. Rename the current branch: `git branch -m <new-name>`
+4. Notify Orrery about the branch rename:
    curl -s -X POST {base_url}/hooks/cells/{cell_id}/branch-updated -H 'Content-Type: application/json' -d '{{"branch": "<new-name>"}}'
-4. Push: `git push -u origin <new-name>`
-5. Create the PR. Write the body to a temp file first to avoid shell quoting issues,
+5. Push: `git push -u origin <new-name>`
+6. Create the PR. Write the body to a temp file first to avoid shell quoting issues,
    then use `--body-file`:
 
    ```
@@ -37,7 +44,7 @@ This worktree is managed by Orrery (cell id: {cell_id}).
 
    </details>
    ```
-6. Notify Orrery about the PR:
+7. Notify Orrery about the PR:
    curl -s -X POST {base_url}/hooks/cells/{cell_id}/pr-created -H 'Content-Type: application/json' -d '{{"pr_url": "<url>", "pr_number": <number>}}'
 
 Always notify Orrery after renaming the branch and after creating the PR.
