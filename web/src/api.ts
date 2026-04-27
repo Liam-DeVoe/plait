@@ -58,7 +58,8 @@ export interface DaemonRun {
 export interface Repo {
   id: string;
   path: string;
-  upstream: string;
+  upstream: string | null;
+  kind: "remote" | "local";
 }
 
 const BASE = "/api";

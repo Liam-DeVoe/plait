@@ -8,6 +8,7 @@ import {
 } from "react-router-dom";
 import {
   fetchCell,
+  fetchRepos,
   archiveCell,
   triggerSync,
   deleteCell,
@@ -19,6 +20,7 @@ import {
   fetchXtermState,
   type Cell,
   type Session,
+  type Repo,
 } from "../api";
 import Terminal from "../Terminal";
 import { StatusBadge, OverflowMenu } from "../components/shared";
@@ -96,6 +98,7 @@ export default function CellDetailPage() {
   const [cell, setCell] = useState<(Cell & { sessions: Session[] }) | null>(
     null,
   );
+  const [repos, setRepos] = useState<Repo[]>([]);
   const [launching, setLaunching] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     (location.state as any)?.autoFocusSessionId ?? null,
@@ -109,6 +112,10 @@ export default function CellDetailPage() {
   useEffect(() => {
     load();
   }, [load, run]);
+
+  useEffect(() => {
+    fetchRepos().then(setRepos);
+  }, []);
 
   useEffect(() => {
     if (cell) {
@@ -146,6 +153,7 @@ export default function CellDetailPage() {
 
   if (!cell) return null;
 
+  const isLocal = repos.find((r) => r.id === cell.repo)?.kind === "local";
   const userSessions = cell.sessions.filter((s) => s.role === "user");
   const daemonSessions = cell.sessions.filter((s) => s.role === "daemon");
 
@@ -182,10 +190,13 @@ export default function CellDetailPage() {
                   label={cell.archive_reason === "merged" ? "Merged" : cell.archive_reason === "closed" ? "Closed" : "Archived"}
                 />
               )}
-              <StatusBadge
-                status={cell.ci_status}
-                label={`CI: ${cell.ci_status}`}
-              />
+              {isLocal && <StatusBadge status="local" label="local" />}
+              {!isLocal && (
+                <StatusBadge
+                  status={cell.ci_status}
+                  label={`CI: ${cell.ci_status}`}
+                />
+              )}
               <StatusBadge
                 status={cell.tend_status}
                 label={`Tend: ${cell.tend_status}`}

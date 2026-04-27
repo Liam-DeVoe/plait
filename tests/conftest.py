@@ -158,6 +158,97 @@ def git_env(tmp_path, _git_env_template) -> GitEnv:
     git_module._main_branch_cache.clear()
 
 
+@pytest.fixture(scope="session")
+def _git_env_local_template(tmp_path_factory) -> Path:
+    """Template for a local-only git repo: a normal repo with no `origin`."""
+    template = tmp_path_factory.mktemp("git_local_template")
+
+    def _git(*args, cwd=None):
+        subprocess.run(["git", *args], cwd=cwd, check=True, capture_output=True)
+
+    repo = template / "localrepo"
+    _git("init", "--initial-branch=main", str(repo))
+    _git("config", "user.email", "test@test.com", cwd=repo)
+    _git("config", "user.name", "Test", cwd=repo)
+
+    (repo / "README.md").write_text("initial")
+    _git("add", "README.md", cwd=repo)
+    _git("commit", "-m", "initial", cwd=repo)
+
+    return template
+
+
+@dataclass
+class LocalGitEnv:
+    """A local-only git environment: a single repo with no remote."""
+
+    clone: Path
+    repo_id: str
+
+    def run_git(self, *args: str, cwd: Path | None = None) -> str:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd or self.clone,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout
+
+    def add_commit(
+        self, filename: str, content: str, message: str, cwd: Path | None = None
+    ) -> str:
+        target = cwd or self.clone
+        (target / filename).write_text(content)
+        self.run_git("add", filename, cwd=target)
+        self.run_git("commit", "-m", message, cwd=target)
+        return self.run_git("rev-parse", "HEAD", cwd=target).strip()
+
+    def create_branch(self, name: str) -> None:
+        self.run_git("checkout", "-b", name)
+
+    def checkout(self, branch: str) -> None:
+        self.run_git("checkout", branch)
+
+
+@pytest.fixture
+def git_env_local(tmp_path, _git_env_local_template) -> LocalGitEnv:
+    """Local-only git environment for this test.
+    Patches git.WORKTREE_ROOT and the config module to mark the repo as local."""
+    import server.config as config_module
+    import server.git as git_module
+
+    repo_id = "localrepo"
+
+    shutil.copytree(_git_env_local_template, tmp_path / "git", symlinks=True)
+    git_root = tmp_path / "git"
+    clone = git_root / "localrepo"
+
+    env = LocalGitEnv(clone=clone, repo_id=repo_id)
+
+    worktree_root = tmp_path / "worktrees"
+    worktree_root.mkdir()
+
+    original_worktree_root = git_module.WORKTREE_ROOT
+    git_module.WORKTREE_ROOT = worktree_root
+
+    original_data = config_module._data
+    config_module._data = {
+        "author": "testuser",
+        "repos": {
+            repo_id: {"path": str(clone), "kind": "local"},
+        },
+    }
+
+    git_module._main_branch_cache.clear()
+
+    yield env
+
+    git_module.WORKTREE_ROOT = original_worktree_root
+    config_module._data = original_data
+    git_module._main_branch_cache.clear()
+
+
 # --- Mock gh CLI ---
 
 

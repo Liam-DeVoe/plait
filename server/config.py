@@ -12,7 +12,8 @@ CONFIG_PATH = Path(__file__).parent.parent / "config.toml"
 class Repo:
     id: str
     path: Path
-    upstream: str  # GitHub "owner/repo" for gh CLI
+    kind: str  # "remote" or "local"
+    upstream: str | None  # GitHub "owner/repo" for gh CLI; None for local repos
 
 
 def _load() -> dict:
@@ -33,10 +34,24 @@ def get_repos() -> dict[str, Repo]:
     data = _get_data()
     repos = {}
     for repo_id, info in data.get("repos", {}).items():
+        kind = info.get("kind", "remote")
+        if kind not in ("remote", "local"):
+            raise ValueError(
+                f"Repo {repo_id!r}: kind must be 'remote' or 'local', got {kind!r}"
+            )
+        upstream = info.get("upstream")
+        if kind == "remote" and not upstream:
+            raise ValueError(f"Repo {repo_id!r}: kind='remote' requires upstream")
+        if kind == "local" and upstream:
+            raise ValueError(
+                f"Repo {repo_id!r}: kind='local' must not have upstream "
+                f"(got {upstream!r})"
+            )
         repos[repo_id] = Repo(
             id=repo_id,
             path=Path(info["path"]),
-            upstream=info["upstream"],
+            kind=kind,
+            upstream=upstream,
         )
     return repos
 
@@ -46,6 +61,18 @@ def get_repo(repo_id: str) -> Repo:
     if repo_id not in repos:
         raise KeyError(f"Unknown repo: {repo_id!r}")
     return repos[repo_id]
+
+
+def is_local(repo_id: str) -> bool:
+    return get_repo(repo_id).kind == "local"
+
+
+def require_upstream(repo_id: str) -> str:
+    """Return the upstream for a repo, raising if it's a local repo."""
+    repo = get_repo(repo_id)
+    if repo.upstream is None:
+        raise ValueError(f"Repo {repo_id!r} is local-only — no upstream available")
+    return repo.upstream
 
 
 def get_author() -> str:

@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef } from "react";
-import { useNavigate, type NavigateFunction } from "react-router-dom";
+import { type NavigateFunction } from "react-router-dom";
 
 export const BADGE_STATUSES = new Set([
   "passing", "current", "open", "pending", "running",
   "failing", "failed", "behind", "unknown", "archived", "closed", "completed",
+  "local",
 ]);
 
 export function StatusBadge({ status, label }: { status: string; label: string }) {

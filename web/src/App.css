@@ -49,6 +49,11 @@
   color: #1f2937;
 }
 
+.badge--local {
+  background: #cffafe;
+  color: #155e75;
+}
+
 /* === Overflow Menu === */
 .overflow-menu {
   position: relative;
@@ -472,6 +477,9 @@
   line-height: 20px;
   font-weight: 600;
   color: #374151;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .cells-page__add-btn {

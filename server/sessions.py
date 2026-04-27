@@ -10,7 +10,7 @@ import asyncio
 import logging
 from datetime import datetime, timezone
 
-from server import claude, db, git
+from server import claude, config, db, git
 from server.models import Cell
 from server.pty import pty_manager
 
@@ -32,7 +32,13 @@ async def tend_cmd(
     to spawn_session rather than baked into the command.
     """
     mb = await git.main_branch(cell.repo)
-    prompt = claude.tend_prompt(cell.branch, cell.id, mb, has_conflict)
+    prompt = claude.tend_prompt(
+        cell.branch,
+        cell.id,
+        mb,
+        has_conflict,
+        is_local=config.is_local(cell.repo),
+    )
     return (
         [
             "claude",

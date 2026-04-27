@@ -5,7 +5,7 @@ import logging
 import uuid
 from datetime import datetime, timezone
 
-from server import db, git
+from server import config, db, git
 from server.models import (
     Cell,
     CellStatus,
@@ -162,6 +162,21 @@ async def _mark_activity(cell: Cell) -> None:
     cell.last_activity_at = now
 
 
+async def _archive_cell(cell: Cell, reason: str) -> None:
+    """Archive a cell: remove its worktree, mark it archived in DB, notify."""
+    try:
+        await git.remove_worktree(cell.repo, cell.worktree_path)
+    except Exception:
+        logger.warning(f"Failed to remove worktree for cell {cell.id}")
+    await db.update_cell(
+        cell.id,
+        status=CellStatus.archived,
+        archived_at=datetime.now(timezone.utc).isoformat(),
+        archive_reason=reason,
+    )
+    await notify("cell_updated", {"id": cell.id, "status": "archived"})
+
+
 async def _process_cell(cell: Cell) -> dict:
     reasons: list[str] = []
     warnings: list[str] = []
@@ -169,6 +184,27 @@ async def _process_cell(cell: Cell) -> dict:
     outcome = None
 
     try:
+        # --- Local-only repos: detect merge into local main and archive ---
+        # Done first so a worktree that Claude has switched to main doesn't
+        # trip up the assert-not-detached / behind-main checks below.
+        if config.is_local(cell.repo) and await git.is_merged_into_main(
+            cell.repo, cell.branch
+        ):
+            logger.info(
+                f"Cell {cell.id} branch {cell.branch} merged into main, archiving"
+            )
+            await _archive_cell(cell, reason="merged")
+            await git.delete_branch(cell.repo, cell.branch)
+            return {
+                "cell_id": cell.id,
+                "repo": cell.repo,
+                "branch": cell.branch,
+                "decision": "archived",
+                "reasons": ["local_merged"],
+                "warnings": warnings,
+                "outcome": None,
+            }
+
         await git.assert_not_detached(cell.worktree_path)
 
         # Fetch latest from origin
@@ -235,17 +271,7 @@ async def _process_cell(cell: Cell) -> dict:
                         f"Cell {cell.id} PR #{cell.pr_number} is "
                         f"{pr_data.state}, archiving"
                     )
-                    try:
-                        await git.remove_worktree(cell.repo, cell.worktree_path)
-                    except Exception:
-                        logger.warning(f"Failed to remove worktree for cell {cell.id}")
-                    await db.update_cell(
-                        cell.id,
-                        status=CellStatus.archived,
-                        archived_at=datetime.now(timezone.utc).isoformat(),
-                        archive_reason=pr_data.state.lower(),
-                    )
-                    await notify("cell_updated", {"id": cell.id, "status": "archived"})
+                    await _archive_cell(cell, reason=pr_data.state.lower())
                     return {
                         "cell_id": cell.id,
                         "repo": cell.repo,
@@ -349,8 +375,10 @@ async def _process_cell(cell: Cell) -> dict:
         await _derive_sync_status(cell)
 
         # --- Detect PR for cells that have been pushed but have no PR yet ---
-        if not cell.pr_number and await git.has_remote_branch(
-            cell.worktree_path, cell.branch
+        if (
+            not config.is_local(cell.repo)
+            and not cell.pr_number
+            and await git.has_remote_branch(cell.worktree_path, cell.branch)
         ):
             pr_info = await git.find_pr_for_branch(cell.repo, cell.branch)
             if pr_info:

@@ -24,6 +24,8 @@ async def run(*args: str, cwd: str | Path | None = None) -> tuple[int, str, str]
 
 
 async def fetch_origin(repo_id: str) -> None:
+    if config.is_local(repo_id):
+        return
     repo = config.get_repo(repo_id)
     rc, out, err = await run("git", "fetch", "origin", cwd=repo.path)
     if rc != 0:
@@ -34,14 +36,27 @@ _main_branch_cache: dict[str, str] = {}
 
 
 async def main_branch(repo_id: str) -> str:
-    """Return the default branch of `origin` for the given repo.
+    """Return the default branch name for the given repo.
 
-    Resolved via `git symbolic-ref refs/remotes/origin/HEAD` and cached
-    for the lifetime of the process.
+    For remote repos: resolved from `refs/remotes/origin/HEAD`.
+    For local repos: tries `refs/heads/main` then `refs/heads/master`.
+    Cached for the lifetime of the process.
     """
     if repo_id in _main_branch_cache:
         return _main_branch_cache[repo_id]
     repo = config.get_repo(repo_id)
+    if repo.kind == "local":
+        for candidate in ("main", "master"):
+            rc, _, _ = await run(
+                "git", "rev-parse", "--verify", f"refs/heads/{candidate}", cwd=repo.path
+            )
+            if rc == 0:
+                _main_branch_cache[repo_id] = candidate
+                return candidate
+        raise RuntimeError(
+            f"Could not resolve default branch for local repo {repo_id}: "
+            f"neither 'main' nor 'master' exists in {repo.path}"
+        )
     rc, out, err = await run(
         "git", "symbolic-ref", "refs/remotes/origin/HEAD", cwd=repo.path
     )
@@ -56,6 +71,28 @@ async def main_branch(repo_id: str) -> str:
     return name
 
 
+async def main_ref(repo_id: str) -> str:
+    """Return the ref to compare against for "main".
+
+    For remote repos: "origin/<branch>". For local repos: "<branch>".
+    """
+    mb = await main_branch(repo_id)
+    if config.is_local(repo_id):
+        return mb
+    return f"origin/{mb}"
+
+
+async def branch_ref(repo_id: str, branch: str) -> str:
+    """Return the ref for a cell's branch.
+
+    For remote repos: "origin/<branch>" (the published tip).
+    For local repos: just "<branch>" (the local branch).
+    """
+    if config.is_local(repo_id):
+        return branch
+    return f"origin/{branch}"
+
+
 async def create_sortie_worktrees(sortie_id: str) -> dict[str, str]:
     """Create read-only worktrees for all repos at origin/main.
 
@@ -68,7 +105,7 @@ async def create_sortie_worktrees(sortie_id: str) -> dict[str, str]:
 
     async def _create_one(repo_id: str, repo: config.Repo) -> tuple[str, str]:
         await fetch_origin(repo_id)
-        mb = await main_branch(repo_id)
+        ref = await main_ref(repo_id)
         wt_dir = sortie_dir / repo_id
         rc, out, err = await run(
             "git",
@@ -76,7 +113,7 @@ async def create_sortie_worktrees(sortie_id: str) -> dict[str, str]:
             "add",
             "--detach",
             str(wt_dir),
-            f"origin/{mb}",
+            ref,
             cwd=repo.path,
         )
         if rc != 0:
@@ -119,6 +156,31 @@ async def create_worktree(repo_id: str, branch: str, cell_id: str) -> str:
         )
     worktree_dir = WORKTREE_ROOT / cell_id
     worktree_dir.parent.mkdir(parents=True, exist_ok=True)
+
+    if repo.kind == "local":
+        # Local repos: branch off local main, or check out an existing local branch.
+        rc, _, _ = await run(
+            "git", "rev-parse", "--verify", f"refs/heads/{branch}", cwd=repo_dir
+        )
+        if rc == 0:
+            rc, out, err = await run(
+                "git", "worktree", "add", str(worktree_dir), branch, cwd=repo_dir
+            )
+        else:
+            ref = await main_ref(repo_id)
+            rc, out, err = await run(
+                "git",
+                "worktree",
+                "add",
+                "-b",
+                branch,
+                str(worktree_dir),
+                ref,
+                cwd=repo_dir,
+            )
+        if rc != 0:
+            raise RuntimeError(f"Failed to create worktree: {err}")
+        return str(worktree_dir)
 
     # Check if branch exists on remote
     rc, out, err = await run(
@@ -164,7 +226,7 @@ async def create_worktree(repo_id: str, branch: str, cell_id: str) -> str:
     else:
         # Create new branch from origin/<main_branch>
         await fetch_origin(repo_id)
-        mb = await main_branch(repo_id)
+        ref = await main_ref(repo_id)
         rc, out, err = await run(
             "git",
             "worktree",
@@ -172,7 +234,7 @@ async def create_worktree(repo_id: str, branch: str, cell_id: str) -> str:
             "-b",
             branch,
             str(worktree_dir),
-            f"origin/{mb}",
+            ref,
             cwd=repo_dir,
         )
 
@@ -198,13 +260,14 @@ async def assert_not_detached(worktree_path: str) -> None:
 
 
 async def is_behind_main(repo_id: str, worktree_path: str, branch: str) -> bool:
-    """Check if the remote branch is behind the repo's main branch."""
-    mb = await main_branch(repo_id)
+    """Check if the branch is behind the repo's main branch."""
+    main = await main_ref(repo_id)
+    branch_r = await branch_ref(repo_id, branch)
     rc, out, err = await run(
         "git",
         "rev-list",
         "--count",
-        f"origin/{branch}..origin/{mb}",
+        f"{branch_r}..{main}",
         cwd=worktree_path,
     )
     if rc != 0:
@@ -217,7 +280,7 @@ async def check_merge_conflicts(
     worktree_path: str,
     ignore: frozenset[str] = frozenset(),
 ) -> list[str]:
-    """Return the list of paths that would conflict on a merge from origin/main.
+    """Return the list of paths that would conflict on a merge from main.
 
     Uses `git merge-tree --write-tree` to compute the merge against the
     object database without touching the working tree, index, or HEAD.
@@ -228,10 +291,12 @@ async def check_merge_conflicts(
     conflicts they don't want to act on (e.g. `RELEASE.md` files that get
     deleted by an upcoming release job).
     """
-    mb = await main_branch(repo_id)
-    rc, _, err = await run("git", "fetch", "origin", mb, cwd=worktree_path)
-    if rc != 0:
-        raise RuntimeError(f"fetch failed: {err}")
+    main = await main_ref(repo_id)
+    if not config.is_local(repo_id):
+        mb = await main_branch(repo_id)
+        rc, _, err = await run("git", "fetch", "origin", mb, cwd=worktree_path)
+        if rc != 0:
+            raise RuntimeError(f"fetch failed: {err}")
 
     rc, out, _ = await run(
         "git",
@@ -240,7 +305,7 @@ async def check_merge_conflicts(
         "--name-only",
         "-z",
         "HEAD",
-        f"origin/{mb}",
+        main,
         cwd=worktree_path,
     )
     if rc == 0:
@@ -311,7 +376,7 @@ def _upstream_to_repo_id(upstream: str) -> str | None:
 
 async def get_pr_state(repo_id: str, pr_number: int) -> str:
     """Get PR state: 'OPEN', 'MERGED', or 'CLOSED'."""
-    upstream = config.get_repo(repo_id).upstream
+    upstream = config.require_upstream(repo_id)
     rc, out, err = await run(
         "gh",
         "pr",
@@ -331,7 +396,7 @@ async def get_pr_state(repo_id: str, pr_number: int) -> str:
 
 async def get_ci_status(repo_id: str, pr_number: int) -> str:
     """Get CI status for a PR. Returns 'passing', 'failing', 'pending', or 'unknown'."""
-    upstream = config.get_repo(repo_id).upstream
+    upstream = config.require_upstream(repo_id)
     rc, out, err = await run(
         "gh",
         "pr",
@@ -357,7 +422,7 @@ async def get_ci_status(repo_id: str, pr_number: int) -> str:
 
 async def get_pr_comment_count(repo_id: str, pr_number: int) -> int | None:
     """Get the total number of comments on a PR (issue comments + review comments)."""
-    upstream = config.get_repo(repo_id).upstream
+    upstream = config.require_upstream(repo_id)
     rc, out, err = await run(
         "gh",
         "pr",
@@ -389,7 +454,7 @@ async def get_pr_reaction_count(repo_id: str, pr_number: int) -> int | None:
     author = config.get_author()
     if not author:
         return 0
-    upstream = config.get_repo(repo_id).upstream
+    upstream = config.require_upstream(repo_id)
     owner, name = upstream.split("/")
     query = """
     query($owner: String!, $name: String!, $pr: Int!) {
@@ -463,7 +528,7 @@ async def get_pr_reaction_count(repo_id: str, pr_number: int) -> int | None:
 
 async def get_pr_latest_comment_time(repo_id: str, pr_number: int) -> datetime | None:
     """Get the creation time of the most recent comment or review on a PR."""
-    upstream = config.get_repo(repo_id).upstream
+    upstream = config.require_upstream(repo_id)
     rc, out, err = await run(
         "gh",
         "pr",
@@ -510,7 +575,7 @@ async def get_pr_data(repo_id: str, pr_number: int) -> PRData | None:
     Returns None on any API failure so callers can skip comparisons
     rather than acting on stale data.
     """
-    upstream = config.get_repo(repo_id).upstream
+    upstream = config.require_upstream(repo_id)
     author = config.get_author()
 
     # 1. PR metadata: state + head SHA (1 REST call)
@@ -617,7 +682,7 @@ async def get_ci_status_rest(repo_id: str, head_sha: str) -> str:
 
     Returns 'passing', 'failing', 'pending', or 'unknown'.
     """
-    upstream = config.get_repo(repo_id).upstream
+    upstream = config.require_upstream(repo_id)
     rc, out, _ = await run(
         "gh", "api", f"repos/{upstream}/commits/{head_sha}/check-runs"
     )
@@ -644,7 +709,7 @@ async def get_ci_status_rest(repo_id: str, head_sha: str) -> str:
 
 async def get_ci_failure_logs(repo_id: str, branch: str) -> str:
     """Get CI failure logs for the most recent failing run on a branch."""
-    upstream = config.get_repo(repo_id).upstream
+    upstream = config.require_upstream(repo_id)
     rc, out, err = await run(
         "gh",
         "run",
@@ -696,9 +761,49 @@ async def has_remote_branch(worktree_path: str, branch: str) -> bool:
     return rc == 0
 
 
+async def is_merged_into_main(repo_id: str, branch: str) -> bool:
+    """Check if `branch` is fully merged into the repo's main branch.
+
+    True iff the branch tip is reachable from main AND the branch tip is
+    NOT in main's first-parent ancestry. The second condition is what
+    distinguishes "merged via a merge commit" from "fresh branch off main
+    that hasn't done any work" — in the merged case the branch tip is the
+    second parent of a merge commit, which is off the first-parent line.
+
+    The user prompt mandates `git merge --no-ff` so a merge commit is
+    always created (fast-forward merges would leave branch == main, with
+    the branch tip on main's first-parent line, undetectable here).
+    Squash and rebase-merges produce different commit SHAs and won't be
+    detected.
+    """
+    repo = config.get_repo(repo_id)
+    rc, branch_sha, _ = await run(
+        "git", "rev-parse", "--verify", f"refs/heads/{branch}", cwd=repo.path
+    )
+    if rc != 0:
+        return False
+    main = await main_ref(repo_id)
+    rc, _, _ = await run(
+        "git", "merge-base", "--is-ancestor", branch, main, cwd=repo.path
+    )
+    if rc != 0:
+        return False
+    rc, out, _ = await run("git", "rev-list", "--first-parent", main, cwd=repo.path)
+    if rc != 0:
+        return False
+    first_parent_shas = set(out.split())
+    return branch_sha.strip() not in first_parent_shas
+
+
+async def delete_branch(repo_id: str, branch: str) -> None:
+    """Delete a local branch. Caller must ensure no worktree has it checked out."""
+    repo = config.get_repo(repo_id)
+    await run("git", "branch", "-D", branch, cwd=repo.path)
+
+
 async def find_pr_for_branch(repo_id: str, branch: str) -> dict | None:
     """Check if a PR exists for a branch. Returns {number, url} or None."""
-    upstream = config.get_repo(repo_id).upstream
+    upstream = config.require_upstream(repo_id)
     rc, out, err = await run(
         "gh",
         "pr",
@@ -722,7 +827,7 @@ async def find_pr_for_branch(repo_id: str, branch: str) -> dict | None:
 
 async def create_pr(worktree_path: str, repo_id: str, title: str, body: str) -> dict:
     """Create a PR from the current branch. Returns dict with number and url."""
-    upstream = config.get_repo(repo_id).upstream
+    upstream = config.require_upstream(repo_id)
     rc, out, err = await run(
         "gh",
         "pr",

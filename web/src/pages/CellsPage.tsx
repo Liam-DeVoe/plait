@@ -21,19 +21,21 @@ import type { LayoutContext } from "../components/Layout";
 
 function CellRow({
   cell,
+  isLocal,
   onSync,
   onArchive,
   onDelete,
   onVSCode,
 }: {
   cell: Cell;
+  isLocal: boolean;
   onSync: () => void;
   onArchive: () => void;
   onDelete: () => void;
   onVSCode: () => void;
 }) {
   const navigate = useNavigate();
-  const needsAttention = cell.ci_status === "failing";
+  const needsAttention = !isLocal && cell.ci_status === "failing";
 
   return (
     <tr
@@ -44,7 +46,9 @@ function CellRow({
         <div className="cell-row__branch">{cell.branch}</div>
       </td>
       <td className="table__cell">
-        {cell.pr_url ? (
+        {isLocal ? (
+          <span className="cell-row__no-pr">—</span>
+        ) : cell.pr_url ? (
           <a
             href={cell.pr_url}
             target="_blank"
@@ -59,7 +63,11 @@ function CellRow({
         )}
       </td>
       <td className="table__cell">
-        <StatusBadge status={cell.ci_status} label={`CI: ${cell.ci_status}`} />
+        {isLocal ? (
+          <span className="cell-row__no-pr">—</span>
+        ) : (
+          <StatusBadge status={cell.ci_status} label={`CI: ${cell.ci_status}`} />
+        )}
       </td>
       <td className="table__cell">
         <StatusBadge
@@ -280,12 +288,14 @@ function DaemonLog({ runs }: { runs: DaemonRun[] }) {
 
 function CellTable({
   cells,
+  isLocal,
   onSync,
   onArchive,
   onDelete,
   onVSCode,
 }: {
   cells: Cell[];
+  isLocal: boolean;
   onSync: (id: string) => void;
   onArchive: (id: string) => void;
   onDelete: (id: string) => void;
@@ -300,6 +310,7 @@ function CellTable({
       <CellRow
         key={cell.id}
         cell={cell}
+        isLocal={isLocal}
         onSync={() => onSync(cell.id)}
         onArchive={() => onArchive(cell.id)}
         onDelete={() => onDelete(cell.id)}
@@ -391,6 +402,8 @@ export default function CellsPage() {
     if (!grouped.has(cell.repo)) grouped.set(cell.repo, []);
     grouped.get(cell.repo)!.push(cell);
   }
+  const repoKind = new Map<string, "remote" | "local">();
+  for (const repo of repos) repoKind.set(repo.id, repo.kind);
 
   return (
     <>
@@ -414,35 +427,42 @@ export default function CellsPage() {
         </div>
       ) : (
         <div className="cells-page__groups">
-          {[...grouped.entries()].map(([repo, repoCells]) => (
-            <div key={repo} className="card card--clipped">
-              <div className="cells-page__group-header">
-                <div className="cells-page__group-title">
-                  {repo}
+          {[...grouped.entries()].map(([repo, repoCells]) => {
+            const isLocal = repoKind.get(repo) === "local";
+            return (
+              <div key={repo} className="card card--clipped">
+                <div className="cells-page__group-header">
+                  <div className="cells-page__group-title">
+                    {repo}
+                    {isLocal && (
+                      <StatusBadge status="local" label="local" />
+                    )}
+                  </div>
+                  <div
+                    className="btn btn--sm btn--blue cells-page__add-btn"
+                    onClick={() => handleNewLocalCell(repo)}
+                    title="New cell"
+                  >
+                    +
+                  </div>
                 </div>
-                <div
-                  className="btn btn--sm btn--blue cells-page__add-btn"
-                  onClick={() => handleNewLocalCell(repo)}
-                  title="New cell"
-                >
-                  +
-                </div>
+                <CellTable
+                  cells={repoCells}
+                  isLocal={isLocal}
+                  onSync={(id) => triggerSync(id)}
+                  onArchive={async (id) => {
+                    await archiveCell(id);
+                    loadCells();
+                  }}
+                  onDelete={async (id) => {
+                    await deleteCell(id);
+                    loadCells();
+                  }}
+                  onVSCode={(id) => openInVSCode(id)}
+                />
               </div>
-              <CellTable
-                cells={repoCells}
-                onSync={(id) => triggerSync(id)}
-                onArchive={async (id) => {
-                  await archiveCell(id);
-                  loadCells();
-                }}
-                onDelete={async (id) => {
-                  await deleteCell(id);
-                  loadCells();
-                }}
-                onVSCode={(id) => openInVSCode(id)}
-              />
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 

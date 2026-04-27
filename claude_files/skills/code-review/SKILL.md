@@ -79,10 +79,16 @@ Examples:
 - The diff guards the state of an object field — `if self.x is None`, `if not self.x.connected`, `if key not in self.cache`, `try: ... except AttributeError` for a field that "might not be set yet". Look at the call sites; if every path into this method goes through a setup step that establishes the guarded state, the check is dead code pretending the lifecycle is uncertain when it isn't. For example:
   ```python
   class Server:
-      def __init__(self): self._runner: Runner | None = None
-      def start(self): self._runner = Runner(); self._handle()
+      def __init__(self):
+          self._runner: Runner | None = None
+
+      def start(self):
+          self._runner = Runner()
+          self._handle()
+
       def _handle(self):
-          if self._runner is None: return  # dead — start() always runs first
+          if self._runner is None:
+              return  # dead — start() always runs first
           self._runner.process()
   ```
   Recommend deleting the dead check.

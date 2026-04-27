@@ -583,6 +583,125 @@ async def test_pr_activity_cooldown_skips_recent(
     assert fetched.pr_comment_count == 0
 
 
+# --- Local-only repo daemon tests ---
+
+
+async def _create_local_cell(git_env_local, branch: str, cell_id: str) -> Cell:
+    wt_path = await git.create_worktree(git_env_local.repo_id, branch, cell_id)
+    cell = Cell(
+        id=cell_id,
+        repo=git_env_local.repo_id,
+        branch=branch,
+        worktree_path=wt_path,
+    )
+    await db.create_cell(cell)
+    return cell
+
+
+async def test_local_cell_current_no_action(git_env_local, init_db, mock_claude):
+    """A current local cell does nothing."""
+    cell = await _create_local_cell(git_env_local, "feature", "local-1")
+
+    await process_cell(cell)
+
+    fetched = await db.get_cell(cell.id)
+    assert fetched.sync_status == SyncStatus.current
+    mock_claude.assert_not_called()
+
+
+async def test_local_cell_behind_no_conflict_no_action(
+    git_env_local, init_db, mock_claude
+):
+    """A behind-but-mergeable local cell shouldn't trigger a tend session."""
+    cell = await _create_local_cell(git_env_local, "feature", "local-2")
+    # Add a non-conflicting commit to main from the clone.
+    git_env_local.add_commit("main.txt", "main", "advance main")
+
+    await process_cell(cell)
+
+    fetched = await db.get_cell(cell.id)
+    assert fetched.sync_status == SyncStatus.behind
+    mock_claude.assert_not_called()
+
+
+async def test_local_cell_conflict_invokes_tend(git_env_local, init_db, mock_claude):
+    """A conflict against local main triggers a tend session."""
+    cell = await _create_local_cell(git_env_local, "conflict", "local-3")
+    # Edit README.md on the branch (in the worktree)
+    await git.run(
+        "git",
+        "commit",
+        "--allow-empty",
+        "-m",
+        "noop",
+        cwd=cell.worktree_path,
+    )
+    (Path(cell.worktree_path) / "README.md").write_text("branch")
+    await git.run("git", "add", "README.md", cwd=cell.worktree_path)
+    await git.run("git", "commit", "-m", "edit branch", cwd=cell.worktree_path)
+    # Edit README.md on main (in the clone)
+    git_env_local.add_commit("README.md", "main", "edit on main")
+
+    async def fake_spawn(session_id, cmd, cwd, **kwargs):
+        await git.run(
+            "git", "merge", "main", "--strategy-option=theirs", "--no-edit", cwd=cwd
+        )
+        return 0
+
+    mock_claude.side_effect = fake_spawn
+
+    await process_cell(cell)
+
+    sessions = await db.list_sessions(cell.id)
+    assert len(sessions) == 1
+    assert sessions[0].trigger == "tend"
+    assert sessions[0].succeeded is True
+
+
+async def test_local_cell_archived_when_merged_into_main(
+    git_env_local, init_db, mock_claude
+):
+    """When the cell's branch is merged into local main, the cell is archived."""
+    cell = await _create_local_cell(git_env_local, "done", "local-4")
+    # Add a commit to the branch in the worktree.
+    (Path(cell.worktree_path) / "done.txt").write_text("done")
+    await git.run("git", "add", "done.txt", cwd=cell.worktree_path)
+    await git.run("git", "commit", "-m", "done work", cwd=cell.worktree_path)
+
+    # Merge done into main from the clone (which is on main).
+    git_env_local.run_git("merge", "--no-ff", "-m", "merge done", "done")
+
+    result = await process_cell(cell)
+
+    assert result["decision"] == "archived"
+    assert "local_merged" in result["reasons"]
+
+    fetched = await db.get_cell(cell.id)
+    assert fetched.status == CellStatus.archived
+    assert fetched.archive_reason == "merged"
+
+    # Branch should have been deleted by the daemon.
+    rc, _, _ = await git.run(
+        "git",
+        "rev-parse",
+        "--verify",
+        "refs/heads/done",
+        cwd=git_env_local.clone,
+    )
+    assert rc != 0
+    mock_claude.assert_not_called()
+
+
+async def test_local_cell_no_pr_polling(git_env_local, init_db, mock_gh, mock_claude):
+    """The daemon must not call gh for local cells."""
+    cell = await _create_local_cell(git_env_local, "clean", "local-5")
+
+    # No mock_gh responses set; if any gh command runs, the mock returns rc=1
+    # with "no mock for: ..." — but more importantly we just confirm no tend.
+    await process_cell(cell)
+    mock_claude.assert_not_called()
+
+
 async def test_pr_activity_cooldown_allows_old(git_env, init_db, mock_gh, mock_claude):
     """Daemon proceeds when latest PR comment is older than cooldown period."""
     git_env.create_branch("cooldown-ok")

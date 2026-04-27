@@ -421,6 +421,55 @@ async def test_resume_session(client, mock_pty):
     assert resp.json()["ended_at"] is None
 
 
+async def test_repos_endpoint_includes_kind(client):
+    c, _, _ = client
+    resp = await c.get("/repos")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data
+    for r in data:
+        assert "kind" in r
+
+
+async def test_hook_pr_created_rejected_for_local_repo(client):
+    """The pr-created hook must reject cells in local-only repos."""
+    c, git_env, _ = client
+    # Add a local repo, then create a cell in it.
+    import server.config as config_module
+
+    config_module._data["repos"]["local-r"] = {
+        "path": str(git_env.clone),
+        "kind": "local",
+    }
+    resp = await c.post("/hooks/create-cell", json={"repo": "local-r"})
+    assert resp.status_code == 200
+    cell_id = resp.json()["cell_id"]
+
+    resp = await c.post(
+        f"/hooks/cells/{cell_id}/pr-created",
+        json={"pr_url": "https://github.com/x/y/pull/1", "pr_number": 1},
+    )
+    assert resp.status_code == 400
+    assert "local-only" in resp.json()["detail"]
+
+
+async def test_hook_ci_failure_expected_rejected_for_local_repo(client):
+    c, git_env, _ = client
+    import server.config as config_module
+
+    config_module._data["repos"]["local-r2"] = {
+        "path": str(git_env.clone),
+        "kind": "local",
+    }
+    resp = await c.post("/hooks/create-cell", json={"repo": "local-r2"})
+    assert resp.status_code == 200
+    cell_id = resp.json()["cell_id"]
+
+    resp = await c.post(f"/hooks/cells/{cell_id}/ci-failure-expected")
+    assert resp.status_code == 400
+    assert "local-only" in resp.json()["detail"]
+
+
 async def test_resume_alive_session_fails(client, mock_pty):
     """Resuming an already-alive session should return 400."""
     create_resp = await _create_cell_via_api(client)

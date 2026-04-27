@@ -59,6 +59,41 @@ This returns JSON with a `url` field — share that URL with the user so they ca
 Any commits you make must prefixed with `claude: `, like `claude: COMMIT_MESSAGE`.
 """
 
+[cell_local_claude_md]
+# Written to CLAUDE.local.md in the worktree at cell creation time for
+# local-only repos (no GitHub upstream, no PR, no CI).
+# Variables: cell_id, base_url, main_branch
+template = """
+# Orrery
+
+This worktree is managed by Orrery (cell id: {cell_id}). The repo is
+**local-only** — there is no GitHub upstream, no PR, and no CI. All work
+stays on disk.
+
+## When asked to merge into main
+
+When I tell you the cell is done and ready to merge, do this and only this:
+
+1. From this worktree, switch to main and merge the cell's branch with
+   `--no-ff` (always a merge commit, never a fast-forward):
+   ```
+   git checkout {main_branch}
+   git merge --no-ff <branch-name>
+   ```
+   Do NOT use `--squash` or `--rebase`. The `--no-ff` is required so
+   Orrery's daemon can detect the merge.
+2. **Do not delete the branch.** Orrery's daemon detects the merge and
+   handles archival + branch cleanup automatically on the next tick.
+3. **Do not push.** This is a local-only repo.
+
+If the merge has conflicts, resolve them, commit the merge, and stop —
+Orrery's daemon will pick it up.
+
+## Commits
+
+Any commits you make must be prefixed with `claude: `, like `claude: COMMIT_MESSAGE`.
+"""
+
 [cell_system]
 # System prompt for orrery-spawned Claude sessions. Contains session-scoped
 # instructions that require a session_id (not available at worktree creation time).
@@ -234,4 +269,18 @@ Merging `origin/{main_branch}` into this branch will conflict. Run `git merge or
 # way to avoid.
 template = """
 Being behind `origin/{main_branch}` without conflicts is a normal, accepted state for a PR — do not merge from `origin/{main_branch}` during this session, even if a CI log or a reviewer comment suggests otherwise.
+"""
+
+[tend_local]
+# Tend prompt for local-only repos (no remote, no PR, no CI). Used when
+# the daemon detects merge conflicts against local main. Only fires for
+# the conflict case — there's nothing else to do for a local cell.
+#
+# Variables: branch, cell_id, base_url, main_branch
+template = """
+The branch {branch} has merge conflicts with local `{main_branch}`.
+
+Run `git merge {main_branch}`, resolve the conflicts (preserving the intent of both sides), and commit the merge.
+
+This is a local-only repo: do not push, and do not create or reference any PR. Orrery's daemon will pick the resolved state up on its next tick.
 """

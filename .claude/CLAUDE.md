@@ -17,9 +17,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Build & Run
 
 ```bash
-just server      # uvicorn with --reload (watches server/ and prompts.toml)
+just server      # uvicorn (accepts extra args, e.g. just server --reload)
 just web         # Vite dev server (cd web && npm run dev)
 just serve       # both server + web in parallel
+just dev         # both with --reload (watches server/ and prompts.toml)
 just test        # uv run pytest tests/ -n auto (parallel; accepts extra args: just test -k test_name)
 just format      # uv run shed (Python formatting)
 just install     # uv sync && cd web && npm install

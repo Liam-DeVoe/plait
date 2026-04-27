@@ -146,6 +146,97 @@ async def test_check_merge_conflicts_ignore_with_other_conflict(git_env):
     assert conflicts == ["README.md"]
 
 
+# --- Local-only repo tests ---
+
+
+async def test_main_branch_local(git_env_local):
+    """For a local-only repo, main_branch resolves to the local default branch."""
+    mb = await git.main_branch(git_env_local.repo_id)
+    assert mb == "main"
+
+
+async def test_main_ref_local(git_env_local):
+    """main_ref returns just the bare branch name for local repos."""
+    ref = await git.main_ref(git_env_local.repo_id)
+    assert ref == "main"
+
+
+async def test_create_worktree_local_new_branch(git_env_local):
+    """Creating a worktree for a new branch in a local repo should branch off local main."""
+    wt_path = await git.create_worktree(git_env_local.repo_id, "new-feature", "cell-l1")
+    assert Path(wt_path).exists()
+    assert (Path(wt_path) / "README.md").read_text() == "initial"
+
+
+async def test_create_worktree_local_existing_branch(git_env_local):
+    """Creating a worktree for an existing local branch reuses it."""
+    # Create the branch in a separate worktree and add a commit there, so
+    # the clone stays on main.
+    wt0 = await git.create_worktree(git_env_local.repo_id, "existing", "cell-pre")
+    (Path(wt0) / "file.txt").write_text("content")
+    await git.run("git", "add", "file.txt", cwd=wt0)
+    await git.run("git", "commit", "-m", "add file", cwd=wt0)
+    await git.remove_worktree(git_env_local.repo_id, wt0)
+
+    wt_path = await git.create_worktree(git_env_local.repo_id, "existing", "cell-l2")
+    assert Path(wt_path).exists()
+    assert (Path(wt_path) / "file.txt").read_text() == "content"
+
+
+async def test_is_behind_main_local(git_env_local):
+    """is_behind_main works against local main for local repos."""
+    wt_path = await git.create_worktree(git_env_local.repo_id, "behind", "cell-l3")
+    git_env_local.add_commit("new.txt", "main work", "advance main")
+
+    assert await git.is_behind_main(git_env_local.repo_id, wt_path, "behind")
+
+
+async def test_is_behind_main_local_when_current(git_env_local):
+    """is_behind_main returns False when the branch is current with local main."""
+    wt_path = await git.create_worktree(git_env_local.repo_id, "up-to-date", "cell-l4")
+    assert not await git.is_behind_main(git_env_local.repo_id, wt_path, "up-to-date")
+
+
+async def test_check_merge_conflicts_local(git_env_local):
+    """Conflicts with local main are detected without a fetch."""
+    wt_path = await git.create_worktree(git_env_local.repo_id, "conflict", "cell-l5")
+    (Path(wt_path) / "README.md").write_text("branch")
+    await git.run("git", "add", "README.md", cwd=wt_path)
+    await git.run("git", "commit", "-m", "edit branch", cwd=wt_path)
+    git_env_local.add_commit("README.md", "main", "edit on main")
+
+    conflicts = await git.check_merge_conflicts(git_env_local.repo_id, wt_path)
+    assert conflicts == ["README.md"]
+
+
+async def test_is_merged_into_main_local(git_env_local):
+    """is_merged_into_main detects a true merge into local main."""
+    wt_path = await git.create_worktree(git_env_local.repo_id, "done", "cell-l6")
+    (Path(wt_path) / "done.txt").write_text("feature")
+    await git.run("git", "add", "done.txt", cwd=wt_path)
+    await git.run("git", "commit", "-m", "feature work", cwd=wt_path)
+    # Merge from the clone (which is still on main).
+    git_env_local.run_git("merge", "--no-ff", "-m", "merge done", "done")
+
+    assert await git.is_merged_into_main(git_env_local.repo_id, "done")
+
+
+async def test_is_merged_into_main_local_not_merged(git_env_local):
+    """is_merged_into_main returns False when the branch isn't merged."""
+    wt_path = await git.create_worktree(git_env_local.repo_id, "not-done", "cell-l7")
+    (Path(wt_path) / "wip.txt").write_text("wip")
+    await git.run("git", "add", "wip.txt", cwd=wt_path)
+    await git.run("git", "commit", "-m", "wip", cwd=wt_path)
+
+    assert not await git.is_merged_into_main(git_env_local.repo_id, "not-done")
+
+
+async def test_fetch_origin_local_is_noop(git_env_local):
+    """fetch_origin must not network for local repos."""
+    # Should not raise — there is no origin remote in a local repo.
+    await git.fetch_origin(git_env_local.repo_id)
+
+
 async def test_push(git_env):
     # Create a branch and worktree
     git_env.create_branch("push-test")

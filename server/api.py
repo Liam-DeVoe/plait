@@ -103,7 +103,12 @@ async def websocket_endpoint(ws: WebSocket):
 async def list_repos():
     repos = config.get_repos()
     return [
-        {"id": r.id, "path": str(r.path), "upstream": r.upstream}
+        {
+            "id": r.id,
+            "path": str(r.path),
+            "upstream": r.upstream,
+            "kind": r.kind,
+        }
         for r in repos.values()
     ]
 
@@ -133,7 +138,9 @@ class CreateCellRequest(BaseModel):
 @app.post("/cells")
 async def create_cell(req: CreateCellRequest):
     if req.pr_url:
-        # Import from existing PR
+        # Import from existing PR. Local-only repos are unreachable here
+        # because get_pr_info_from_url maps URLs to repo_id via upstream,
+        # and local repos have no upstream.
         try:
             pr_info = await git.get_pr_info_from_url(req.pr_url)
         except RuntimeError as e:
@@ -166,7 +173,7 @@ async def create_cell(req: CreateCellRequest):
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    claude.write_cell_claude_md(cell.worktree_path, cell.id)
+    await claude.write_cell_claude_md(cell.worktree_path, cell.id, cell.repo)
 
     if cell.pr_number:
         ci = await git.get_ci_status(cell.repo, cell.pr_number)
@@ -374,6 +381,11 @@ async def hook_pr_created(cell_id: str, req: PRCreatedHook):
     cell = await db.get_cell(cell_id)
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
+    if config.is_local(cell.repo):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cell {cell_id} is in a local-only repo — no PR exists",
+        )
     await db.update_cell(cell_id, pr_number=req.pr_number, pr_url=req.pr_url)
     await daemon.notify(
         "cell_updated",
@@ -390,6 +402,11 @@ async def hook_ci_failure_expected(cell_id: str):
     cell = await db.get_cell(cell_id)
     if not cell:
         raise HTTPException(status_code=404, detail="Cell not found")
+    if config.is_local(cell.repo):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cell {cell_id} is in a local-only repo — no CI exists",
+        )
     rc, sha, _ = await git.run("git", "rev-parse", "HEAD", cwd=cell.worktree_path)
     if rc != 0:
         raise HTTPException(status_code=500, detail="Could not read HEAD")
@@ -771,7 +788,7 @@ async def hook_create_cell(req: CreateCellHook):
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    claude.write_cell_claude_md(cell.worktree_path, cell.id)
+    await claude.write_cell_claude_md(cell.worktree_path, cell.id, cell.repo)
 
     await db.create_cell(cell)
     await daemon.notify("cell_updated", {"id": cell.id, "status": "open"})
@@ -828,7 +845,7 @@ async def hook_create_sortie_cell(sortie_id: str, req: CreateSortieCellHook):
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    claude.write_cell_claude_md(cell.worktree_path, cell.id)
+    await claude.write_cell_claude_md(cell.worktree_path, cell.id, cell.repo)
 
     await db.create_cell(cell)
     await daemon.notify("sortie_updated", {"id": sortie_id})
