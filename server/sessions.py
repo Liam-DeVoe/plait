@@ -88,14 +88,21 @@ def user_slate_cmd(
     ], exploration_dir
 
 
-def resume_cmd(session_id: str, cwd: str) -> tuple[list[str], str]:
-    """Resume a previously ended session."""
+def resume_cmd(session_id: str, cwd: str, system_prompt: str) -> tuple[list[str], str]:
+    """Resume a previously ended session.
+
+    `claude --resume` does not preserve the original `--system-prompt`, so
+    callers must re-pass it to keep the session's role-specific prompt
+    (worktop hooks, slate orchestration, etc.) in effect after resume.
+    """
     return [
         "claude",
         "--verbose",
         "--dangerously-skip-permissions",
         "--resume",
         session_id,
+        "--system-prompt",
+        system_prompt,
     ], cwd
 
 

@@ -503,7 +503,11 @@ async def resume_session(worktop_id: str, session_id: str):
     # Reset ended_at so daemon sees it as active
     await db.update_session(session_id, ended_at=None)
 
-    cmd, cwd = resume_cmd(session.id, worktop.worktree_path)
+    cmd, cwd = resume_cmd(
+        session.id,
+        worktop.worktree_path,
+        claude.plait_system_prompt(session.id),
+    )
     idle_timeout = (
         daemon.SESSION_IDLE_TIMEOUT if session.role == SessionRole.daemon else None
     )
@@ -694,7 +698,13 @@ async def resume_slate_session(slate_id: str, session_id: str):
 
     exploration_dir = str(git.WORKTREE_ROOT / f"slate-{slate_id}")
     await db.update_session(session_id, ended_at=None)
-    cmd, cwd = resume_cmd(session.id, exploration_dir)
+    cmd, cwd = resume_cmd(
+        session.id,
+        exploration_dir,
+        claude.slate_system_prompt(
+            slate_id, exploration_dir, _slate_repo_worktrees(slate_id)
+        ),
+    )
     idle_timeout = (
         daemon.SESSION_IDLE_TIMEOUT if session.role == SessionRole.daemon else None
     )
