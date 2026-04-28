@@ -12,18 +12,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Sortie** -- a cross-repo initiative (e.g. "make this change across all repos"). Spawns one cell per repo.
 - **Cell** -- a per-repo unit of work. Contains a git worktree, branch, PR link, CI status, and sessions. Lifecycle: open -> archived (on merge) -> optionally re-opened.
 - **Session** -- a Claude conversation scoped to a cell's worktree. Created by the daemon (tend, sortie triggers) or by the user via the API.
-- **Daemon** -- the background async task that polls every 5 minutes, processing all active cells: rebasing behind-main branches, checking CI status, and spawning Claude to fix failures.
+- **Daemon** -- the background async task that polls active cells (default `POLL_INTERVAL = 300s` in `server/daemon.py`, with adaptive backoff based on recent activity): rebasing behind-main branches, checking CI status, and spawning Claude to fix failures.
 
 ## Build & Run
 
 ```bash
-just server      # uvicorn (accepts extra args, e.g. just server --reload)
+just server      # uvicorn on port 57381 (accepts extra args, e.g. just server --reload)
 just web         # Vite dev server (cd web && npm run dev)
 just serve       # both server + web in parallel
 just dev         # both with --reload (watches server/ and prompts.toml)
 just test        # uv run pytest tests/ -n auto (parallel; accepts extra args: just test -k test_name)
 just format      # uv run shed (Python formatting)
-just install     # uv sync && cd web && npm install
+just install     # uv sync, then npm install in web/
 ```
 
 ## Code Style
@@ -65,12 +65,12 @@ Tend sessions are gated by `_in_flight` (prevents duplicate daemon sessions for 
 
 Command factories (`tend_cmd`, `user_cell_cmd`, `user_sortie_cmd`, `resume_cmd`) define how each session type is invoked. `spawn_session()` handles the PTY mechanics common to all types.
 
-Three modes:
-- **Tend** (daemon): interactive Claude with restricted `--allowedTools` (defined in `daemon_config.py`), prompt sent as initial PTY input
-- **User cell**: interactive Claude with `--dangerously-skip-permissions`
-- **Sortie**: interactive Claude orchestrating cross-repo work
+Three modes (all invoke `claude --dangerously-skip-permissions`; differences are in cwd, system prompt, and how the initial prompt is delivered):
+- **Tend** (daemon): runs in the cell worktree; the tend prompt (from `prompts.toml`) is fed as initial PTY input. 5-minute idle timeout via `spawn_session(idle_timeout=...)`.
+- **User cell**: runs in the cell worktree, no initial input.
+- **Sortie**: runs in the sortie's exploration directory with a sortie-specific system prompt that exposes per-repo worktree paths.
 
-`_watch_pty()` runs alongside every session: flushes transcript to DB every 2 seconds (crash recovery), captures raw xterm state on exit for terminal replay. Daemon sessions have a 5-minute idle timeout.
+`_watch_pty()` runs alongside every session: flushes transcript to DB every 2 seconds (crash recovery), captures raw xterm state on exit for terminal replay.
 
 ### Hook Endpoints
 
@@ -79,7 +79,9 @@ Claude sessions call back to Orrery via HTTP hooks to report state changes:
 - `POST /hooks/cells/{id}/pr-created` — after creating a PR
 - `POST /hooks/cells/{id}/ci-failure-expected` — suppresses CI-failure as a tend trigger until the branch HEAD changes
 - `POST /hooks/sessions/{id}/done` — signals task completion, terminates the PTY
+- `POST /hooks/create-cell` — create a standalone cell from outside a sortie
 - `POST /hooks/sorties/{id}/create-cell` — sortie orchestrator creates a cell per repo
+- `POST /hooks/sorties/{id}/set-name` — sortie orchestrator names the sortie
 
 The prompts in `prompts.toml` instruct Claude on when/how to call these hooks.
 
