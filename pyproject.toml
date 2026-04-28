@@ -1,5 +1,5 @@
 [project]
-name = "orrery"
+name = "plait"
 version = "0.1.0"
 description = "Local development tool for managing PRs across multiple repositories"
 requires-python = ">=3.12"

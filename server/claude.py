@@ -7,43 +7,45 @@ import tomllib
 
 from server import config
 
-ORRERY_PORT = 57381
-ORRERY_ROOT = Path(__file__).parent.parent
-PROMPTS_PATH = ORRERY_ROOT / "prompts.toml"
-CLAUDE_FILES_SRC = ORRERY_ROOT / "claude_files"
+PLAIT_PORT = 57381
+PLAIT_ROOT = Path(__file__).parent.parent
+PROMPTS_PATH = PLAIT_ROOT / "prompts.toml"
+CLAUDE_FILES_SRC = PLAIT_ROOT / "claude_files"
 
 
 def _load_prompts() -> dict:
     return tomllib.loads(PROMPTS_PATH.read_text())
 
 
-async def write_cell_claude_md(worktree_path: str, cell_id: str, repo_id: str) -> None:
-    """Install orrery's per-cell Claude config into the worktree.
+async def write_worktop_claude_md(
+    worktree_path: str, worktop_id: str, repo_id: str
+) -> None:
+    """Install plait's per-worktop Claude config into the worktree.
 
-    Writes CLAUDE.local.md with hook instructions, and copies orrery's
+    Writes CLAUDE.local.md with hook instructions, and copies plait's
     bundled skills and agents into worktree/.claude/ so every Claude
-    session in the worktree (orrery-spawned or manual) sees them. This
-    keeps orrery self-contained — no dependency on ~/.claude.
+    session in the worktree (plait-spawned or manual) sees them. This
+    keeps plait self-contained — no dependency on ~/.claude.
 
     Selects a local-flavored template for local-only repos.
     """
     from server import git
 
     worktree = Path(worktree_path)
-    base_url = f"http://localhost:{ORRERY_PORT}"
+    base_url = f"http://localhost:{PLAIT_PORT}"
     prompts = _load_prompts()
     if config.is_local(repo_id):
         main_branch = await git.main_branch(repo_id)
         content = (
-            prompts["cell_local_claude_md"]["template"]
+            prompts["worktop_local_claude_md"]["template"]
             .strip()
-            .format(cell_id=cell_id, base_url=base_url, main_branch=main_branch)
+            .format(worktop_id=worktop_id, base_url=base_url, main_branch=main_branch)
         )
     else:
         content = (
-            prompts["cell_claude_md"]["template"]
+            prompts["worktop_claude_md"]["template"]
             .strip()
-            .format(cell_id=cell_id, base_url=base_url)
+            .format(worktop_id=worktop_id, base_url=base_url)
         )
 
     claude_local = worktree / "CLAUDE.local.md"
@@ -56,31 +58,31 @@ async def write_cell_claude_md(worktree_path: str, cell_id: str, repo_id: str) -
     shutil.copytree(CLAUDE_FILES_SRC, worktree / ".claude", dirs_exist_ok=True)
 
 
-def orrery_system_prompt(session_id: str) -> str:
+def plait_system_prompt(session_id: str) -> str:
     """Generate the session-scoped system prompt (done hook)."""
-    base_url = f"http://localhost:{ORRERY_PORT}"
+    base_url = f"http://localhost:{PLAIT_PORT}"
     prompts = _load_prompts()
     return (
-        prompts["cell_system"]["template"]
+        prompts["worktop_system"]["template"]
         .strip()
         .format(session_id=session_id, base_url=base_url)
     )
 
 
-def sortie_system_prompt(
-    sortie_id: str,
+def slate_system_prompt(
+    slate_id: str,
     exploration_dir: str,
     repo_paths: dict[str, str],
 ) -> str:
-    """Generate the system prompt for a sortie orchestrator session."""
-    base_url = f"http://localhost:{ORRERY_PORT}"
+    """Generate the system prompt for a slate orchestrator session."""
+    base_url = f"http://localhost:{PLAIT_PORT}"
     repo_list = "\n".join(f"  - {rid}: {path}" for rid, path in repo_paths.items())
     prompts = _load_prompts()
     return (
-        prompts["sortie_system"]["template"]
+        prompts["slate_system"]["template"]
         .strip()
         .format(
-            sortie_id=sortie_id,
+            slate_id=slate_id,
             base_url=base_url,
             exploration_dir=exploration_dir,
             repo_list=repo_list,
@@ -90,7 +92,7 @@ def sortie_system_prompt(
 
 def tend_prompt(
     branch: str,
-    cell_id: str,
+    worktop_id: str,
     main_branch: str,
     has_conflict: bool,
     is_local: bool = False,
@@ -107,14 +109,14 @@ def tend_prompt(
     simpler.
     """
     prompts = _load_prompts()
-    base_url = f"http://localhost:{ORRERY_PORT}"
+    base_url = f"http://localhost:{PLAIT_PORT}"
     if is_local:
         return (
             prompts["tend_local"]["template"]
             .strip()
             .format(
                 branch=branch,
-                cell_id=cell_id,
+                worktop_id=worktop_id,
                 base_url=base_url,
                 main_branch=main_branch,
             )
@@ -130,7 +132,7 @@ def tend_prompt(
         .format(
             branch=branch,
             author=author,
-            cell_id=cell_id,
+            worktop_id=worktop_id,
             base_url=base_url,
             main_branch=main_branch,
             merge_section=merge_section,

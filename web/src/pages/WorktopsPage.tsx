@@ -1,33 +1,33 @@
 import { useEffect, useState, useCallback } from "react";
 import { useNavigate, NavLink, useOutletContext } from "react-router-dom";
 import {
-  fetchCells,
+  fetchWorktops,
   fetchDaemonRuns,
   fetchRepos,
   triggerDaemonRun,
-  createCell,
-  createLocalCell,
-  archiveCell,
+  createWorktop,
+  createLocalWorktop,
+  archiveWorktop,
   triggerSync,
-  deleteCell,
+  deleteWorktop,
   openInVSCode,
   createInteractiveSession,
-  type Cell,
+  type Worktop,
   type DaemonRun,
   type Repo,
 } from "../api";
 import { StatusBadge, OverflowMenu, timeAgo, navigateTo } from "../components/shared";
 import type { LayoutContext } from "../components/Layout";
 
-function CellRow({
-  cell,
+function WorktopRow({
+  worktop,
   isLocal,
   onSync,
   onArchive,
   onDelete,
   onVSCode,
 }: {
-  cell: Cell;
+  worktop: Worktop;
   isLocal: boolean;
   onSync: () => void;
   onArchive: () => void;
@@ -35,48 +35,48 @@ function CellRow({
   onVSCode: () => void;
 }) {
   const navigate = useNavigate();
-  const needsAttention = !isLocal && cell.ci_status === "failing";
+  const needsAttention = !isLocal && worktop.ci_status === "failing";
 
   return (
     <tr
-      className={`cell-row${needsAttention ? " cell-row--attention" : ""}`}
-      onClick={(e) => navigateTo(e, `/cells/${cell.id}`, navigate)}
+      className={`worktop-row${needsAttention ? " worktop-row--attention" : ""}`}
+      onClick={(e) => navigateTo(e, `/worktops/${worktop.id}`, navigate)}
     >
-      <td className="table__cell">
-        <div className="cell-row__branch">{cell.branch}</div>
+      <td className="table__worktop">
+        <div className="worktop-row__branch">{worktop.branch}</div>
       </td>
-      <td className="table__cell">
+      <td className="table__worktop">
         {isLocal ? (
-          <span className="cell-row__no-pr">—</span>
-        ) : cell.pr_url ? (
+          <span className="worktop-row__no-pr">—</span>
+        ) : worktop.pr_url ? (
           <a
-            href={cell.pr_url}
+            href={worktop.pr_url}
             target="_blank"
             rel="noopener noreferrer"
             className="link"
             onClick={(e) => e.stopPropagation()}
           >
-            #{cell.pr_number}
+            #{worktop.pr_number}
           </a>
         ) : (
-          <span className="cell-row__no-pr">no PR</span>
+          <span className="worktop-row__no-pr">no PR</span>
         )}
       </td>
-      <td className="table__cell">
+      <td className="table__worktop">
         {isLocal ? (
-          <span className="cell-row__no-pr">—</span>
+          <span className="worktop-row__no-pr">—</span>
         ) : (
-          <StatusBadge status={cell.ci_status} label={`CI: ${cell.ci_status}`} />
+          <StatusBadge status={worktop.ci_status} label={`CI: ${worktop.ci_status}`} />
         )}
       </td>
-      <td className="table__cell">
+      <td className="table__worktop">
         <StatusBadge
-          status={cell.tend_status}
-          label={`Tend: ${cell.tend_status}`}
+          status={worktop.tend_status}
+          label={`Tend: ${worktop.tend_status}`}
         />
       </td>
-      <td className="table__cell">
-        <div className="cell-row__actions" onClick={(e) => e.stopPropagation()}>
+      <td className="table__worktop">
+        <div className="worktop-row__actions" onClick={(e) => e.stopPropagation()}>
           <div
             className="btn btn--sm btn--gray"
             onClick={onVSCode}
@@ -99,7 +99,7 @@ function CellRow({
   );
 }
 
-function CreateCellForm({
+function CreateWorktopForm({
   open,
   onClose,
   onCreated,
@@ -117,7 +117,7 @@ function CreateCellForm({
     setLoading(true);
     setError(null);
     try {
-      await createCell(prUrl);
+      await createWorktop(prUrl);
       setPrUrl("");
       onClose();
       onCreated();
@@ -240,10 +240,10 @@ function DaemonLog({ runs }: { runs: DaemonRun[] }) {
             {expanded.has(run.id) && (
               <div className="daemon-log__run-details">
                 {run.results.map((r) => (
-                  <div key={r.cell_id} className="daemon-log__cell-result">
+                  <div key={r.worktop_id} className="daemon-log__worktop-result">
                     <NavLink
-                      to={`/cells/${r.cell_id}`}
-                      className="daemon-log__cell-name"
+                      to={`/worktops/${r.worktop_id}`}
+                      className="daemon-log__worktop-name"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {r.repo}:{r.branch}
@@ -286,15 +286,15 @@ function DaemonLog({ runs }: { runs: DaemonRun[] }) {
   );
 }
 
-function CellTable({
-  cells,
+function WorktopTable({
+  worktops,
   isLocal,
   onSync,
   onArchive,
   onDelete,
   onVSCode,
 }: {
-  cells: Cell[];
+  worktops: Worktop[];
   isLocal: boolean;
   onSync: (id: string) => void;
   onArchive: (id: string) => void;
@@ -302,80 +302,80 @@ function CellTable({
   onVSCode: (id: string) => void;
 }) {
   const [showArchived, setShowArchived] = useState(false);
-  const activeCells = cells.filter((c) => c.status !== "archived");
-  const archivedCells = cells.filter((c) => c.status === "archived");
+  const activeWorktops = worktops.filter((c) => c.status !== "archived");
+  const archivedWorktops = worktops.filter((c) => c.status === "archived");
 
-  const renderRows = (rows: Cell[]) =>
-    rows.map((cell) => (
-      <CellRow
-        key={cell.id}
-        cell={cell}
+  const renderRows = (rows: Worktop[]) =>
+    rows.map((worktop) => (
+      <WorktopRow
+        key={worktop.id}
+        worktop={worktop}
         isLocal={isLocal}
-        onSync={() => onSync(cell.id)}
-        onArchive={() => onArchive(cell.id)}
-        onDelete={() => onDelete(cell.id)}
-        onVSCode={() => onVSCode(cell.id)}
+        onSync={() => onSync(worktop.id)}
+        onArchive={() => onArchive(worktop.id)}
+        onDelete={() => onDelete(worktop.id)}
+        onVSCode={() => onVSCode(worktop.id)}
       />
     ));
 
-  if (activeCells.length === 0 && archivedCells.length === 0) {
+  if (activeWorktops.length === 0 && archivedWorktops.length === 0) {
     return (
       <div className="muted" style={{ padding: "12px 16px" }}>
-        No cells
+        No worktops
       </div>
     );
   }
 
   return (
     <>
-      {activeCells.length > 0 ? (
+      {activeWorktops.length > 0 ? (
         <table className="table">
           <thead className="table__head">
             <tr>
-              <th className="table__header-cell">Branch</th>
-              <th className="table__header-cell">PR</th>
-              <th className="table__header-cell">CI</th>
-              <th className="table__header-cell">Tend</th>
-              <th className="table__header-cell">Actions</th>
+              <th className="table__header-worktop">Branch</th>
+              <th className="table__header-worktop">PR</th>
+              <th className="table__header-worktop">CI</th>
+              <th className="table__header-worktop">Tend</th>
+              <th className="table__header-worktop">Actions</th>
             </tr>
           </thead>
-          <tbody>{renderRows(activeCells)}</tbody>
+          <tbody>{renderRows(activeWorktops)}</tbody>
         </table>
       ) : (
         <div className="muted" style={{ padding: "12px 16px" }}>
-          No open cells
+          No open worktops
         </div>
       )}
-      {archivedCells.length > 0 && (
+      {archivedWorktops.length > 0 && (
         <div
-          className="cells-page__archived-toggle"
+          className="worktops-page__archived-toggle"
           onClick={() => setShowArchived(!showArchived)}
         >
-          <span className="cells-page__archived-arrow">
+          <span className="worktops-page__archived-arrow">
             {showArchived ? "▾" : "▸"}
           </span>
-          Archived ({archivedCells.length})
+          Archived ({archivedWorktops.length})
         </div>
       )}
-      {showArchived && archivedCells.length > 0 && (
-        <table className="table cells-page__archived-table">
-          <tbody>{renderRows(archivedCells)}</tbody>
+      {showArchived && archivedWorktops.length > 0 && (
+        <table className="table worktops-page__archived-table">
+          <tbody>{renderRows(archivedWorktops)}</tbody>
         </table>
       )}
     </>
   );
 }
 
-export default function CellsPage() {
+export default function WorktopsPage() {
   const { run } = useOutletContext<LayoutContext>();
   const navigate = useNavigate();
-  const [cells, setCells] = useState<Cell[]>([]);
+  const [worktops, setWorktops] = useState<Worktop[]>([]);
   const [repos, setRepos] = useState<Repo[]>([]);
   const [runs, setRuns] = useState<DaemonRun[]>([]);
   const [importOpen, setImportOpen] = useState(false);
 
-  const loadCells = useCallback(async () => {
-    setCells(await fetchCells());
+  const loadWorktops = useCallback(async () => {
+    setWorktops(await fetchWorktops());
   }, []);
 
   useEffect(() => {
@@ -383,24 +383,24 @@ export default function CellsPage() {
   }, []);
 
   useEffect(() => {
-    loadCells();
+    loadWorktops();
     fetchDaemonRuns(10).then(setRuns);
-  }, [loadCells, run]);
+  }, [loadWorktops, run]);
 
-  const handleNewLocalCell = async (repo: string) => {
-    const cell = await createLocalCell(repo);
-    const session = await createInteractiveSession(cell.id);
-    navigate(`/cells/${cell.id}`, { state: { autoFocusSessionId: session.id } });
+  const handleNewLocalWorktop = async (repo: string) => {
+    const worktop = await createLocalWorktop(repo);
+    const session = await createInteractiveSession(worktop.id);
+    navigate(`/worktops/${worktop.id}`, { state: { autoFocusSessionId: session.id } });
   };
 
-  // Group cells by repo, include repos with no cells
-  const grouped = new Map<string, Cell[]>();
+  // Group worktops by repo, include repos with no worktops
+  const grouped = new Map<string, Worktop[]>();
   for (const repo of repos) {
     grouped.set(repo.id, []);
   }
-  for (const cell of cells) {
-    if (!grouped.has(cell.repo)) grouped.set(cell.repo, []);
-    grouped.get(cell.repo)!.push(cell);
+  for (const worktop of worktops) {
+    if (!grouped.has(worktop.repo)) grouped.set(worktop.repo, []);
+    grouped.get(worktop.repo)!.push(worktop);
   }
   const repoKind = new Map<string, "remote" | "local">();
   for (const repo of repos) repoKind.set(repo.id, repo.kind);
@@ -408,17 +408,17 @@ export default function CellsPage() {
   return (
     <>
       <div className="page-header">
-        <div className="page-title">Cells</div>
+        <div className="page-title">Worktops</div>
         {!importOpen && (
           <div className="btn btn--gray" onClick={() => setImportOpen(true)}>
-            Import Cell
+            Import Worktop
           </div>
         )}
       </div>
-      <CreateCellForm
+      <CreateWorktopForm
         open={importOpen}
         onClose={() => setImportOpen(false)}
-        onCreated={loadCells}
+        onCreated={loadWorktops}
       />
 
       {repos.length === 0 ? (
@@ -426,37 +426,37 @@ export default function CellsPage() {
           <div>No repos configured. Add repos to config.toml to get started.</div>
         </div>
       ) : (
-        <div className="cells-page__groups">
-          {[...grouped.entries()].map(([repo, repoCells]) => {
+        <div className="worktops-page__groups">
+          {[...grouped.entries()].map(([repo, repoWorktops]) => {
             const isLocal = repoKind.get(repo) === "local";
             return (
               <div key={repo} className="card card--clipped">
-                <div className="cells-page__group-header">
-                  <div className="cells-page__group-title">
+                <div className="worktops-page__group-header">
+                  <div className="worktops-page__group-title">
                     {repo}
                     {isLocal && (
                       <StatusBadge status="local" label="local" />
                     )}
                   </div>
                   <div
-                    className="btn btn--sm btn--blue cells-page__add-btn"
-                    onClick={() => handleNewLocalCell(repo)}
-                    title="New cell"
+                    className="btn btn--sm btn--blue worktops-page__add-btn"
+                    onClick={() => handleNewLocalWorktop(repo)}
+                    title="New worktop"
                   >
                     +
                   </div>
                 </div>
-                <CellTable
-                  cells={repoCells}
+                <WorktopTable
+                  worktops={repoWorktops}
                   isLocal={isLocal}
                   onSync={(id) => triggerSync(id)}
                   onArchive={async (id) => {
-                    await archiveCell(id);
-                    loadCells();
+                    await archiveWorktop(id);
+                    loadWorktops();
                   }}
                   onDelete={async (id) => {
-                    await deleteCell(id);
-                    loadCells();
+                    await deleteWorktop(id);
+                    loadWorktops();
                   }}
                   onVSCode={(id) => openInVSCode(id)}
                 />

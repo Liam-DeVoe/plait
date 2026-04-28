@@ -18,28 +18,28 @@ from pydantic import BaseModel
 
 from server import claude, config, daemon, db, git
 from server.models import (
-    Cell,
-    CellStatus,
     CIStatus,
     Session,
     SessionRole,
-    Sortie,
+    Slate,
+    Worktop,
+    WorktopStatus,
 )
 from server.pty import pty_manager
 from server.sessions import (
     resume_cmd,
     spawn_session,
-    user_cell_cmd,
-    user_sortie_cmd,
+    user_slate_cmd,
+    user_worktop_cmd,
 )
 
 logger = logging.getLogger(__name__)
 
 
-def _sortie_repo_worktrees(sortie_id: str) -> dict[str, str]:
-    """Reconstruct the repo_id -> worktree path mapping for a sortie."""
+def _slate_repo_worktrees(slate_id: str) -> dict[str, str]:
+    """Reconstruct the repo_id -> worktree path mapping for a slate."""
     return {
-        repo_id: str(git.WORKTREE_ROOT / f"sortie-{sortie_id}" / repo_id)
+        repo_id: str(git.WORKTREE_ROOT / f"slate-{slate_id}" / repo_id)
         for repo_id in config.get_repos()
     }
 
@@ -60,7 +60,7 @@ async def lifespan(app: FastAPI):
     broadcast_task.cancel()
 
 
-app = FastAPI(title="Orrery", lifespan=lifespan)
+app = FastAPI(title="Plait", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -127,16 +127,16 @@ async def trigger_daemon_run():
     return {"status": "started"}
 
 
-# --- Cell endpoints ---
+# --- Worktop endpoints ---
 
 
-class CreateCellRequest(BaseModel):
+class CreateWorktopRequest(BaseModel):
     pr_url: str | None = None
     repo: str | None = None
 
 
-@app.post("/cells")
-async def create_cell(req: CreateCellRequest):
+@app.post("/worktops")
+async def create_worktop(req: CreateWorktopRequest):
     if req.pr_url:
         # Import from existing PR. Local-only repos are unreachable here
         # because get_pr_info_from_url maps URLs to repo_id via upstream,
@@ -146,7 +146,7 @@ async def create_cell(req: CreateCellRequest):
         except RuntimeError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-        cell = Cell(
+        worktop = Worktop(
             repo=pr_info["repo_id"],
             branch=pr_info["branch"],
             worktree_path="",
@@ -159,158 +159,164 @@ async def create_cell(req: CreateCellRequest):
             config.get_repo(req.repo)
         except KeyError:
             raise HTTPException(status_code=400, detail=f"Unknown repo: {req.repo!r}")
-        # Create local cell with generic branch name
-        cell = Cell(
+        # Create local worktop with generic branch name
+        worktop = Worktop(
             repo=req.repo,
             worktree_path="",
         )
-        cell.branch = f"cell/{cell.id[:8]}"
+        worktop.branch = f"worktop/{worktop.id[:8]}"
     else:
         raise HTTPException(status_code=400, detail="Either pr_url or repo is required")
 
     try:
-        cell.worktree_path = await git.create_worktree(cell.repo, cell.branch, cell.id)
+        worktop.worktree_path = await git.create_worktree(
+            worktop.repo, worktop.branch, worktop.id
+        )
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    await claude.write_cell_claude_md(cell.worktree_path, cell.id, cell.repo)
+    await claude.write_worktop_claude_md(
+        worktop.worktree_path, worktop.id, worktop.repo
+    )
 
-    if cell.pr_number:
-        ci = await git.get_ci_status(cell.repo, cell.pr_number)
-        cell.ci_status = CIStatus(ci)
-        cell.pr_comment_count = (
-            await git.get_pr_comment_count(cell.repo, cell.pr_number)
+    if worktop.pr_number:
+        ci = await git.get_ci_status(worktop.repo, worktop.pr_number)
+        worktop.ci_status = CIStatus(ci)
+        worktop.pr_comment_count = (
+            await git.get_pr_comment_count(worktop.repo, worktop.pr_number)
         ) or 0
 
-    await db.create_cell(cell)
-    return await _cell_dict(cell)
+    await db.create_worktop(worktop)
+    return await _worktop_dict(worktop)
 
 
-async def _tend_status(cell_id: str) -> str:
+async def _tend_status(worktop_id: str) -> str:
     """Derive tend status from sessions: 'running' if a tend session is active."""
-    sessions = await db.list_sessions(cell_id)
+    sessions = await db.list_sessions(worktop_id)
     for s in sessions:
         if s.trigger == "tend" and s.ended_at is None:
             return "running"
     return "current"
 
 
-async def _cell_dict(cell: Cell) -> dict:
-    """Serialize a cell with derived tend_status."""
-    result = asdict(cell)
-    result["tend_status"] = await _tend_status(cell.id)
+async def _worktop_dict(worktop: Worktop) -> dict:
+    """Serialize a worktop with derived tend_status."""
+    result = asdict(worktop)
+    result["tend_status"] = await _tend_status(worktop.id)
     return result
 
 
-@app.get("/cells")
-async def list_cells(status: str | None = None):
-    cell_status = CellStatus(status) if status else None
-    cells = await db.list_cells(cell_status)
-    return [await _cell_dict(c) for c in cells]
+@app.get("/worktops")
+async def list_worktops(status: str | None = None):
+    worktop_status = WorktopStatus(status) if status else None
+    worktops = await db.list_worktops(worktop_status)
+    return [await _worktop_dict(c) for c in worktops]
 
 
-@app.get("/cells/{cell_id}")
-async def get_cell(cell_id: str):
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
-    sessions = await db.list_sessions(cell_id)
-    result = await _cell_dict(cell)
+@app.get("/worktops/{worktop_id}")
+async def get_worktop(worktop_id: str):
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
+    sessions = await db.list_sessions(worktop_id)
+    result = await _worktop_dict(worktop)
     result["sessions"] = [_session_dict(s) for s in sessions]
     return result
 
 
-@app.post("/cells/{cell_id}/archive")
-async def archive_cell(cell_id: str):
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
+@app.post("/worktops/{worktop_id}/archive")
+async def archive_worktop(worktop_id: str):
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
 
     # Remove worktree
     try:
-        await git.remove_worktree(cell.repo, cell.worktree_path)
+        await git.remove_worktree(worktop.repo, worktop.worktree_path)
     except Exception:
-        logger.warning(f"Failed to remove worktree for cell {cell_id}")
+        logger.warning(f"Failed to remove worktree for worktop {worktop_id}")
 
-    updated = await db.update_cell(
-        cell_id,
-        status=CellStatus.archived,
+    updated = await db.update_worktop(
+        worktop_id,
+        status=WorktopStatus.archived,
         archived_at=datetime.now(timezone.utc).isoformat(),
     )
     assert updated is not None
-    await daemon.notify("cell_updated", {"id": cell_id, "status": "archived"})
-    return await _cell_dict(updated)
+    await daemon.notify("worktop_updated", {"id": worktop_id, "status": "archived"})
+    return await _worktop_dict(updated)
 
 
-@app.post("/cells/{cell_id}/reopen")
-async def reopen_cell(cell_id: str):
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
-    if cell.status != CellStatus.archived:
-        raise HTTPException(status_code=400, detail="Cell is not archived")
+@app.post("/worktops/{worktop_id}/reopen")
+async def reopen_worktop(worktop_id: str):
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
+    if worktop.status != WorktopStatus.archived:
+        raise HTTPException(status_code=400, detail="Worktop is not archived")
 
     # Recreate worktree
     try:
-        worktree_path = await git.create_worktree(cell.repo, cell.branch, cell.id)
+        worktree_path = await git.create_worktree(
+            worktop.repo, worktop.branch, worktop.id
+        )
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    updated = await db.update_cell(
-        cell_id,
-        status=CellStatus.open,
+    updated = await db.update_worktop(
+        worktop_id,
+        status=WorktopStatus.open,
         worktree_path=worktree_path,
         archived_at=None,
         archive_reason=None,
     )
     assert updated is not None
-    await daemon.notify("cell_updated", {"id": cell_id, "status": "open"})
-    return await _cell_dict(updated)
+    await daemon.notify("worktop_updated", {"id": worktop_id, "status": "open"})
+    return await _worktop_dict(updated)
 
 
-@app.post("/cells/{cell_id}/sync")
-async def trigger_sync(cell_id: str):
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
+@app.post("/worktops/{worktop_id}/sync")
+async def trigger_sync(worktop_id: str):
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
 
-    asyncio.create_task(daemon.tend_cell(cell))
+    asyncio.create_task(daemon.tend_worktop(worktop))
     return {"status": "sync triggered"}
 
 
-@app.delete("/cells/{cell_id}")
-async def delete_cell(cell_id: str):
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
+@app.delete("/worktops/{worktop_id}")
+async def delete_worktop(worktop_id: str):
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
 
     try:
-        await git.remove_worktree(cell.repo, cell.worktree_path)
+        await git.remove_worktree(worktop.repo, worktop.worktree_path)
     except Exception:
         pass
 
-    await db.delete_cell(cell_id)
+    await db.delete_worktop(worktop_id)
     return {"status": "deleted"}
 
 
-@app.post("/cells/{cell_id}/vscode")
-async def open_in_vscode(cell_id: str):
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
-    subprocess.Popen(["code", cell.worktree_path])
+@app.post("/worktops/{worktop_id}/vscode")
+async def open_in_vscode(worktop_id: str):
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
+    subprocess.Popen(["code", worktop.worktree_path])
     return {"status": "opened"}
 
 
-@app.post("/cells/{cell_id}/sessions/{session_id}/vscode")
-async def open_session_in_vscode(cell_id: str, session_id: str):
+@app.post("/worktops/{worktop_id}/sessions/{session_id}/vscode")
+async def open_session_in_vscode(worktop_id: str, session_id: str):
     """Stop the web PTY session (if alive) and open VS Code + a terminal
-    that resumes the Claude Code session in the cell's worktree."""
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
+    that resumes the Claude Code session in the worktop's worktree."""
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
 
-    sessions = await db.list_sessions(cell_id)
+    sessions = await db.list_sessions(worktop_id)
     session = next((s for s in sessions if s.id == session_id), None)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -332,7 +338,7 @@ async def open_session_in_vscode(cell_id: str, session_id: str):
             await db.update_session(session_id, **update_kwargs)
 
     # Open VS Code at the worktree
-    subprocess.Popen(["code", cell.worktree_path])
+    subprocess.Popen(["code", worktop.worktree_path])
 
     # Open a new integrated terminal in VS Code and type the resume command.
     # Uses AppleScript to wait for VS Code, open a terminal (Ctrl+Shift+`),
@@ -361,13 +367,13 @@ class BranchUpdatedHook(BaseModel):
     branch: str
 
 
-@app.post("/hooks/cells/{cell_id}/branch-updated")
-async def hook_branch_updated(cell_id: str, req: BranchUpdatedHook):
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
-    await db.update_cell(cell_id, branch=req.branch)
-    await daemon.notify("cell_updated", {"id": cell_id, "branch": req.branch})
+@app.post("/hooks/worktops/{worktop_id}/branch-updated")
+async def hook_branch_updated(worktop_id: str, req: BranchUpdatedHook):
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
+    await db.update_worktop(worktop_id, branch=req.branch)
+    await daemon.notify("worktop_updated", {"id": worktop_id, "branch": req.branch})
     return {"status": "ok"}
 
 
@@ -376,43 +382,45 @@ class PRCreatedHook(BaseModel):
     pr_number: int
 
 
-@app.post("/hooks/cells/{cell_id}/pr-created")
-async def hook_pr_created(cell_id: str, req: PRCreatedHook):
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
-    if config.is_local(cell.repo):
+@app.post("/hooks/worktops/{worktop_id}/pr-created")
+async def hook_pr_created(worktop_id: str, req: PRCreatedHook):
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
+    if config.is_local(worktop.repo):
         raise HTTPException(
             status_code=400,
-            detail=f"Cell {cell_id} is in a local-only repo — no PR exists",
+            detail=f"Worktop {worktop_id} is in a local-only repo — no PR exists",
         )
-    await db.update_cell(cell_id, pr_number=req.pr_number, pr_url=req.pr_url)
+    await db.update_worktop(worktop_id, pr_number=req.pr_number, pr_url=req.pr_url)
     await daemon.notify(
-        "cell_updated",
-        {"id": cell_id, "pr_number": req.pr_number, "pr_url": req.pr_url},
+        "worktop_updated",
+        {"id": worktop_id, "pr_number": req.pr_number, "pr_url": req.pr_url},
     )
     return {"status": "ok"}
 
 
-@app.post("/hooks/cells/{cell_id}/ci-failure-expected")
-async def hook_ci_failure_expected(cell_id: str):
+@app.post("/hooks/worktops/{worktop_id}/ci-failure-expected")
+async def hook_ci_failure_expected(worktop_id: str):
     """Called by a tend session when it determines CI failures are expected
     (e.g. the PR depends on another unmerged PR). Suppresses CI-failure
     as a tend trigger until the branch HEAD changes."""
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
-    if config.is_local(cell.repo):
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
+    if config.is_local(worktop.repo):
         raise HTTPException(
             status_code=400,
-            detail=f"Cell {cell_id} is in a local-only repo — no CI exists",
+            detail=f"Worktop {worktop_id} is in a local-only repo — no CI exists",
         )
-    rc, sha, _ = await git.run("git", "rev-parse", "HEAD", cwd=cell.worktree_path)
+    rc, sha, _ = await git.run("git", "rev-parse", "HEAD", cwd=worktop.worktree_path)
     if rc != 0:
         raise HTTPException(status_code=500, detail="Could not read HEAD")
     sha = sha.strip()
-    await db.update_cell(cell_id, ci_failure_expected_sha=sha)
-    await daemon.notify("cell_updated", {"id": cell_id, "ci_failure_expected_sha": sha})
+    await db.update_worktop(worktop_id, ci_failure_expected_sha=sha)
+    await daemon.notify(
+        "worktop_updated", {"id": worktop_id, "ci_failure_expected_sha": sha}
+    )
     return {"status": "ok"}
 
 
@@ -440,9 +448,9 @@ def _session_dict(s: Session) -> dict:
     return d
 
 
-@app.get("/cells/{cell_id}/sessions")
-async def list_sessions(cell_id: str):
-    sessions = await db.list_sessions(cell_id)
+@app.get("/worktops/{worktop_id}/sessions")
+async def list_sessions(worktop_id: str):
+    sessions = await db.list_sessions(worktop_id)
     return [_session_dict(s) for s in sessions]
 
 
@@ -451,11 +459,11 @@ class CreateSessionRequest(BaseModel):
     prompt_file: str = ""
 
 
-@app.post("/cells/{cell_id}/sessions")
-async def create_session_endpoint(cell_id: str, req: CreateSessionRequest):
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
+@app.post("/worktops/{worktop_id}/sessions")
+async def create_session_endpoint(worktop_id: str, req: CreateSessionRequest):
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
 
     prompt = req.prompt
     if req.prompt_file:
@@ -467,24 +475,24 @@ async def create_session_endpoint(cell_id: str, req: CreateSessionRequest):
             )
 
     session = Session(
-        cell_id=cell.id,
+        worktop_id=worktop.id,
         role=SessionRole.user,
     )
     await db.create_session(session)
 
-    cmd, cwd = user_cell_cmd(session.id, cell)
+    cmd, cwd = user_worktop_cmd(session.id, worktop)
     spawn_session(session.id, cmd, cwd, initial_input=prompt)
 
     return _session_dict(session)
 
 
-@app.post("/cells/{cell_id}/sessions/{session_id}/resume")
-async def resume_session(cell_id: str, session_id: str):
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
+@app.post("/worktops/{worktop_id}/sessions/{session_id}/resume")
+async def resume_session(worktop_id: str, session_id: str):
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
 
-    session_list = await db.list_sessions(cell_id)
+    session_list = await db.list_sessions(worktop_id)
     session = next((s for s in session_list if s.id == session_id), None)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -495,7 +503,7 @@ async def resume_session(cell_id: str, session_id: str):
     # Reset ended_at so daemon sees it as active
     await db.update_session(session_id, ended_at=None)
 
-    cmd, cwd = resume_cmd(session.id, cell.worktree_path)
+    cmd, cwd = resume_cmd(session.id, worktop.worktree_path)
     idle_timeout = (
         daemon.SESSION_IDLE_TIMEOUT if session.role == SessionRole.daemon else None
     )
@@ -505,13 +513,13 @@ async def resume_session(cell_id: str, session_id: str):
     return _session_dict(session)
 
 
-@app.delete("/cells/{cell_id}/sessions/{session_id}")
-async def delete_session(cell_id: str, session_id: str):
-    cell = await db.get_cell(cell_id)
-    if not cell:
-        raise HTTPException(status_code=404, detail="Cell not found")
+@app.delete("/worktops/{worktop_id}/sessions/{session_id}")
+async def delete_session(worktop_id: str, session_id: str):
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
 
-    session_list = await db.list_sessions(cell_id)
+    session_list = await db.list_sessions(worktop_id)
     session = next((s for s in session_list if s.id == session_id), None)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -523,12 +531,12 @@ async def delete_session(cell_id: str, session_id: str):
         pty_manager.remove(session_id)
 
     await db.delete_session(session_id)
-    await daemon.notify("cell_updated", {"id": cell_id})
+    await daemon.notify("worktop_updated", {"id": worktop_id})
 
 
-@app.get("/cells/{cell_id}/sessions/{session_id}/xterm-state")
-async def get_xterm_state(cell_id: str, session_id: str):
-    sessions = await db.list_sessions(cell_id)
+@app.get("/worktops/{worktop_id}/sessions/{session_id}/xterm-state")
+async def get_xterm_state(worktop_id: str, session_id: str):
+    sessions = await db.list_sessions(worktop_id)
     session = next((s for s in sessions if s.id == session_id), None)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
@@ -600,74 +608,74 @@ async def _cleanup_stale_sessions() -> None:
         await conn.close()
 
 
-# --- Sortie endpoints ---
+# --- Slate endpoints ---
 
 
-def _sortie_dict(sortie: Sortie, cells: list[Cell]) -> dict:
-    """Serialize a sortie with derived is_archived field."""
-    d = asdict(sortie)
-    all_cells_archived = len(cells) > 0 and all(
-        c.status == CellStatus.archived for c in cells
+def _slate_dict(slate: Slate, worktops: list[Worktop]) -> dict:
+    """Serialize a slate with derived is_archived field."""
+    d = asdict(slate)
+    all_worktops_archived = len(worktops) > 0 and all(
+        c.status == WorktopStatus.archived for c in worktops
     )
-    d["is_archived"] = sortie.archived or all_cells_archived
+    d["is_archived"] = slate.archived or all_worktops_archived
     return d
 
 
-@app.post("/sorties")
-async def create_sortie():
-    sortie = Sortie()
-    await db.create_sortie(sortie)
+@app.post("/slates")
+async def create_slate():
+    slate = Slate()
+    await db.create_slate(slate)
 
     try:
-        await git.create_sortie_worktrees(sortie.id)
+        await git.create_slate_worktrees(slate.id)
     except RuntimeError:
-        raise HTTPException(status_code=500, detail="Failed to create sortie worktrees")
+        raise HTTPException(status_code=500, detail="Failed to create slate worktrees")
 
     session = Session(
-        sortie_id=sortie.id,
+        slate_id=slate.id,
         role=SessionRole.user,
-        trigger="sortie",
+        trigger="slate",
     )
     await db.create_session(session)
-    await db.update_sortie(sortie.id, session_id=session.id)
+    await db.update_slate(slate.id, session_id=session.id)
 
-    result = asdict(sortie)
+    result = asdict(slate)
     result["session_id"] = session.id
     return result
 
 
-@app.get("/sorties")
-async def list_sorties():
-    sorties = await db.list_sorties()
+@app.get("/slates")
+async def list_slates():
+    slates = await db.list_slates()
     result = []
-    for s in sorties:
-        cells = await db.list_cells_by_sortie(s.id)
-        d = _sortie_dict(s, cells)
-        d["cell_count"] = len(cells)
+    for s in slates:
+        worktops = await db.list_worktops_by_slate(s.id)
+        d = _slate_dict(s, worktops)
+        d["worktop_count"] = len(worktops)
         result.append(d)
     return result
 
 
-@app.get("/sorties/{sortie_id}")
-async def get_sortie(sortie_id: str):
-    sortie = await db.get_sortie(sortie_id)
-    if not sortie:
-        raise HTTPException(status_code=404, detail="Sortie not found")
-    child_cells = await db.list_cells_by_sortie(sortie_id)
-    result = _sortie_dict(sortie, child_cells)
-    result["cells"] = [asdict(c) for c in child_cells]
+@app.get("/slates/{slate_id}")
+async def get_slate(slate_id: str):
+    slate = await db.get_slate(slate_id)
+    if not slate:
+        raise HTTPException(status_code=404, detail="Slate not found")
+    child_worktops = await db.list_worktops_by_slate(slate_id)
+    result = _slate_dict(slate, child_worktops)
+    result["worktops"] = [asdict(c) for c in child_worktops]
     # Include the orchestrator session if it exists
-    if sortie.session_id:
-        session = await db.get_session(sortie.session_id)
+    if slate.session_id:
+        session = await db.get_session(slate.session_id)
         if session:
             result["session"] = _session_dict(session)
     return result
 
 
-@app.get("/sorties/{sortie_id}/sessions/{session_id}/xterm-state")
-async def get_sortie_xterm_state(sortie_id: str, session_id: str):
+@app.get("/slates/{slate_id}/sessions/{session_id}/xterm-state")
+async def get_slate_xterm_state(slate_id: str, session_id: str):
     session = await db.get_session(session_id)
-    if not session or session.sortie_id != sortie_id:
+    if not session or session.slate_id != slate_id:
         raise HTTPException(status_code=404, detail="Session not found")
     xterm_state = pty_manager.get_raw_output(session_id) or session.xterm_state
     if not xterm_state:
@@ -675,16 +683,16 @@ async def get_sortie_xterm_state(sortie_id: str, session_id: str):
     return Response(content=xterm_state, media_type="application/octet-stream")
 
 
-@app.post("/sorties/{sortie_id}/sessions/{session_id}/resume")
-async def resume_sortie_session(sortie_id: str, session_id: str):
+@app.post("/slates/{slate_id}/sessions/{session_id}/resume")
+async def resume_slate_session(slate_id: str, session_id: str):
     session = await db.get_session(session_id)
-    if not session or session.sortie_id != sortie_id:
+    if not session or session.slate_id != slate_id:
         raise HTTPException(status_code=404, detail="Session not found")
 
     if pty_manager.is_alive(session_id):
         raise HTTPException(status_code=400, detail="Session is already alive")
 
-    exploration_dir = str(git.WORKTREE_ROOT / f"sortie-{sortie_id}")
+    exploration_dir = str(git.WORKTREE_ROOT / f"slate-{slate_id}")
     await db.update_session(session_id, ended_at=None)
     cmd, cwd = resume_cmd(session.id, exploration_dir)
     idle_timeout = (
@@ -696,158 +704,171 @@ async def resume_sortie_session(sortie_id: str, session_id: str):
     return _session_dict(session)
 
 
-@app.post("/sorties/{sortie_id}/sessions/{session_id}/start")
-async def start_sortie_session(sortie_id: str, session_id: str):
+@app.post("/slates/{slate_id}/sessions/{session_id}/start")
+async def start_slate_session(slate_id: str, session_id: str):
     session = await db.get_session(session_id)
-    if not session or session.sortie_id != sortie_id:
+    if not session or session.slate_id != slate_id:
         raise HTTPException(status_code=404, detail="Session not found")
 
     if pty_manager.is_alive(session_id):
         raise HTTPException(status_code=400, detail="Session is already alive")
 
-    exploration_dir = str(git.WORKTREE_ROOT / f"sortie-{sortie_id}")
-    repo_worktrees = _sortie_repo_worktrees(sortie_id)
-    cmd, cwd = user_sortie_cmd(session.id, sortie_id, exploration_dir, repo_worktrees)
+    exploration_dir = str(git.WORKTREE_ROOT / f"slate-{slate_id}")
+    repo_worktrees = _slate_repo_worktrees(slate_id)
+    cmd, cwd = user_slate_cmd(session.id, slate_id, exploration_dir, repo_worktrees)
     spawn_session(session.id, cmd, cwd)
 
     return _session_dict(session)
 
 
-@app.post("/sorties/{sortie_id}/archive")
-async def archive_sortie(sortie_id: str):
-    sortie = await db.get_sortie(sortie_id)
-    if not sortie:
-        raise HTTPException(status_code=404, detail="Sortie not found")
-    updated = await db.update_sortie(sortie_id, archived=True)
+@app.post("/slates/{slate_id}/archive")
+async def archive_slate(slate_id: str):
+    slate = await db.get_slate(slate_id)
+    if not slate:
+        raise HTTPException(status_code=404, detail="Slate not found")
+    updated = await db.update_slate(slate_id, archived=True)
     assert updated is not None
-    await daemon.notify("sortie_updated", {"id": sortie_id})
-    return _sortie_dict(updated, await db.list_cells_by_sortie(sortie_id))
+    await daemon.notify("slate_updated", {"id": slate_id})
+    return _slate_dict(updated, await db.list_worktops_by_slate(slate_id))
 
 
-@app.post("/sorties/{sortie_id}/unarchive")
-async def unarchive_sortie(sortie_id: str):
-    sortie = await db.get_sortie(sortie_id)
-    if not sortie:
-        raise HTTPException(status_code=404, detail="Sortie not found")
-    updated = await db.update_sortie(sortie_id, archived=False)
+@app.post("/slates/{slate_id}/unarchive")
+async def unarchive_slate(slate_id: str):
+    slate = await db.get_slate(slate_id)
+    if not slate:
+        raise HTTPException(status_code=404, detail="Slate not found")
+    updated = await db.update_slate(slate_id, archived=False)
     assert updated is not None
-    await daemon.notify("sortie_updated", {"id": sortie_id})
-    return _sortie_dict(updated, await db.list_cells_by_sortie(sortie_id))
+    await daemon.notify("slate_updated", {"id": slate_id})
+    return _slate_dict(updated, await db.list_worktops_by_slate(slate_id))
 
 
-@app.delete("/sorties/{sortie_id}")
-async def delete_sortie(sortie_id: str):
-    sortie = await db.get_sortie(sortie_id)
-    if not sortie:
-        raise HTTPException(status_code=404, detail="Sortie not found")
+@app.delete("/slates/{slate_id}")
+async def delete_slate(slate_id: str):
+    slate = await db.get_slate(slate_id)
+    if not slate:
+        raise HTTPException(status_code=404, detail="Slate not found")
 
     # Kill orchestrator session PTY if alive
-    if sortie.session_id and pty_manager.is_alive(sortie.session_id):
-        await pty_manager.terminate(sortie.session_id)
+    if slate.session_id and pty_manager.is_alive(slate.session_id):
+        await pty_manager.terminate(slate.session_id)
 
-    # Remove sortie exploration worktrees
+    # Remove slate exploration worktrees
     try:
-        await git.remove_sortie_worktrees(sortie_id)
+        await git.remove_slate_worktrees(slate_id)
     except Exception:
         pass
 
-    await db.delete_sortie(sortie_id)
+    await db.delete_slate(slate_id)
     return {"status": "deleted"}
 
 
-@app.post("/sorties/{sortie_id}/vscode")
-async def open_sortie_in_vscode(sortie_id: str):
-    sortie = await db.get_sortie(sortie_id)
-    if not sortie:
-        raise HTTPException(status_code=404, detail="Sortie not found")
-    exploration_dir = str(git.WORKTREE_ROOT / f"sortie-{sortie_id}")
+@app.post("/slates/{slate_id}/vscode")
+async def open_slate_in_vscode(slate_id: str):
+    slate = await db.get_slate(slate_id)
+    if not slate:
+        raise HTTPException(status_code=404, detail="Slate not found")
+    exploration_dir = str(git.WORKTREE_ROOT / f"slate-{slate_id}")
     subprocess.Popen(["code", exploration_dir])
     return {"status": "opened"}
 
 
-# --- Sortie hook endpoints ---
+# --- Slate hook endpoints ---
 
 
-class CreateCellHook(BaseModel):
+class CreateWorktopHook(BaseModel):
     repo: str
 
 
-@app.post("/hooks/create-cell")
-async def hook_create_cell(req: CreateCellHook):
-    """Called by a cell session to create a new standalone cell in another repo."""
+@app.post("/hooks/create-worktop")
+async def hook_create_worktop(req: CreateWorktopHook):
+    """Called by a worktop session to create a new standalone worktop in another repo."""
     try:
         config.get_repo(req.repo)
     except KeyError:
         raise HTTPException(status_code=400, detail=f"Unknown repo: {req.repo!r}")
 
-    cell = Cell(repo=req.repo, worktree_path="")
-    cell.branch = f"cell/{cell.id[:8]}"
+    worktop = Worktop(repo=req.repo, worktree_path="")
+    worktop.branch = f"worktop/{worktop.id[:8]}"
 
     try:
-        cell.worktree_path = await git.create_worktree(req.repo, cell.branch, cell.id)
+        worktop.worktree_path = await git.create_worktree(
+            req.repo, worktop.branch, worktop.id
+        )
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    await claude.write_cell_claude_md(cell.worktree_path, cell.id, cell.repo)
+    await claude.write_worktop_claude_md(
+        worktop.worktree_path, worktop.id, worktop.repo
+    )
 
-    await db.create_cell(cell)
-    await daemon.notify("cell_updated", {"id": cell.id, "status": "open"})
-    return {"cell_id": cell.id, "url": f"http://localhost:5173/cells/{cell.id}"}
+    await db.create_worktop(worktop)
+    await daemon.notify("worktop_updated", {"id": worktop.id, "status": "open"})
+    return {
+        "worktop_id": worktop.id,
+        "url": f"http://localhost:5173/worktops/{worktop.id}",
+    }
 
 
-class SetSortieNameHook(BaseModel):
+class SetSlateNameHook(BaseModel):
     name: str
 
 
-@app.post("/hooks/sorties/{sortie_id}/set-name")
-async def hook_set_sortie_name(sortie_id: str, req: SetSortieNameHook):
-    sortie = await db.get_sortie(sortie_id)
-    if not sortie:
-        raise HTTPException(status_code=404, detail="Sortie not found")
-    await db.update_sortie(sortie_id, name=req.name)
-    await daemon.notify("sortie_updated", {"id": sortie_id, "name": req.name})
+@app.post("/hooks/slates/{slate_id}/set-name")
+async def hook_set_slate_name(slate_id: str, req: SetSlateNameHook):
+    slate = await db.get_slate(slate_id)
+    if not slate:
+        raise HTTPException(status_code=404, detail="Slate not found")
+    await db.update_slate(slate_id, name=req.name)
+    await daemon.notify("slate_updated", {"id": slate_id, "name": req.name})
     return {"status": "ok"}
 
 
-class CreateSortieCellHook(BaseModel):
+class CreateSlateWorktopHook(BaseModel):
     repo: str
 
 
-@app.post("/hooks/sorties/{sortie_id}/create-cell")
-async def hook_create_sortie_cell(sortie_id: str, req: CreateSortieCellHook):
-    sortie = await db.get_sortie(sortie_id)
-    if not sortie:
-        raise HTTPException(status_code=404, detail="Sortie not found")
+@app.post("/hooks/slates/{slate_id}/create-worktop")
+async def hook_create_slate_worktop(slate_id: str, req: CreateSlateWorktopHook):
+    slate = await db.get_slate(slate_id)
+    if not slate:
+        raise HTTPException(status_code=404, detail="Slate not found")
 
     try:
         config.get_repo(req.repo)
     except KeyError:
         raise HTTPException(status_code=400, detail=f"Unknown repo: {req.repo!r}")
 
-    # Check for duplicate cell in this sortie
-    existing = await db.list_cells_by_sortie(sortie_id)
+    # Check for duplicate worktop in this slate
+    existing = await db.list_worktops_by_slate(slate_id)
     if any(c.repo == req.repo for c in existing):
         raise HTTPException(
             status_code=400,
-            detail=f"A cell for {req.repo!r} already exists in this sortie",
+            detail=f"A worktop for {req.repo!r} already exists in this slate",
         )
 
-    branch = f"sortie/{sortie_id[:8]}/{req.repo}"
-    cell = Cell(
-        sortie_id=sortie_id,
+    branch = f"slate/{slate_id[:8]}/{req.repo}"
+    worktop = Worktop(
+        slate_id=slate_id,
         repo=req.repo,
         branch=branch,
         worktree_path="",
     )
 
     try:
-        cell.worktree_path = await git.create_worktree(req.repo, branch, cell.id)
+        worktop.worktree_path = await git.create_worktree(req.repo, branch, worktop.id)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    await claude.write_cell_claude_md(cell.worktree_path, cell.id, cell.repo)
+    await claude.write_worktop_claude_md(
+        worktop.worktree_path, worktop.id, worktop.repo
+    )
 
-    await db.create_cell(cell)
-    await daemon.notify("sortie_updated", {"id": sortie_id})
-    await daemon.notify("cell_updated", {"id": cell.id, "status": "open"})
-    return {"cell_id": cell.id, "worktree_path": cell.worktree_path, "branch": branch}
+    await db.create_worktop(worktop)
+    await daemon.notify("slate_updated", {"id": slate_id})
+    await daemon.notify("worktop_updated", {"id": worktop.id, "status": "open"})
+    return {
+        "worktop_id": worktop.id,
+        "worktree_path": worktop.worktree_path,
+        "branch": branch,
+    }

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from enum import Enum
 
 
-class CellStatus(str, Enum):
+class WorktopStatus(str, Enum):
     open = "open"
     archived = "archived"
 
@@ -29,9 +29,9 @@ class SessionRole(str, Enum):
 
 
 @dataclass
-class Cell:
+class Worktop:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    sortie_id: str | None = None
+    slate_id: str | None = None
     repo: str = ""  # repo ID from config.toml
     branch: str = ""
     worktree_path: str = ""
@@ -42,7 +42,7 @@ class Cell:
     pr_comment_count: int = 0
     pr_reaction_count: int = 0
     sync_status: SyncStatus = SyncStatus.current
-    status: CellStatus = CellStatus.open
+    status: WorktopStatus = WorktopStatus.open
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -54,7 +54,7 @@ class Cell:
 
 
 @dataclass
-class Sortie:
+class Slate:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     session_id: str | None = None
     name: str | None = None
@@ -67,8 +67,8 @@ class Sortie:
 @dataclass
 class Session:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
-    cell_id: str | None = None
-    sortie_id: str | None = None
+    worktop_id: str | None = None
+    slate_id: str | None = None
     role: SessionRole = SessionRole.user
     trigger: str | None = None
     succeeded: bool | None = None

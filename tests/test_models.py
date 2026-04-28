@@ -1,25 +1,25 @@
 from server.models import (
-    Cell,
-    CellStatus,
     CIStatus,
     Session,
     SessionRole,
-    Sortie,
+    Slate,
     SyncStatus,
+    Worktop,
+    WorktopStatus,
 )
 
 
-def test_cell_defaults():
-    cell = Cell()
-    assert cell.id  # non-empty UUID
-    assert cell.status == CellStatus.open
-    assert cell.ci_status == CIStatus.unknown
-    assert cell.sync_status == SyncStatus.current
-    assert cell.sortie_id is None
-    assert cell.pr_number is None
-    assert cell.pr_url is None
-    assert cell.archived_at is None
-    assert cell.created_at  # non-empty timestamp
+def test_worktop_defaults():
+    worktop = Worktop()
+    assert worktop.id  # non-empty UUID
+    assert worktop.status == WorktopStatus.open
+    assert worktop.ci_status == CIStatus.unknown
+    assert worktop.sync_status == SyncStatus.current
+    assert worktop.slate_id is None
+    assert worktop.pr_number is None
+    assert worktop.pr_url is None
+    assert worktop.archived_at is None
+    assert worktop.created_at  # non-empty timestamp
 
 
 def test_session_defaults():
@@ -32,27 +32,27 @@ def test_session_defaults():
     assert session.transcript == ""
 
 
-def test_sortie_defaults():
-    sortie = Sortie()
-    assert sortie.id
-    assert sortie.session_id is None
+def test_slate_defaults():
+    slate = Slate()
+    assert slate.id
+    assert slate.session_id is None
 
 
-def test_session_sortie_id():
-    session = Session(sortie_id="abc")
-    assert session.sortie_id == "abc"
-    assert session.cell_id is None
+def test_session_slate_id():
+    session = Session(slate_id="abc")
+    assert session.slate_id == "abc"
+    assert session.worktop_id is None
 
 
 def test_enum_values():
-    assert CellStatus.open.value == "open"
-    assert CellStatus.archived.value == "archived"
+    assert WorktopStatus.open.value == "open"
+    assert WorktopStatus.archived.value == "archived"
     assert CIStatus.passing.value == "passing"
     assert SyncStatus.behind.value == "behind"
     assert SessionRole.daemon.value == "daemon"
 
 
-def test_cell_unique_ids():
-    c1 = Cell()
-    c2 = Cell()
+def test_worktop_unique_ids():
+    c1 = Worktop()
+    c2 = Worktop()
     assert c1.id != c2.id

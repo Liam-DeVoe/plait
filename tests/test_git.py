@@ -8,7 +8,7 @@ from server import git
 async def test_create_worktree_new_branch(git_env):
     """Creating a worktree for a branch that doesn't exist yet
     should create a new branch from origin/main."""
-    wt_path = await git.create_worktree(git_env.repo_id, "new-feature", "cell-1")
+    wt_path = await git.create_worktree(git_env.repo_id, "new-feature", "worktop-1")
     assert Path(wt_path).exists()
     assert (Path(wt_path) / "README.md").read_text() == "initial"
 
@@ -21,13 +21,13 @@ async def test_create_worktree_existing_branch(git_env):
     git_env.push("existing-branch")
     git_env.checkout("main")
 
-    wt_path = await git.create_worktree(git_env.repo_id, "existing-branch", "cell-2")
+    wt_path = await git.create_worktree(git_env.repo_id, "existing-branch", "worktop-2")
     assert Path(wt_path).exists()
     assert (Path(wt_path) / "file.txt").read_text() == "content"
 
 
 async def test_remove_worktree(git_env):
-    wt_path = await git.create_worktree(git_env.repo_id, "to-remove", "cell-3")
+    wt_path = await git.create_worktree(git_env.repo_id, "to-remove", "worktop-3")
     assert Path(wt_path).exists()
 
     await git.remove_worktree(git_env.repo_id, wt_path)
@@ -37,7 +37,7 @@ async def test_remove_worktree(git_env):
 async def test_is_behind_main_when_current(git_env):
     git_env.create_branch("up-to-date")
     git_env.checkout("main")
-    wt_path = await git.create_worktree(git_env.repo_id, "up-to-date", "cell-4")
+    wt_path = await git.create_worktree(git_env.repo_id, "up-to-date", "worktop-4")
     assert not await git.is_behind_main(git_env.repo_id, wt_path, "up-to-date")
 
 
@@ -50,7 +50,7 @@ async def test_is_behind_main_when_behind(git_env):
     git_env.add_commit("new_file.txt", "new content", "advance main")
     git_env.push("main")
 
-    wt_path = await git.create_worktree(git_env.repo_id, "behind-branch", "cell-5")
+    wt_path = await git.create_worktree(git_env.repo_id, "behind-branch", "worktop-5")
     await git.run("git", "fetch", "origin", cwd=wt_path)
 
     assert await git.is_behind_main(git_env.repo_id, wt_path, "behind-branch")
@@ -67,7 +67,7 @@ async def test_check_merge_conflicts_clean(git_env):
     git_env.add_commit("main_change.txt", "main stuff", "advance main")
     git_env.push("main")
 
-    wt_path = await git.create_worktree(git_env.repo_id, "feature", "cell-6")
+    wt_path = await git.create_worktree(git_env.repo_id, "feature", "worktop-6")
 
     # No conflict expected — and the working tree must NOT have changed
     conflicts = await git.check_merge_conflicts(git_env.repo_id, wt_path)
@@ -92,7 +92,7 @@ async def test_check_merge_conflicts_with_conflict(git_env):
     git_env.add_commit("README.md", "main version", "edit readme on main")
     git_env.push("main")
 
-    wt_path = await git.create_worktree(git_env.repo_id, "conflicting", "cell-7")
+    wt_path = await git.create_worktree(git_env.repo_id, "conflicting", "worktop-7")
 
     conflicts = await git.check_merge_conflicts(git_env.repo_id, wt_path)
     assert conflicts == ["README.md"]
@@ -112,7 +112,9 @@ async def test_check_merge_conflicts_ignores_listed_paths(git_env):
     git_env.add_commit("RELEASE.md", "main release notes", "add release on main")
     git_env.push("main")
 
-    wt_path = await git.create_worktree(git_env.repo_id, "ignore-branch", "cell-ignore")
+    wt_path = await git.create_worktree(
+        git_env.repo_id, "ignore-branch", "worktop-ignore"
+    )
 
     # Without ignore: conflict shows up.
     assert await git.check_merge_conflicts(git_env.repo_id, wt_path) == ["RELEASE.md"]
@@ -138,7 +140,9 @@ async def test_check_merge_conflicts_ignore_with_other_conflict(git_env):
     git_env.add_commit("README.md", "main readme", "edit readme on main")
     git_env.push("main")
 
-    wt_path = await git.create_worktree(git_env.repo_id, "mixed-branch", "cell-mixed")
+    wt_path = await git.create_worktree(
+        git_env.repo_id, "mixed-branch", "worktop-mixed"
+    )
 
     conflicts = await git.check_merge_conflicts(
         git_env.repo_id, wt_path, ignore=frozenset({"RELEASE.md"})
@@ -163,7 +167,9 @@ async def test_main_ref_local(git_env_local):
 
 async def test_create_worktree_local_new_branch(git_env_local):
     """Creating a worktree for a new branch in a local repo should branch off local main."""
-    wt_path = await git.create_worktree(git_env_local.repo_id, "new-feature", "cell-l1")
+    wt_path = await git.create_worktree(
+        git_env_local.repo_id, "new-feature", "worktop-l1"
+    )
     assert Path(wt_path).exists()
     assert (Path(wt_path) / "README.md").read_text() == "initial"
 
@@ -172,20 +178,20 @@ async def test_create_worktree_local_existing_branch(git_env_local):
     """Creating a worktree for an existing local branch reuses it."""
     # Create the branch in a separate worktree and add a commit there, so
     # the clone stays on main.
-    wt0 = await git.create_worktree(git_env_local.repo_id, "existing", "cell-pre")
+    wt0 = await git.create_worktree(git_env_local.repo_id, "existing", "worktop-pre")
     (Path(wt0) / "file.txt").write_text("content")
     await git.run("git", "add", "file.txt", cwd=wt0)
     await git.run("git", "commit", "-m", "add file", cwd=wt0)
     await git.remove_worktree(git_env_local.repo_id, wt0)
 
-    wt_path = await git.create_worktree(git_env_local.repo_id, "existing", "cell-l2")
+    wt_path = await git.create_worktree(git_env_local.repo_id, "existing", "worktop-l2")
     assert Path(wt_path).exists()
     assert (Path(wt_path) / "file.txt").read_text() == "content"
 
 
 async def test_is_behind_main_local(git_env_local):
     """is_behind_main works against local main for local repos."""
-    wt_path = await git.create_worktree(git_env_local.repo_id, "behind", "cell-l3")
+    wt_path = await git.create_worktree(git_env_local.repo_id, "behind", "worktop-l3")
     git_env_local.add_commit("new.txt", "main work", "advance main")
 
     assert await git.is_behind_main(git_env_local.repo_id, wt_path, "behind")
@@ -193,13 +199,15 @@ async def test_is_behind_main_local(git_env_local):
 
 async def test_is_behind_main_local_when_current(git_env_local):
     """is_behind_main returns False when the branch is current with local main."""
-    wt_path = await git.create_worktree(git_env_local.repo_id, "up-to-date", "cell-l4")
+    wt_path = await git.create_worktree(
+        git_env_local.repo_id, "up-to-date", "worktop-l4"
+    )
     assert not await git.is_behind_main(git_env_local.repo_id, wt_path, "up-to-date")
 
 
 async def test_check_merge_conflicts_local(git_env_local):
     """Conflicts with local main are detected without a fetch."""
-    wt_path = await git.create_worktree(git_env_local.repo_id, "conflict", "cell-l5")
+    wt_path = await git.create_worktree(git_env_local.repo_id, "conflict", "worktop-l5")
     (Path(wt_path) / "README.md").write_text("branch")
     await git.run("git", "add", "README.md", cwd=wt_path)
     await git.run("git", "commit", "-m", "edit branch", cwd=wt_path)
@@ -211,7 +219,7 @@ async def test_check_merge_conflicts_local(git_env_local):
 
 async def test_is_merged_into_main_local(git_env_local):
     """is_merged_into_main detects a true merge into local main."""
-    wt_path = await git.create_worktree(git_env_local.repo_id, "done", "cell-l6")
+    wt_path = await git.create_worktree(git_env_local.repo_id, "done", "worktop-l6")
     (Path(wt_path) / "done.txt").write_text("feature")
     await git.run("git", "add", "done.txt", cwd=wt_path)
     await git.run("git", "commit", "-m", "feature work", cwd=wt_path)
@@ -223,7 +231,7 @@ async def test_is_merged_into_main_local(git_env_local):
 
 async def test_is_merged_into_main_local_not_merged(git_env_local):
     """is_merged_into_main returns False when the branch isn't merged."""
-    wt_path = await git.create_worktree(git_env_local.repo_id, "not-done", "cell-l7")
+    wt_path = await git.create_worktree(git_env_local.repo_id, "not-done", "worktop-l7")
     (Path(wt_path) / "wip.txt").write_text("wip")
     await git.run("git", "add", "wip.txt", cwd=wt_path)
     await git.run("git", "commit", "-m", "wip", cwd=wt_path)
@@ -244,7 +252,7 @@ async def test_push(git_env):
     git_env.push("push-test")
     git_env.checkout("main")
 
-    wt_path = await git.create_worktree(git_env.repo_id, "push-test", "cell-8")
+    wt_path = await git.create_worktree(git_env.repo_id, "push-test", "worktop-8")
 
     # Make a change in the worktree
     (Path(wt_path) / "file.txt").write_text("v2")

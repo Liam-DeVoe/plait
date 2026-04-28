@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timezone
 
 from server import claude, config, db, git
-from server.models import Cell
+from server.models import Worktop
 from server.pty import pty_manager
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 async def tend_cmd(
-    session_id: str, cell: Cell, has_conflict: bool
+    session_id: str, worktop: Worktop, has_conflict: bool
 ) -> tuple[list[str], str, str]:
     """Interactive daemon session to fix merge conflicts / CI failures.
 
@@ -31,13 +31,13 @@ async def tend_cmd(
     Returns (cmd, cwd, prompt). The prompt should be passed as initial_input
     to spawn_session rather than baked into the command.
     """
-    mb = await git.main_branch(cell.repo)
+    mb = await git.main_branch(worktop.repo)
     prompt = claude.tend_prompt(
-        cell.branch,
-        cell.id,
+        worktop.branch,
+        worktop.id,
         mb,
         has_conflict,
-        is_local=config.is_local(cell.repo),
+        is_local=config.is_local(worktop.repo),
     )
     return (
         [
@@ -47,15 +47,15 @@ async def tend_cmd(
             "--session-id",
             session_id,
             "--system-prompt",
-            claude.orrery_system_prompt(session_id),
+            claude.plait_system_prompt(session_id),
         ],
-        cell.worktree_path,
+        worktop.worktree_path,
         prompt,
     )
 
 
-def user_cell_cmd(session_id: str, cell: Cell) -> tuple[list[str], str]:
-    """Interactive user session in a cell worktree."""
+def user_worktop_cmd(session_id: str, worktop: Worktop) -> tuple[list[str], str]:
+    """Interactive user session in a worktop worktree."""
     return [
         "claude",
         "--verbose",
@@ -63,19 +63,19 @@ def user_cell_cmd(session_id: str, cell: Cell) -> tuple[list[str], str]:
         "--session-id",
         session_id,
         "--system-prompt",
-        claude.orrery_system_prompt(session_id),
-    ], cell.worktree_path
+        claude.plait_system_prompt(session_id),
+    ], worktop.worktree_path
 
 
-def user_sortie_cmd(
+def user_slate_cmd(
     session_id: str,
-    sortie_id: str,
+    slate_id: str,
     exploration_dir: str,
     repo_worktrees: dict[str, str],
 ) -> tuple[list[str], str]:
-    """Interactive user session to orchestrate a sortie."""
-    system_prompt = claude.sortie_system_prompt(
-        sortie_id, exploration_dir, repo_worktrees
+    """Interactive user session to orchestrate a slate."""
+    system_prompt = claude.slate_system_prompt(
+        slate_id, exploration_dir, repo_worktrees
     )
     return [
         "claude",
@@ -193,13 +193,13 @@ async def _watch_pty(
     conn = await db.get_db()
     try:
         cursor = await conn.execute(
-            "SELECT cell_id, sortie_id FROM sessions WHERE id = ?", (session_id,)
+            "SELECT worktop_id, slate_id FROM sessions WHERE id = ?", (session_id,)
         )
         row = await cursor.fetchone()
-        if row and row["cell_id"]:
-            await notify("cell_updated", {"id": row["cell_id"]})
-        if row and row["sortie_id"]:
-            await notify("sortie_updated", {"id": row["sortie_id"]})
+        if row and row["worktop_id"]:
+            await notify("worktop_updated", {"id": row["worktop_id"]})
+        if row and row["slate_id"]:
+            await notify("slate_updated", {"id": row["slate_id"]})
     finally:
         await conn.close()
 

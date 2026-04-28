@@ -3,7 +3,7 @@ import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 
-const STORAGE_KEY = "orrery:terminal-height";
+const STORAGE_KEY = "plait:terminal-height";
 const DEFAULT_HEIGHT = 400;
 const MIN_HEIGHT = 150;
 const MAX_HEIGHT = 1200;

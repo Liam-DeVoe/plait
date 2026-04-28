@@ -83,7 +83,7 @@ async def main_ref(repo_id: str) -> str:
 
 
 async def branch_ref(repo_id: str, branch: str) -> str:
-    """Return the ref for a cell's branch.
+    """Return the ref for a worktop's branch.
 
     For remote repos: "origin/<branch>" (the published tip).
     For local repos: just "<branch>" (the local branch).
@@ -93,20 +93,20 @@ async def branch_ref(repo_id: str, branch: str) -> str:
     return f"origin/{branch}"
 
 
-async def create_sortie_worktrees(sortie_id: str) -> dict[str, str]:
+async def create_slate_worktrees(slate_id: str) -> dict[str, str]:
     """Create read-only worktrees for all repos at origin/main.
 
     Returns a dict mapping repo_id to worktree path.
-    Worktrees are created at worktrees/sortie-{id}/{repo_id}/ using
+    Worktrees are created at worktrees/slate-{id}/{repo_id}/ using
     detached HEAD (no branch).
     """
-    sortie_dir = WORKTREE_ROOT / f"sortie-{sortie_id}"
-    sortie_dir.mkdir(parents=True, exist_ok=True)
+    slate_dir = WORKTREE_ROOT / f"slate-{slate_id}"
+    slate_dir.mkdir(parents=True, exist_ok=True)
 
     async def _create_one(repo_id: str, repo: config.Repo) -> tuple[str, str]:
         await fetch_origin(repo_id)
         ref = await main_ref(repo_id)
-        wt_dir = sortie_dir / repo_id
+        wt_dir = slate_dir / repo_id
         rc, out, err = await run(
             "git",
             "worktree",
@@ -117,7 +117,7 @@ async def create_sortie_worktrees(sortie_id: str) -> dict[str, str]:
             cwd=repo.path,
         )
         if rc != 0:
-            raise RuntimeError(f"Failed to create sortie worktree for {repo_id}: {err}")
+            raise RuntimeError(f"Failed to create slate worktree for {repo_id}: {err}")
         return repo_id, str(wt_dir)
 
     pairs = await asyncio.gather(
@@ -126,13 +126,13 @@ async def create_sortie_worktrees(sortie_id: str) -> dict[str, str]:
     return dict(pairs)
 
 
-async def remove_sortie_worktrees(sortie_id: str) -> None:
-    """Remove all exploration worktrees for a sortie."""
-    sortie_dir = WORKTREE_ROOT / f"sortie-{sortie_id}"
-    if not sortie_dir.exists():
+async def remove_slate_worktrees(slate_id: str) -> None:
+    """Remove all exploration worktrees for a slate."""
+    slate_dir = WORKTREE_ROOT / f"slate-{slate_id}"
+    if not slate_dir.exists():
         return
     for repo_id, repo in config.get_repos().items():
-        wt_dir = sortie_dir / repo_id
+        wt_dir = slate_dir / repo_id
         if wt_dir.exists():
             await run(
                 "git",
@@ -142,19 +142,19 @@ async def remove_sortie_worktrees(sortie_id: str) -> None:
                 str(wt_dir),
                 cwd=repo.path,
             )
-    if sortie_dir.exists():
-        sortie_dir.rmdir()
+    if slate_dir.exists():
+        slate_dir.rmdir()
 
 
-async def create_worktree(repo_id: str, branch: str, cell_id: str) -> str:
-    """Create a git worktree for a cell. Returns the worktree path."""
+async def create_worktree(repo_id: str, branch: str, worktop_id: str) -> str:
+    """Create a git worktree for a worktop. Returns the worktree path."""
     repo = config.get_repo(repo_id)
     repo_dir = repo.path
     if not repo_dir.exists():
         raise RuntimeError(
             f"Repo path does not exist: {repo_dir}. Clone the repo first."
         )
-    worktree_dir = WORKTREE_ROOT / cell_id
+    worktree_dir = WORKTREE_ROOT / worktop_id
     worktree_dir.parent.mkdir(parents=True, exist_ok=True)
 
     if repo.kind == "local":
@@ -447,7 +447,7 @@ async def get_pr_comment_count(repo_id: str, pr_number: int) -> int | None:
 async def get_pr_reaction_count(repo_id: str, pr_number: int) -> int | None:
     """Count reactions by the configured author on others' PR comments.
 
-    Only counts reactions where the reactor is the orrery author AND the
+    Only counts reactions where the reactor is the plait author AND the
     comment was written by someone else.  This detects the author
     acknowledging reviewer feedback.
     """

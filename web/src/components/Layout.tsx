@@ -16,24 +16,24 @@ export default function Layout() {
       <div className="layout__header">
         <div className="layout__header-inner">
           <NavLink to="/" className="layout__logo">
-            Orrery
+            Plait
           </NavLink>
           <div className="layout__nav">
             <NavLink
-              to="/cells"
+              to="/worktops"
               className={({ isActive }) =>
                 `layout__nav-link${isActive ? " layout__nav-link--active" : ""}`
               }
             >
-              Cells
+              Worktops
             </NavLink>
             <NavLink
-              to="/sorties"
+              to="/slates"
               className={({ isActive }) =>
                 `layout__nav-link${isActive ? " layout__nav-link--active" : ""}`
               }
             >
-              Sorties
+              Slates
             </NavLink>
           </div>
         </div>

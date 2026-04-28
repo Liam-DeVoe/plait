@@ -327,7 +327,7 @@ class _SpawnSessionMock:
 def mock_claude():
     """Mock spawn_session in the daemon to avoid spawning real Claude processes.
 
-    Only affects daemon code paths (process_cell, spawn_sortie_session).
+    Only affects daemon code paths (process_worktop, spawn_slate_session).
     API endpoints use the real spawn_session backed by mock_pty.
     """
     import server.daemon as daemon_module

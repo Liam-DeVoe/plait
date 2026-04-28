@@ -7,18 +7,18 @@ import {
   Link,
 } from "react-router-dom";
 import {
-  fetchCell,
+  fetchWorktop,
   fetchRepos,
-  archiveCell,
+  archiveWorktop,
   triggerSync,
-  deleteCell,
+  deleteWorktop,
   openInVSCode,
   openSessionInVSCode,
   createInteractiveSession,
   deleteSession,
   resumeSession,
   fetchXtermState,
-  type Cell,
+  type Worktop,
   type Session,
   type Repo,
 } from "../api";
@@ -28,12 +28,12 @@ import type { LayoutContext } from "../components/Layout";
 
 function CollapsibleSession({
   session,
-  cellId,
+  worktopId,
   onResume,
   onVSCode,
 }: {
   session: Session;
-  cellId: string;
+  worktopId: string;
   onResume: () => void;
   onVSCode: () => void;
 }) {
@@ -82,7 +82,7 @@ function CollapsibleSession({
             sessionId={session.id}
             alive={session.alive}
             onResume={async () => onResume()}
-            fetchXtermState={() => fetchXtermState(cellId, session.id)}
+            fetchXtermState={() => fetchXtermState(worktopId, session.id)}
           />
         </div>
       )}
@@ -90,12 +90,12 @@ function CollapsibleSession({
   );
 }
 
-export default function CellDetailPage() {
+export default function WorktopDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
   const { run } = useOutletContext<LayoutContext>();
-  const [cell, setCell] = useState<(Cell & { sessions: Session[] }) | null>(
+  const [worktop, setWorktop] = useState<(Worktop & { sessions: Session[] }) | null>(
     null,
   );
   const [repos, setRepos] = useState<Repo[]>([]);
@@ -106,7 +106,7 @@ export default function CellDetailPage() {
 
   const load = useCallback(async () => {
     if (!id) return;
-    setCell(await fetchCell(id));
+    setWorktop(await fetchWorktop(id));
   }, [id]);
 
   useEffect(() => {
@@ -118,13 +118,13 @@ export default function CellDetailPage() {
   }, []);
 
   useEffect(() => {
-    if (cell) {
-      document.title = `${cell.branch} | Orrery`;
+    if (worktop) {
+      document.title = `${worktop.branch} | Plait`;
     }
     return () => {
-      document.title = "Orrery";
+      document.title = "Plait";
     };
-  }, [cell?.branch]);
+  }, [worktop?.branch]);
 
   const handleLaunchSession = async () => {
     if (!id) return;
@@ -151,11 +151,11 @@ export default function CellDetailPage() {
     load();
   };
 
-  if (!cell) return null;
+  if (!worktop) return null;
 
-  const isLocal = repos.find((r) => r.id === cell.repo)?.kind === "local";
-  const userSessions = cell.sessions.filter((s) => s.role === "user");
-  const daemonSessions = cell.sessions.filter((s) => s.role === "daemon");
+  const isLocal = repos.find((r) => r.id === worktop.repo)?.kind === "local";
+  const userSessions = worktop.sessions.filter((s) => s.role === "user");
+  const daemonSessions = worktop.sessions.filter((s) => s.role === "daemon");
 
   // Auto-select: prefer most recent alive user session, else most recent user session
   const effectiveSelectedId = (() => {
@@ -171,60 +171,60 @@ export default function CellDetailPage() {
 
   return (
     <div>
-      <Link to={cell.sortie_id ? `/sorties/${cell.sortie_id}` : "/cells"} className="back-link">
+      <Link to={worktop.slate_id ? `/slates/${worktop.slate_id}` : "/worktops"} className="back-link">
         &larr; Back
       </Link>
-      <div className="card cell-detail__card">
-        <div className="cell-detail__header">
+      <div className="card worktop-detail__card">
+        <div className="worktop-detail__header">
           <div>
-            <div className="cell-detail__title">
-              {cell.repo}{" "}
-              <span className="cell-detail__title-branch">
-                / {cell.branch}
+            <div className="worktop-detail__title">
+              {worktop.repo}{" "}
+              <span className="worktop-detail__title-branch">
+                / {worktop.branch}
               </span>
             </div>
-            <div className="cell-detail__badges">
-              {cell.status === "archived" && (
+            <div className="worktop-detail__badges">
+              {worktop.status === "archived" && (
                 <StatusBadge
-                  status={cell.archive_reason === "merged" ? "completed" : "archived"}
-                  label={cell.archive_reason === "merged" ? "Merged" : cell.archive_reason === "closed" ? "Closed" : "Archived"}
+                  status={worktop.archive_reason === "merged" ? "completed" : "archived"}
+                  label={worktop.archive_reason === "merged" ? "Merged" : worktop.archive_reason === "closed" ? "Closed" : "Archived"}
                 />
               )}
               {isLocal && <StatusBadge status="local" label="local" />}
               {!isLocal && (
                 <StatusBadge
-                  status={cell.ci_status}
-                  label={`CI: ${cell.ci_status}`}
+                  status={worktop.ci_status}
+                  label={`CI: ${worktop.ci_status}`}
                 />
               )}
               <StatusBadge
-                status={cell.tend_status}
-                label={`Tend: ${cell.tend_status}`}
+                status={worktop.tend_status}
+                label={`Tend: ${worktop.tend_status}`}
               />
             </div>
-            {cell.pr_url && (
-              <div className="cell-detail__pr">
+            {worktop.pr_url && (
+              <div className="worktop-detail__pr">
                 <a
-                  href={cell.pr_url}
+                  href={worktop.pr_url}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="link"
                 >
-                  PR #{cell.pr_number} ↗
+                  PR #{worktop.pr_number} ↗
                 </a>
               </div>
             )}
           </div>
-          <div className="cell-detail__actions">
+          <div className="worktop-detail__actions">
             <div
               className="btn btn--md btn--gray"
-              onClick={() => openInVSCode(cell.id)}
+              onClick={() => openInVSCode(worktop.id)}
             >
               VS Code
             </div>
             <div
               className="btn btn--md btn--soft-blue"
-              onClick={() => triggerSync(cell.id)}
+              onClick={() => triggerSync(worktop.id)}
             >
               Tend
             </div>
@@ -233,15 +233,15 @@ export default function CellDetailPage() {
                 {
                   label: "Archive",
                   onClick: async () => {
-                    await archiveCell(cell.id);
-                    navigate("/cells");
+                    await archiveWorktop(worktop.id);
+                    navigate("/worktops");
                   },
                 },
                 {
                   label: "Delete",
                   onClick: async () => {
-                    await deleteCell(cell.id);
-                    navigate("/cells");
+                    await deleteWorktop(worktop.id);
+                    navigate("/worktops");
                   },
                   danger: true,
                 },
@@ -251,8 +251,8 @@ export default function CellDetailPage() {
         </div>
       </div>
 
-      <div className="cell-detail__sessions-header">
-        <div className="cell-detail__sessions-title">Sessions</div>
+      <div className="worktop-detail__sessions-header">
+        <div className="worktop-detail__sessions-title">Sessions</div>
       </div>
 
       {userSessions.length === 0 ? (
@@ -275,7 +275,7 @@ export default function CellDetailPage() {
                     <div
                       className="btn btn--sm btn--soft-gray"
                       onClick={async () => {
-                        await openSessionInVSCode(cell.id, selectedSession.id);
+                        await openSessionInVSCode(worktop.id, selectedSession.id);
                         load();
                       }}
                     >
@@ -302,7 +302,7 @@ export default function CellDetailPage() {
                   alive={selectedSession.alive}
                   autoFocus={selectedSession.id === selectedSessionId}
                   onResume={() => handleResumeSession(selectedSession.id)}
-                  fetchXtermState={() => fetchXtermState(cell.id, selectedSession.id)}
+                  fetchXtermState={() => fetchXtermState(worktop.id, selectedSession.id)}
                 />
               </>
             )}
@@ -337,16 +337,16 @@ export default function CellDetailPage() {
 
       {daemonSessions.length > 0 && (
         <div>
-          <div className="cell-detail__daemon-title">Daemon sessions</div>
-          <div className="cell-detail__daemon-list">
+          <div className="worktop-detail__daemon-title">Daemon sessions</div>
+          <div className="worktop-detail__daemon-list">
             {[...daemonSessions].reverse().map((s) => (
               <CollapsibleSession
                 key={s.id}
                 session={s}
-                cellId={cell.id}
+                worktopId={worktop.id}
                 onResume={() => handleResumeSession(s.id)}
                 onVSCode={async () => {
-                  await openSessionInVSCode(cell.id, s.id);
+                  await openSessionInVSCode(worktop.id, s.id);
                   load();
                 }}
               />

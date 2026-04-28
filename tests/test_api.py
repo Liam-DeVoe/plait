@@ -41,8 +41,8 @@ def _setup_gh_for_pr(
     return pr_url
 
 
-async def _create_cell_via_api(client_tuple, branch="test-branch", pr_number=42):
-    """Helper to create a cell via the API and return the response."""
+async def _create_worktop_via_api(client_tuple, branch="test-branch", pr_number=42):
+    """Helper to create a worktop via the API and return the response."""
     client, git_env, mock_gh = client_tuple
 
     # Push a branch so the worktree can be created from it
@@ -52,12 +52,12 @@ async def _create_cell_via_api(client_tuple, branch="test-branch", pr_number=42)
     git_env.checkout("main")
 
     pr_url = _setup_gh_for_pr(mock_gh, git_env, branch, pr_number)
-    resp = await client.post("/cells", json={"pr_url": pr_url})
+    resp = await client.post("/worktops", json={"pr_url": pr_url})
     return resp
 
 
-async def test_create_cell(client):
-    resp = await _create_cell_via_api(client)
+async def test_create_worktop(client):
+    resp = await _create_worktop_via_api(client)
     assert resp.status_code == 200
     data = resp.json()
     assert data["repo"] == client[1].repo_id
@@ -68,99 +68,99 @@ async def test_create_cell(client):
     assert data["worktree_path"]  # non-empty
 
 
-async def test_list_cells_empty(client):
+async def test_list_worktops_empty(client):
     c, _, _ = client
-    resp = await c.get("/cells")
+    resp = await c.get("/worktops")
     assert resp.status_code == 200
     assert resp.json() == []
 
 
-async def test_list_cells_after_create(client):
-    await _create_cell_via_api(client)
+async def test_list_worktops_after_create(client):
+    await _create_worktop_via_api(client)
     c, _, _ = client
-    resp = await c.get("/cells")
+    resp = await c.get("/worktops")
     assert resp.status_code == 200
     assert len(resp.json()) == 1
 
 
-async def test_get_cell(client):
-    create_resp = await _create_cell_via_api(client)
-    cell_id = create_resp.json()["id"]
+async def test_get_worktop(client):
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
     c, _, _ = client
-    resp = await c.get(f"/cells/{cell_id}")
+    resp = await c.get(f"/worktops/{worktop_id}")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["id"] == cell_id
+    assert data["id"] == worktop_id
     assert "sessions" in data
 
 
-async def test_get_cell_not_found(client):
+async def test_get_worktop_not_found(client):
     c, _, _ = client
-    resp = await c.get("/cells/nonexistent")
+    resp = await c.get("/worktops/nonexistent")
     assert resp.status_code == 404
 
 
-async def test_archive_cell(client):
-    create_resp = await _create_cell_via_api(client)
-    cell_id = create_resp.json()["id"]
+async def test_archive_worktop(client):
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
     c, _, _ = client
-    resp = await c.post(f"/cells/{cell_id}/archive")
+    resp = await c.post(f"/worktops/{worktop_id}/archive")
     assert resp.status_code == 200
     assert resp.json()["status"] == "archived"
     assert resp.json()["archived_at"] is not None
 
 
-async def test_archive_cell_not_found(client):
+async def test_archive_worktop_not_found(client):
     c, _, _ = client
-    resp = await c.post("/cells/nonexistent/archive")
+    resp = await c.post("/worktops/nonexistent/archive")
     assert resp.status_code == 404
 
 
-async def test_delete_cell(client):
-    create_resp = await _create_cell_via_api(client)
-    cell_id = create_resp.json()["id"]
+async def test_delete_worktop(client):
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
     c, _, _ = client
-    resp = await c.delete(f"/cells/{cell_id}")
+    resp = await c.delete(f"/worktops/{worktop_id}")
     assert resp.status_code == 200
 
     # Verify it's gone
-    resp = await c.get(f"/cells/{cell_id}")
+    resp = await c.get(f"/worktops/{worktop_id}")
     assert resp.status_code == 404
 
 
-async def test_delete_cell_not_found(client):
+async def test_delete_worktop_not_found(client):
     c, _, _ = client
-    resp = await c.delete("/cells/nonexistent")
+    resp = await c.delete("/worktops/nonexistent")
     assert resp.status_code == 404
 
 
-async def test_create_local_cell(client):
-    """Creating a cell with just repo should create a local cell with generic branch."""
+async def test_create_local_worktop(client):
+    """Creating a worktop with just repo should create a local worktop with generic branch."""
     c, git_env, _ = client
-    resp = await c.post("/cells", json={"repo": git_env.repo_id})
+    resp = await c.post("/worktops", json={"repo": git_env.repo_id})
     assert resp.status_code == 200
     data = resp.json()
     assert data["repo"] == git_env.repo_id
-    assert data["branch"].startswith("cell/")
+    assert data["branch"].startswith("worktop/")
     assert data["pr_number"] is None
     assert data["pr_url"] is None
     assert data["status"] == "open"
     assert data["worktree_path"]
 
 
-async def test_create_cell_requires_pr_url_or_repo(client):
+async def test_create_worktop_requires_pr_url_or_repo(client):
     c, _, _ = client
-    resp = await c.post("/cells", json={})
+    resp = await c.post("/worktops", json={})
     assert resp.status_code == 400
 
 
-async def test_create_cell_bad_url(client):
+async def test_create_worktop_bad_url(client):
     c, _, _ = client
-    resp = await c.post("/cells", json={"pr_url": "not-a-url"})
+    resp = await c.post("/worktops", json={"pr_url": "not-a-url"})
     assert resp.status_code == 400
 
 
-async def test_create_cell_gh_returns_non_json(client):
+async def test_create_worktop_gh_returns_non_json(client):
     """When gh pr view returns non-JSON output, the API should return 400, not 500."""
     c, git_env, mock_gh = client
     from server.config import get_repo
@@ -170,11 +170,11 @@ async def test_create_cell_gh_returns_non_json(client):
     # gh returns success (rc=0) but non-JSON output
     mock_gh.set_response("pr view", 0, "Internal Server Error")
 
-    resp = await c.post("/cells", json={"pr_url": pr_url})
+    resp = await c.post("/worktops", json={"pr_url": pr_url})
     assert resp.status_code == 400
 
 
-async def test_create_cell_repo_path_missing(client):
+async def test_create_worktop_repo_path_missing(client):
     """When the configured repo path doesn't exist on disk, should return 400, not 500."""
     c, git_env, mock_gh = client
 
@@ -192,222 +192,222 @@ async def test_create_cell_repo_path_missing(client):
         json.dumps({"number": 1, "url": pr_url, "headRefName": "fix-bug"}),
     )
 
-    resp = await c.post("/cells", json={"pr_url": pr_url})
+    resp = await c.post("/worktops", json={"pr_url": pr_url})
     assert resp.status_code == 400
 
 
-async def test_list_cells_filter_by_status(client):
-    create_resp = await _create_cell_via_api(client)
-    cell_id = create_resp.json()["id"]
+async def test_list_worktops_filter_by_status(client):
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
     c, _, _ = client
 
-    # Archive the cell
-    await c.post(f"/cells/{cell_id}/archive")
+    # Archive the worktop
+    await c.post(f"/worktops/{worktop_id}/archive")
 
     # Filter open — should be empty
-    resp = await c.get("/cells?status=open")
+    resp = await c.get("/worktops?status=open")
     assert len(resp.json()) == 0
 
     # Filter archived — should have one
-    resp = await c.get("/cells?status=archived")
+    resp = await c.get("/worktops?status=archived")
     assert len(resp.json()) == 1
 
 
-async def test_create_sortie(client):
+async def test_create_slate(client):
     c, git_env, _ = client
     resp = await c.post(
-        "/sorties",
+        "/slates",
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["session_id"] is not None  # session created inline with PTY
 
 
-async def test_list_sorties(client):
+async def test_list_slates(client):
     c, git_env, _ = client
     await c.post(
-        "/sorties",
+        "/slates",
     )
-    resp = await c.get("/sorties")
+    resp = await c.get("/slates")
     assert resp.status_code == 200
     data = resp.json()
     assert len(data) == 1
-    assert "cell_count" in data[0]
+    assert "worktop_count" in data[0]
 
 
-async def test_hook_create_sortie_cell(client):
-    """Sortie create-cell hook should create a cell linked to the sortie."""
+async def test_hook_create_slate_worktop(client):
+    """Slate create-worktop hook should create a worktop linked to the slate."""
     c, git_env, _ = client
     resp = await c.post(
-        "/sorties",
+        "/slates",
     )
-    sortie_id = resp.json()["id"]
+    slate_id = resp.json()["id"]
 
     resp = await c.post(
-        f"/hooks/sorties/{sortie_id}/create-cell",
+        f"/hooks/slates/{slate_id}/create-worktop",
         json={"repo": git_env.repo_id},
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["cell_id"]
+    assert data["worktop_id"]
     assert data["worktree_path"]
-    assert data["branch"] == f"sortie/{sortie_id[:8]}/{git_env.repo_id}"
+    assert data["branch"] == f"slate/{slate_id[:8]}/{git_env.repo_id}"
 
-    # Verify cell exists and is linked to sortie
-    resp = await c.get(f"/cells/{data['cell_id']}")
-    assert resp.json()["sortie_id"] == sortie_id
+    # Verify worktop exists and is linked to slate
+    resp = await c.get(f"/worktops/{data['worktop_id']}")
+    assert resp.json()["slate_id"] == slate_id
 
 
-async def test_hook_create_sortie_cell_duplicate(client):
-    """Creating a duplicate cell for the same repo in a sortie should fail."""
+async def test_hook_create_slate_worktop_duplicate(client):
+    """Creating a duplicate worktop for the same repo in a slate should fail."""
     c, git_env, _ = client
     resp = await c.post(
-        "/sorties",
+        "/slates",
     )
-    sortie_id = resp.json()["id"]
+    slate_id = resp.json()["id"]
 
     await c.post(
-        f"/hooks/sorties/{sortie_id}/create-cell",
+        f"/hooks/slates/{slate_id}/create-worktop",
         json={"repo": git_env.repo_id},
     )
     resp = await c.post(
-        f"/hooks/sorties/{sortie_id}/create-cell",
+        f"/hooks/slates/{slate_id}/create-worktop",
         json={"repo": git_env.repo_id},
     )
     assert resp.status_code == 400
 
 
-async def test_hook_create_sortie_cell_bad_repo(client):
+async def test_hook_create_slate_worktop_bad_repo(client):
     c, _, _ = client
     resp = await c.post(
-        "/sorties",
+        "/slates",
     )
-    sortie_id = resp.json()["id"]
+    slate_id = resp.json()["id"]
 
     resp = await c.post(
-        f"/hooks/sorties/{sortie_id}/create-cell",
+        f"/hooks/slates/{slate_id}/create-worktop",
         json={"repo": "nonexistent"},
     )
     assert resp.status_code == 400
 
 
-async def test_hook_create_cell(client):
-    """Hook should create a standalone cell in the given repo."""
+async def test_hook_create_worktop(client):
+    """Hook should create a standalone worktop in the given repo."""
     c, git_env, _ = client
-    resp = await c.post("/hooks/create-cell", json={"repo": git_env.repo_id})
+    resp = await c.post("/hooks/create-worktop", json={"repo": git_env.repo_id})
     assert resp.status_code == 200
     data = resp.json()
-    assert data["cell_id"]
-    assert f"/cells/{data['cell_id']}" in data["url"]
+    assert data["worktop_id"]
+    assert f"/worktops/{data['worktop_id']}" in data["url"]
 
-    # Verify cell exists and has no sortie
-    resp = await c.get(f"/cells/{data['cell_id']}")
+    # Verify worktop exists and has no slate
+    resp = await c.get(f"/worktops/{data['worktop_id']}")
     assert resp.status_code == 200
-    assert resp.json()["sortie_id"] is None
+    assert resp.json()["slate_id"] is None
     assert resp.json()["repo"] == git_env.repo_id
 
 
-async def test_hook_create_cell_bad_repo(client):
+async def test_hook_create_worktop_bad_repo(client):
     c, _, _ = client
-    resp = await c.post("/hooks/create-cell", json={"repo": "nonexistent"})
+    resp = await c.post("/hooks/create-worktop", json={"repo": "nonexistent"})
     assert resp.status_code == 400
 
 
 async def test_hook_branch_updated(client):
-    """Hook should update the cell's branch in the DB."""
-    create_resp = await _create_cell_via_api(client)
-    cell_id = create_resp.json()["id"]
+    """Hook should update the worktop's branch in the DB."""
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
     c, _, _ = client
 
     resp = await c.post(
-        f"/hooks/cells/{cell_id}/branch-updated",
+        f"/hooks/worktops/{worktop_id}/branch-updated",
         json={"branch": "fix-timeout-handling"},
     )
     assert resp.status_code == 200
 
     # Verify branch was updated
-    resp = await c.get(f"/cells/{cell_id}")
+    resp = await c.get(f"/worktops/{worktop_id}")
     assert resp.json()["branch"] == "fix-timeout-handling"
 
 
 async def test_hook_pr_created(client):
-    """Hook should update the cell's PR info in the DB."""
-    create_resp = await _create_cell_via_api(client)
-    cell_id = create_resp.json()["id"]
+    """Hook should update the worktop's PR info in the DB."""
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
     c, _, _ = client
 
     resp = await c.post(
-        f"/hooks/cells/{cell_id}/pr-created",
+        f"/hooks/worktops/{worktop_id}/pr-created",
         json={"pr_url": "https://github.com/org/repo/pull/99", "pr_number": 99},
     )
     assert resp.status_code == 200
 
     # Verify PR info was updated
-    resp = await c.get(f"/cells/{cell_id}")
+    resp = await c.get(f"/worktops/{worktop_id}")
     assert resp.json()["pr_number"] == 99
     assert resp.json()["pr_url"] == "https://github.com/org/repo/pull/99"
 
 
-async def test_hook_cell_not_found(client):
+async def test_hook_worktop_not_found(client):
     c, _, _ = client
     resp = await c.post(
-        "/hooks/cells/nonexistent/branch-updated",
+        "/hooks/worktops/nonexistent/branch-updated",
         json={"branch": "foo"},
     )
     assert resp.status_code == 404
 
 
 async def test_create_session(client, mock_pty):
-    """POST /cells/:id/sessions should spawn an interactive PTY session."""
-    create_resp = await _create_cell_via_api(client)
-    cell_id = create_resp.json()["id"]
+    """POST /worktops/:id/sessions should spawn an interactive PTY session."""
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
     c, _, _ = client
 
     resp = await c.post(
-        f"/cells/{cell_id}/sessions",
+        f"/worktops/{worktop_id}/sessions",
         json={"prompt": "fix the tests"},
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["cell_id"] == cell_id
+    assert data["worktop_id"] == worktop_id
     assert data["role"] == "user"
     assert data["alive"] is True
     assert data["ended_at"] is None
     assert mock_pty.spawn.called
 
-    # Verify it shows up in cell sessions
-    resp = await c.get(f"/cells/{cell_id}/sessions")
+    # Verify it shows up in worktop sessions
+    resp = await c.get(f"/worktops/{worktop_id}/sessions")
     assert len(resp.json()) == 1
 
 
 async def test_create_session_no_prompt(client, mock_pty):
     """Sessions can be created without a prompt."""
-    create_resp = await _create_cell_via_api(client)
-    cell_id = create_resp.json()["id"]
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
     c, _, _ = client
 
-    resp = await c.post(f"/cells/{cell_id}/sessions", json={})
+    resp = await c.post(f"/worktops/{worktop_id}/sessions", json={})
     assert resp.status_code == 200
     assert mock_pty.spawn.called
 
 
-async def test_create_session_cell_not_found(client, mock_pty):
+async def test_create_session_worktop_not_found(client, mock_pty):
     c, _, _ = client
     resp = await c.post(
-        "/cells/nonexistent/sessions",
+        "/worktops/nonexistent/sessions",
         json={"prompt": "hello"},
     )
     assert resp.status_code == 404
 
 
 async def test_resume_session(client, mock_pty):
-    """POST /cells/:id/sessions/:sid/resume should spawn a new PTY."""
-    create_resp = await _create_cell_via_api(client)
-    cell_id = create_resp.json()["id"]
+    """POST /worktops/:id/sessions/:sid/resume should spawn a new PTY."""
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
     c, _, _ = client
 
     # Create a session, then simulate it dying
-    resp = await c.post(f"/cells/{cell_id}/sessions", json={})
+    resp = await c.post(f"/worktops/{worktop_id}/sessions", json={})
     session_id = resp.json()["id"]
 
     # Simulate the PTY dying and mark ended in DB
@@ -416,7 +416,7 @@ async def test_resume_session(client, mock_pty):
 
     await db.update_session(session_id, ended_at="2024-01-01T00:00:00+00:00")
 
-    resp = await c.post(f"/cells/{cell_id}/sessions/{session_id}/resume")
+    resp = await c.post(f"/worktops/{worktop_id}/sessions/{session_id}/resume")
     assert resp.status_code == 200
     assert resp.json()["ended_at"] is None
 
@@ -432,21 +432,21 @@ async def test_repos_endpoint_includes_kind(client):
 
 
 async def test_hook_pr_created_rejected_for_local_repo(client):
-    """The pr-created hook must reject cells in local-only repos."""
+    """The pr-created hook must reject worktops in local-only repos."""
     c, git_env, _ = client
-    # Add a local repo, then create a cell in it.
+    # Add a local repo, then create a worktop in it.
     import server.config as config_module
 
     config_module._data["repos"]["local-r"] = {
         "path": str(git_env.clone),
         "kind": "local",
     }
-    resp = await c.post("/hooks/create-cell", json={"repo": "local-r"})
+    resp = await c.post("/hooks/create-worktop", json={"repo": "local-r"})
     assert resp.status_code == 200
-    cell_id = resp.json()["cell_id"]
+    worktop_id = resp.json()["worktop_id"]
 
     resp = await c.post(
-        f"/hooks/cells/{cell_id}/pr-created",
+        f"/hooks/worktops/{worktop_id}/pr-created",
         json={"pr_url": "https://github.com/x/y/pull/1", "pr_number": 1},
     )
     assert resp.status_code == 400
@@ -461,24 +461,24 @@ async def test_hook_ci_failure_expected_rejected_for_local_repo(client):
         "path": str(git_env.clone),
         "kind": "local",
     }
-    resp = await c.post("/hooks/create-cell", json={"repo": "local-r2"})
+    resp = await c.post("/hooks/create-worktop", json={"repo": "local-r2"})
     assert resp.status_code == 200
-    cell_id = resp.json()["cell_id"]
+    worktop_id = resp.json()["worktop_id"]
 
-    resp = await c.post(f"/hooks/cells/{cell_id}/ci-failure-expected")
+    resp = await c.post(f"/hooks/worktops/{worktop_id}/ci-failure-expected")
     assert resp.status_code == 400
     assert "local-only" in resp.json()["detail"]
 
 
 async def test_resume_alive_session_fails(client, mock_pty):
     """Resuming an already-alive session should return 400."""
-    create_resp = await _create_cell_via_api(client)
-    cell_id = create_resp.json()["id"]
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
     c, _, _ = client
 
-    resp = await c.post(f"/cells/{cell_id}/sessions", json={})
+    resp = await c.post(f"/worktops/{worktop_id}/sessions", json={})
     session_id = resp.json()["id"]
 
     # Session is alive (mock default), so resume should fail
-    resp = await c.post(f"/cells/{cell_id}/sessions/{session_id}/resume")
+    resp = await c.post(f"/worktops/{worktop_id}/sessions/{session_id}/resume")
     assert resp.status_code == 400

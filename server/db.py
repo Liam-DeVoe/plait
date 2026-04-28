@@ -7,21 +7,21 @@ from pathlib import Path
 import aiosqlite
 
 from server.models import (
-    Cell,
-    CellStatus,
     CIStatus,
     Session,
     SessionRole,
-    Sortie,
+    Slate,
     SyncStatus,
+    Worktop,
+    WorktopStatus,
 )
 
-DB_PATH: str | Path = Path(__file__).parent.parent / "orrery.db"
+DB_PATH: str | Path = Path(__file__).parent.parent / "plait.db"
 
 SCHEMA = """
-CREATE TABLE IF NOT EXISTS cells (
+CREATE TABLE IF NOT EXISTS worktops (
     id TEXT PRIMARY KEY,
-    sortie_id TEXT,
+    slate_id TEXT,
     repo TEXT NOT NULL,
     branch TEXT NOT NULL,
     worktree_path TEXT NOT NULL,
@@ -37,10 +37,10 @@ CREATE TABLE IF NOT EXISTS cells (
     archived_at TEXT,
     archive_reason TEXT,
     last_activity_at TEXT,
-    FOREIGN KEY (sortie_id) REFERENCES sorties(id)
+    FOREIGN KEY (slate_id) REFERENCES slates(id)
 );
 
-CREATE TABLE IF NOT EXISTS sorties (
+CREATE TABLE IF NOT EXISTS slates (
     id TEXT PRIMARY KEY,
     session_id TEXT,
     name TEXT,
@@ -57,8 +57,8 @@ CREATE TABLE IF NOT EXISTS daemon_runs (
 
 CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
-    cell_id TEXT,
-    sortie_id TEXT,
+    worktop_id TEXT,
+    slate_id TEXT,
     role TEXT NOT NULL DEFAULT 'user',
     trigger_name TEXT,
     succeeded INTEGER,
@@ -66,8 +66,8 @@ CREATE TABLE IF NOT EXISTS sessions (
     xterm_state BLOB,
     started_at TEXT NOT NULL,
     ended_at TEXT,
-    FOREIGN KEY (cell_id) REFERENCES cells(id),
-    FOREIGN KEY (sortie_id) REFERENCES sorties(id)
+    FOREIGN KEY (worktop_id) REFERENCES worktops(id),
+    FOREIGN KEY (slate_id) REFERENCES slates(id)
 );
 """
 
@@ -83,14 +83,14 @@ async def init_db() -> None:
     db = await get_db()
     for migration in [
         "ALTER TABLE sessions ADD COLUMN xterm_state BLOB",
-        "ALTER TABLE sessions ADD COLUMN sortie_id TEXT",
-        "ALTER TABLE sorties ADD COLUMN session_id TEXT",
-        "ALTER TABLE cells ADD COLUMN pr_reaction_count INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE sorties DROP COLUMN status",
-        "ALTER TABLE cells ADD COLUMN last_activity_at TEXT",
-        "ALTER TABLE cells ADD COLUMN ci_failure_expected_sha TEXT",
-        "ALTER TABLE sorties ADD COLUMN name TEXT",
-        "ALTER TABLE sorties ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE sessions ADD COLUMN slate_id TEXT",
+        "ALTER TABLE slates ADD COLUMN session_id TEXT",
+        "ALTER TABLE worktops ADD COLUMN pr_reaction_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE slates DROP COLUMN status",
+        "ALTER TABLE worktops ADD COLUMN last_activity_at TEXT",
+        "ALTER TABLE worktops ADD COLUMN ci_failure_expected_sha TEXT",
+        "ALTER TABLE slates ADD COLUMN name TEXT",
+        "ALTER TABLE slates ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
     ]:
         try:
             await db.execute(migration)
@@ -100,72 +100,72 @@ async def init_db() -> None:
     await db.close()
 
 
-# --- Cells ---
+# --- Worktops ---
 
 
-async def create_cell(cell: Cell) -> Cell:
+async def create_worktop(worktop: Worktop) -> Worktop:
     db = await get_db()
     try:
         await db.execute(
-            """INSERT INTO cells (id, sortie_id, repo, branch, worktree_path,
+            """INSERT INTO worktops (id, slate_id, repo, branch, worktree_path,
                pr_number, pr_url, ci_status, ci_failure_expected_sha,
                pr_comment_count, pr_reaction_count,
                sync_status, status, created_at, archived_at, archive_reason,
                last_activity_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
-                cell.id,
-                cell.sortie_id,
-                cell.repo,
-                cell.branch,
-                cell.worktree_path,
-                cell.pr_number,
-                cell.pr_url,
-                cell.ci_status.value,
-                cell.ci_failure_expected_sha,
-                cell.pr_comment_count,
-                cell.pr_reaction_count,
-                cell.sync_status.value,
-                cell.status.value,
-                cell.created_at,
-                cell.archived_at,
-                cell.archive_reason,
-                cell.last_activity_at,
+                worktop.id,
+                worktop.slate_id,
+                worktop.repo,
+                worktop.branch,
+                worktop.worktree_path,
+                worktop.pr_number,
+                worktop.pr_url,
+                worktop.ci_status.value,
+                worktop.ci_failure_expected_sha,
+                worktop.pr_comment_count,
+                worktop.pr_reaction_count,
+                worktop.sync_status.value,
+                worktop.status.value,
+                worktop.created_at,
+                worktop.archived_at,
+                worktop.archive_reason,
+                worktop.last_activity_at,
             ),
         )
         await db.commit()
-        return cell
+        return worktop
     finally:
         await db.close()
 
 
-async def list_cells(status: CellStatus | None = None) -> list[Cell]:
+async def list_worktops(status: WorktopStatus | None = None) -> list[Worktop]:
     db = await get_db()
     try:
         if status:
             cursor = await db.execute(
-                "SELECT * FROM cells WHERE status = ? ORDER BY created_at DESC",
+                "SELECT * FROM worktops WHERE status = ? ORDER BY created_at DESC",
                 (status.value,),
             )
         else:
-            cursor = await db.execute("SELECT * FROM cells ORDER BY created_at DESC")
+            cursor = await db.execute("SELECT * FROM worktops ORDER BY created_at DESC")
         rows = await cursor.fetchall()
-        return [_row_to_cell(row) for row in rows]
+        return [_row_to_worktop(row) for row in rows]
     finally:
         await db.close()
 
 
-async def get_cell(cell_id: str) -> Cell | None:
+async def get_worktop(worktop_id: str) -> Worktop | None:
     db = await get_db()
     try:
-        cursor = await db.execute("SELECT * FROM cells WHERE id = ?", (cell_id,))
+        cursor = await db.execute("SELECT * FROM worktops WHERE id = ?", (worktop_id,))
         row = await cursor.fetchone()
-        return _row_to_cell(row) if row else None
+        return _row_to_worktop(row) if row else None
     finally:
         await db.close()
 
 
-async def update_cell(cell_id: str, **kwargs: object) -> Cell | None:
+async def update_worktop(worktop_id: str, **kwargs: object) -> Worktop | None:
     db = await get_db()
     try:
         sets = []
@@ -175,31 +175,31 @@ async def update_cell(cell_id: str, **kwargs: object) -> Cell | None:
                 value = value.value
             sets.append(f"{key} = ?")
             values.append(value)
-        values.append(cell_id)
+        values.append(worktop_id)
         await db.execute(
-            f"UPDATE cells SET {', '.join(sets)} WHERE id = ?",
+            f"UPDATE worktops SET {', '.join(sets)} WHERE id = ?",
             values,
         )
         await db.commit()
-        return await get_cell(cell_id)
+        return await get_worktop(worktop_id)
     finally:
         await db.close()
 
 
-async def delete_cell(cell_id: str) -> bool:
+async def delete_worktop(worktop_id: str) -> bool:
     db = await get_db()
     try:
-        cursor = await db.execute("DELETE FROM cells WHERE id = ?", (cell_id,))
+        cursor = await db.execute("DELETE FROM worktops WHERE id = ?", (worktop_id,))
         await db.commit()
         return cursor.rowcount > 0
     finally:
         await db.close()
 
 
-def _row_to_cell(row: aiosqlite.Row) -> Cell:
-    return Cell(
+def _row_to_worktop(row: aiosqlite.Row) -> Worktop:
+    return Worktop(
         id=row["id"],
-        sortie_id=row["sortie_id"],
+        slate_id=row["slate_id"],
         repo=row["repo"],
         branch=row["branch"],
         worktree_path=row["worktree_path"],
@@ -210,7 +210,7 @@ def _row_to_cell(row: aiosqlite.Row) -> Cell:
         pr_comment_count=row["pr_comment_count"],
         pr_reaction_count=row["pr_reaction_count"],
         sync_status=SyncStatus(row["sync_status"]),
-        status=CellStatus(row["status"]),
+        status=WorktopStatus(row["status"]),
         created_at=row["created_at"],
         archived_at=row["archived_at"],
         archive_reason=row["archive_reason"],
@@ -226,13 +226,13 @@ async def create_session(session: Session) -> Session:
     try:
         succeeded_val = None if session.succeeded is None else int(session.succeeded)
         await db.execute(
-            """INSERT INTO sessions (id, cell_id, sortie_id, role, trigger_name,
+            """INSERT INTO sessions (id, worktop_id, slate_id, role, trigger_name,
                succeeded, transcript, xterm_state, started_at, ended_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session.id,
-                session.cell_id,
-                session.sortie_id,
+                session.worktop_id,
+                session.slate_id,
                 session.role.value,
                 session.trigger,
                 succeeded_val,
@@ -248,12 +248,12 @@ async def create_session(session: Session) -> Session:
         await db.close()
 
 
-async def list_sessions(cell_id: str) -> list[Session]:
+async def list_sessions(worktop_id: str) -> list[Session]:
     db = await get_db()
     try:
         cursor = await db.execute(
-            "SELECT * FROM sessions WHERE cell_id = ? ORDER BY started_at ASC",
-            (cell_id,),
+            "SELECT * FROM sessions WHERE worktop_id = ? ORDER BY started_at ASC",
+            (worktop_id,),
         )
         rows = await cursor.fetchall()
         return [_row_to_session(row) for row in rows]
@@ -307,8 +307,8 @@ def _row_to_session(row: aiosqlite.Row) -> Session:
     succeeded_raw = row["succeeded"]
     return Session(
         id=row["id"],
-        cell_id=row["cell_id"],
-        sortie_id=row["sortie_id"],
+        worktop_id=row["worktop_id"],
+        slate_id=row["slate_id"],
         role=SessionRole(row["role"]),
         trigger=row["trigger_name"],
         succeeded=None if succeeded_raw is None else bool(succeeded_raw),
@@ -319,51 +319,51 @@ def _row_to_session(row: aiosqlite.Row) -> Session:
     )
 
 
-# --- Sorties ---
+# --- Slates ---
 
 
-async def create_sortie(sortie: Sortie) -> Sortie:
+async def create_slate(slate: Slate) -> Slate:
     db = await get_db()
     try:
         await db.execute(
-            """INSERT INTO sorties (id, session_id, name, archived, created_at)
+            """INSERT INTO slates (id, session_id, name, archived, created_at)
                VALUES (?, ?, ?, ?, ?)""",
             (
-                sortie.id,
-                sortie.session_id,
-                sortie.name,
-                int(sortie.archived),
-                sortie.created_at,
+                slate.id,
+                slate.session_id,
+                slate.name,
+                int(slate.archived),
+                slate.created_at,
             ),
         )
         await db.commit()
-        return sortie
+        return slate
     finally:
         await db.close()
 
 
-async def list_sorties() -> list[Sortie]:
+async def list_slates() -> list[Slate]:
     db = await get_db()
     try:
-        cursor = await db.execute("SELECT * FROM sorties ORDER BY created_at DESC")
+        cursor = await db.execute("SELECT * FROM slates ORDER BY created_at DESC")
         rows = await cursor.fetchall()
-        return [_row_to_sortie(row) for row in rows]
+        return [_row_to_slate(row) for row in rows]
     finally:
         await db.close()
 
 
-async def get_sortie(sortie_id: str) -> Sortie | None:
+async def get_slate(slate_id: str) -> Slate | None:
     db = await get_db()
     try:
-        cursor = await db.execute("SELECT * FROM sorties WHERE id = ?", (sortie_id,))
+        cursor = await db.execute("SELECT * FROM slates WHERE id = ?", (slate_id,))
         row = await cursor.fetchone()
-        return _row_to_sortie(row) if row else None
+        return _row_to_slate(row) if row else None
     finally:
         await db.close()
 
 
-def _row_to_sortie(row: aiosqlite.Row) -> Sortie:
-    return Sortie(
+def _row_to_slate(row: aiosqlite.Row) -> Slate:
+    return Slate(
         id=row["id"],
         session_id=row["session_id"],
         name=row["name"],
@@ -372,7 +372,7 @@ def _row_to_sortie(row: aiosqlite.Row) -> Sortie:
     )
 
 
-async def update_sortie(sortie_id: str, **kwargs: object) -> Sortie | None:
+async def update_slate(slate_id: str, **kwargs: object) -> Slate | None:
     conn = await get_db()
     try:
         sets = []
@@ -382,41 +382,41 @@ async def update_sortie(sortie_id: str, **kwargs: object) -> Sortie | None:
                 value = value.value
             sets.append(f"{key} = ?")
             values.append(value)
-        values.append(sortie_id)
+        values.append(slate_id)
         await conn.execute(
-            f"UPDATE sorties SET {', '.join(sets)} WHERE id = ?",
+            f"UPDATE slates SET {', '.join(sets)} WHERE id = ?",
             values,
         )
         await conn.commit()
-        return await get_sortie(sortie_id)
+        return await get_slate(slate_id)
     finally:
         await conn.close()
 
 
-async def list_cells_by_sortie(sortie_id: str) -> list[Cell]:
+async def list_worktops_by_slate(slate_id: str) -> list[Worktop]:
     conn = await get_db()
     try:
         cursor = await conn.execute(
-            "SELECT * FROM cells WHERE sortie_id = ? ORDER BY created_at DESC",
-            (sortie_id,),
+            "SELECT * FROM worktops WHERE slate_id = ? ORDER BY created_at DESC",
+            (slate_id,),
         )
         rows = await cursor.fetchall()
-        return [_row_to_cell(row) for row in rows]
+        return [_row_to_worktop(row) for row in rows]
     finally:
         await conn.close()
 
 
-async def delete_sortie(sortie_id: str) -> None:
+async def delete_slate(slate_id: str) -> None:
     conn = await get_db()
     try:
-        # Delete sortie-level sessions (orchestrator etc)
-        await conn.execute("DELETE FROM sessions WHERE sortie_id = ?", (sortie_id,))
-        # Detach cells — they continue to exist independently
+        # Delete slate-level sessions (orchestrator etc)
+        await conn.execute("DELETE FROM sessions WHERE slate_id = ?", (slate_id,))
+        # Detach worktops — they continue to exist independently
         await conn.execute(
-            "UPDATE cells SET sortie_id = NULL WHERE sortie_id = ?",
-            (sortie_id,),
+            "UPDATE worktops SET slate_id = NULL WHERE slate_id = ?",
+            (slate_id,),
         )
-        await conn.execute("DELETE FROM sorties WHERE id = ?", (sortie_id,))
+        await conn.execute("DELETE FROM slates WHERE id = ?", (slate_id,))
         await conn.commit()
     finally:
         await conn.close()

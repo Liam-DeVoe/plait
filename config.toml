@@ -32,6 +32,6 @@ upstream = "hegeldev/website"
 path = "/Users/tybug/Desktop/Liam/coding/hypothesis"
 upstream = "liam-devoe/hypothesis"
 
-[repos.orrery]
-path = "/Users/tybug/Desktop/Liam/coding/hegel/orrery"
+[repos.plait]
+path = "/Users/tybug/Desktop/Liam/coding/hegel/plait"
 kind = "local"

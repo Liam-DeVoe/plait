@@ -1,6 +1,6 @@
-export interface Cell {
+export interface Worktop {
   id: string;
-  sortie_id: string | null;
+  slate_id: string | null;
   repo: string;
   branch: string;
   worktree_path: string;
@@ -17,7 +17,7 @@ export interface Cell {
 
 export interface Session {
   id: string;
-  cell_id: string;
+  worktop_id: string;
   role: "daemon" | "user";
   trigger: string | null;
   succeeded: boolean | null;
@@ -27,19 +27,19 @@ export interface Session {
   alive: boolean;
 }
 
-export interface Sortie {
+export interface Slate {
   id: string;
   session_id: string | null;
   name: string | null;
   archived: boolean;
   is_archived: boolean;
   created_at: string;
-  cells?: Cell[];
+  worktops?: Worktop[];
   session?: Session;
 }
 
 export interface DaemonRunResult {
-  cell_id: string;
+  worktop_id: string;
   repo: string;
   branch: string;
   decision: "ok" | "skipped" | "tended" | "deferred" | "archived" | "error";
@@ -78,108 +78,108 @@ export async function fetchRepos(): Promise<Repo[]> {
   return res.json();
 }
 
-export async function fetchCells(status?: string): Promise<Cell[]> {
+export async function fetchWorktops(status?: string): Promise<Worktop[]> {
   const params = status ? `?status=${status}` : "";
-  const res = await fetch(`${BASE}/cells${params}`);
+  const res = await fetch(`${BASE}/worktops${params}`);
   return res.json();
 }
 
-export async function fetchCell(id: string): Promise<Cell & { sessions: Session[] }> {
-  const res = await fetch(`${BASE}/cells/${id}`);
+export async function fetchWorktop(id: string): Promise<Worktop & { sessions: Session[] }> {
+  const res = await fetch(`${BASE}/worktops/${id}`);
   return res.json();
 }
 
-export async function createCell(prUrl: string): Promise<Cell> {
-  const res = await fetch(`${BASE}/cells`, {
+export async function createWorktop(prUrl: string): Promise<Worktop> {
+  const res = await fetch(`${BASE}/worktops`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ pr_url: prUrl }),
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || "Failed to create cell");
+    throw new Error(err.detail || "Failed to create worktop");
   }
   return res.json();
 }
 
-export async function createLocalCell(repo: string): Promise<Cell> {
-  const res = await fetch(`${BASE}/cells`, {
+export async function createLocalWorktop(repo: string): Promise<Worktop> {
+  const res = await fetch(`${BASE}/worktops`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ repo }),
   });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || "Failed to create cell");
+    throw new Error(err.detail || "Failed to create worktop");
   }
   return res.json();
 }
 
-export async function archiveCell(id: string): Promise<Cell> {
-  const res = await fetch(`${BASE}/cells/${id}/archive`, { method: "POST" });
+export async function archiveWorktop(id: string): Promise<Worktop> {
+  const res = await fetch(`${BASE}/worktops/${id}/archive`, { method: "POST" });
   return res.json();
 }
 
-export async function reopenCell(id: string): Promise<Cell> {
-  const res = await fetch(`${BASE}/cells/${id}/reopen`, { method: "POST" });
+export async function reopenWorktop(id: string): Promise<Worktop> {
+  const res = await fetch(`${BASE}/worktops/${id}/reopen`, { method: "POST" });
   return res.json();
 }
 
 export async function triggerSync(id: string): Promise<void> {
-  await fetch(`${BASE}/cells/${id}/sync`, { method: "POST" });
+  await fetch(`${BASE}/worktops/${id}/sync`, { method: "POST" });
 }
 
-export async function deleteCell(id: string): Promise<void> {
-  await fetch(`${BASE}/cells/${id}`, { method: "DELETE" });
+export async function deleteWorktop(id: string): Promise<void> {
+  await fetch(`${BASE}/worktops/${id}`, { method: "DELETE" });
 }
 
 export async function openInVSCode(id: string): Promise<void> {
-  await fetch(`${BASE}/cells/${id}/vscode`, { method: "POST" });
+  await fetch(`${BASE}/worktops/${id}/vscode`, { method: "POST" });
 }
 
-export async function openSessionInVSCode(cellId: string, sessionId: string): Promise<void> {
-  await fetch(`${BASE}/cells/${cellId}/sessions/${sessionId}/vscode`, { method: "POST" });
+export async function openSessionInVSCode(worktopId: string, sessionId: string): Promise<void> {
+  await fetch(`${BASE}/worktops/${worktopId}/sessions/${sessionId}/vscode`, { method: "POST" });
 }
 
-export async function fetchSorties(): Promise<(Sortie & { cell_count: number })[]> {
-  const res = await fetch(`${BASE}/sorties`);
+export async function fetchSlates(): Promise<(Slate & { worktop_count: number })[]> {
+  const res = await fetch(`${BASE}/slates`);
   return res.json();
 }
 
-export async function fetchSortie(id: string): Promise<Sortie & { cells: Cell[] }> {
-  const res = await fetch(`${BASE}/sorties/${id}`);
+export async function fetchSlate(id: string): Promise<Slate & { worktops: Worktop[] }> {
+  const res = await fetch(`${BASE}/slates/${id}`);
   return res.json();
 }
 
-export async function createSortie(): Promise<Sortie> {
-  const res = await fetch(`${BASE}/sorties`, { method: "POST" });
+export async function createSlate(): Promise<Slate> {
+  const res = await fetch(`${BASE}/slates`, { method: "POST" });
   if (!res.ok) {
     const err = await res.json();
-    throw new Error(err.detail || "Failed to create sortie");
+    throw new Error(err.detail || "Failed to create slate");
   }
   return res.json();
 }
 
-export async function archiveSortie(id: string): Promise<Sortie> {
-  const res = await fetch(`${BASE}/sorties/${id}/archive`, { method: "POST" });
+export async function archiveSlate(id: string): Promise<Slate> {
+  const res = await fetch(`${BASE}/slates/${id}/archive`, { method: "POST" });
   return res.json();
 }
 
-export async function unarchiveSortie(id: string): Promise<Sortie> {
-  const res = await fetch(`${BASE}/sorties/${id}/unarchive`, { method: "POST" });
+export async function unarchiveSlate(id: string): Promise<Slate> {
+  const res = await fetch(`${BASE}/slates/${id}/unarchive`, { method: "POST" });
   return res.json();
 }
 
-export async function deleteSortie(id: string): Promise<void> {
-  await fetch(`${BASE}/sorties/${id}`, { method: "DELETE" });
+export async function deleteSlate(id: string): Promise<void> {
+  await fetch(`${BASE}/slates/${id}`, { method: "DELETE" });
 }
 
-export async function openSortieInVSCode(id: string): Promise<void> {
-  await fetch(`${BASE}/sorties/${id}/vscode`, { method: "POST" });
+export async function openSlateInVSCode(id: string): Promise<void> {
+  await fetch(`${BASE}/slates/${id}/vscode`, { method: "POST" });
 }
 
-export async function createInteractiveSession(cellId: string, prompt?: string): Promise<Session> {
-  const res = await fetch(`${BASE}/cells/${cellId}/sessions`, {
+export async function createInteractiveSession(worktopId: string, prompt?: string): Promise<Session> {
+  const res = await fetch(`${BASE}/worktops/${worktopId}/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ prompt: prompt ?? "" }),
@@ -191,8 +191,8 @@ export async function createInteractiveSession(cellId: string, prompt?: string):
   return res.json();
 }
 
-export async function deleteSession(cellId: string, sessionId: string): Promise<void> {
-  const res = await fetch(`${BASE}/cells/${cellId}/sessions/${sessionId}`, {
+export async function deleteSession(worktopId: string, sessionId: string): Promise<void> {
+  const res = await fetch(`${BASE}/worktops/${worktopId}/sessions/${sessionId}`, {
     method: "DELETE",
   });
   if (!res.ok) {
@@ -201,16 +201,16 @@ export async function deleteSession(cellId: string, sessionId: string): Promise<
   }
 }
 
-export async function fetchXtermState(cellId: string, sessionId: string): Promise<ArrayBuffer> {
-  const res = await fetch(`${BASE}/cells/${cellId}/sessions/${sessionId}/xterm-state`);
+export async function fetchXtermState(worktopId: string, sessionId: string): Promise<ArrayBuffer> {
+  const res = await fetch(`${BASE}/worktops/${worktopId}/sessions/${sessionId}/xterm-state`);
   if (!res.ok) {
     throw new Error("Failed to fetch xterm state");
   }
   return res.arrayBuffer();
 }
 
-export async function resumeSession(cellId: string, sessionId: string): Promise<Session> {
-  const res = await fetch(`${BASE}/cells/${cellId}/sessions/${sessionId}/resume`, {
+export async function resumeSession(worktopId: string, sessionId: string): Promise<Session> {
+  const res = await fetch(`${BASE}/worktops/${worktopId}/sessions/${sessionId}/resume`, {
     method: "POST",
   });
   if (!res.ok) {
@@ -220,16 +220,16 @@ export async function resumeSession(cellId: string, sessionId: string): Promise<
   return res.json();
 }
 
-export async function fetchSortieXtermState(sortieId: string, sessionId: string): Promise<ArrayBuffer> {
-  const res = await fetch(`${BASE}/sorties/${sortieId}/sessions/${sessionId}/xterm-state`);
+export async function fetchSlateXtermState(slateId: string, sessionId: string): Promise<ArrayBuffer> {
+  const res = await fetch(`${BASE}/slates/${slateId}/sessions/${sessionId}/xterm-state`);
   if (!res.ok) {
     throw new Error("Failed to fetch xterm state");
   }
   return res.arrayBuffer();
 }
 
-export async function startSortieSession(sortieId: string, sessionId: string): Promise<Session> {
-  const res = await fetch(`${BASE}/sorties/${sortieId}/sessions/${sessionId}/start`, {
+export async function startSlateSession(slateId: string, sessionId: string): Promise<Session> {
+  const res = await fetch(`${BASE}/slates/${slateId}/sessions/${sessionId}/start`, {
     method: "POST",
   });
   if (!res.ok) {
@@ -239,8 +239,8 @@ export async function startSortieSession(sortieId: string, sessionId: string): P
   return res.json();
 }
 
-export async function resumeSortieSession(sortieId: string, sessionId: string): Promise<Session> {
-  const res = await fetch(`${BASE}/sorties/${sortieId}/sessions/${sessionId}/resume`, {
+export async function resumeSlateSession(slateId: string, sessionId: string): Promise<Session> {
+  const res = await fetch(`${BASE}/slates/${slateId}/sessions/${sessionId}/resume`, {
     method: "POST",
   });
   if (!res.ok) {

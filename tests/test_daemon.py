@@ -5,14 +5,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from server import daemon, db, git
-from server.daemon import process_cell
+from server.daemon import process_worktop
 from server.models import (
-    Cell,
-    CellStatus,
     CIStatus,
     Session,
     SessionRole,
     SyncStatus,
+    Worktop,
+    WorktopStatus,
 )
 
 
@@ -77,30 +77,30 @@ def _mock_pr_data(
     mock_gh.set_response(f"/pulls/{pr_number}", 0, pr_json)
 
 
-async def _create_cell_in_db(git_env, branch: str, cell_id: str) -> Cell:
-    """Helper: create a worktree and DB record for a cell."""
-    wt_path = await git.create_worktree(git_env.repo_id, branch, cell_id)
-    cell = Cell(
-        id=cell_id,
+async def _create_worktop_in_db(git_env, branch: str, worktop_id: str) -> Worktop:
+    """Helper: create a worktree and DB record for a worktop."""
+    wt_path = await git.create_worktree(git_env.repo_id, branch, worktop_id)
+    worktop = Worktop(
+        id=worktop_id,
         repo=git_env.repo_id,
         branch=branch,
         worktree_path=wt_path,
     )
-    await db.create_cell(cell)
-    return cell
+    await db.create_worktop(worktop)
+    return worktop
 
 
-async def test_cell_current_no_action(git_env, init_db):
-    """If cell is not behind main, process_cell should do nothing."""
-    cell = await _create_cell_in_db(git_env, "up-to-date", "daemon-1")
+async def test_worktop_current_no_action(git_env, init_db):
+    """If worktop is not behind main, process_worktop should do nothing."""
+    worktop = await _create_worktop_in_db(git_env, "up-to-date", "daemon-1")
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
-    fetched = await db.get_cell(cell.id)
+    fetched = await db.get_worktop(worktop.id)
     assert fetched.sync_status == SyncStatus.current
 
 
-async def test_cell_clean_merge_no_action(git_env, init_db, mock_claude):
+async def test_worktop_clean_merge_no_action(git_env, init_db, mock_claude):
     """A clean merge from main should NOT be performed by the daemon.
 
     Auto-merging clean would produce noisy merge commits on the PR. The
@@ -116,27 +116,27 @@ async def test_cell_clean_merge_no_action(git_env, init_db, mock_claude):
     git_env.add_commit("main.txt", "main work", "advance main")
     git_env.push("main")
 
-    cell = await _create_cell_in_db(git_env, "feature", "daemon-2")
+    worktop = await _create_worktop_in_db(git_env, "feature", "daemon-2")
 
-    head_before = await git.run("git", "rev-parse", "HEAD", cwd=cell.worktree_path)
+    head_before = await git.run("git", "rev-parse", "HEAD", cwd=worktop.worktree_path)
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
-    fetched = await db.get_cell(cell.id)
+    fetched = await db.get_worktop(worktop.id)
     assert fetched.sync_status == SyncStatus.behind
 
     # Worktree HEAD should be unchanged — no merge was done.
-    head_after = await git.run("git", "rev-parse", "HEAD", cwd=cell.worktree_path)
+    head_after = await git.run("git", "rev-parse", "HEAD", cwd=worktop.worktree_path)
     assert head_before == head_after
-    assert not (Path(cell.worktree_path) / "main.txt").exists()
+    assert not (Path(worktop.worktree_path) / "main.txt").exists()
 
     # No tend session was spawned.
     mock_claude.assert_not_called()
-    sessions = await db.list_sessions(cell.id)
+    sessions = await db.list_sessions(worktop.id)
     assert sessions == []
 
 
-async def test_cell_release_md_conflict_skipped(git_env, init_db, mock_claude):
+async def test_worktop_release_md_conflict_skipped(git_env, init_db, mock_claude):
     """A RELEASE.md-only conflict shouldn't trigger a tend session.
 
     The release job will eventually delete RELEASE.md from main, so the
@@ -151,18 +151,18 @@ async def test_cell_release_md_conflict_skipped(git_env, init_db, mock_claude):
     git_env.add_commit("RELEASE.md", "main release", "add release on main")
     git_env.push("main")
 
-    cell = await _create_cell_in_db(git_env, "release-conflict", "daemon-rel")
+    worktop = await _create_worktop_in_db(git_env, "release-conflict", "daemon-rel")
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
-    fetched = await db.get_cell(cell.id)
+    fetched = await db.get_worktop(worktop.id)
     assert fetched.sync_status == SyncStatus.behind
     mock_claude.assert_not_called()
-    sessions = await db.list_sessions(cell.id)
+    sessions = await db.list_sessions(worktop.id)
     assert sessions == []
 
 
-async def test_cell_conflict_claude_resolves(git_env, init_db, mock_claude):
+async def test_worktop_conflict_claude_resolves(git_env, init_db, mock_claude):
     """If merge has conflicts, Claude should be invoked to resolve them."""
     # Create a branch that edits README.md
     git_env.create_branch("conflict-branch")
@@ -174,7 +174,7 @@ async def test_cell_conflict_claude_resolves(git_env, init_db, mock_claude):
     git_env.add_commit("README.md", "main version", "edit on main")
     git_env.push("main")
 
-    cell = await _create_cell_in_db(git_env, "conflict-branch", "daemon-3")
+    worktop = await _create_worktop_in_db(git_env, "conflict-branch", "daemon-3")
 
     # Mock spawn_session to actually resolve the conflict by doing a real merge
     async def fake_spawn(session_id, cmd, cwd, **kwargs):
@@ -190,20 +190,20 @@ async def test_cell_conflict_claude_resolves(git_env, init_db, mock_claude):
 
     mock_claude.side_effect = fake_spawn
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
-    fetched = await db.get_cell(cell.id)
+    fetched = await db.get_worktop(worktop.id)
     assert fetched.sync_status == SyncStatus.current
 
     # Verify a daemon session was created
-    sessions = await db.list_sessions(cell.id)
+    sessions = await db.list_sessions(worktop.id)
     assert len(sessions) == 1
     assert sessions[0].trigger == "tend"
     assert sessions[0].succeeded is True
 
 
-async def test_cell_conflict_claude_fails(git_env, init_db, mock_claude):
-    """If Claude fails to resolve, cell should be marked as failed."""
+async def test_worktop_conflict_claude_fails(git_env, init_db, mock_claude):
+    """If Claude fails to resolve, worktop should be marked as failed."""
     # Set up a conflict
     git_env.create_branch("fail-branch")
     git_env.add_commit("README.md", "branch version", "edit on branch")
@@ -213,33 +213,33 @@ async def test_cell_conflict_claude_fails(git_env, init_db, mock_claude):
     git_env.add_commit("README.md", "main version", "edit on main")
     git_env.push("main")
 
-    cell = await _create_cell_in_db(git_env, "fail-branch", "daemon-4")
+    worktop = await _create_worktop_in_db(git_env, "fail-branch", "daemon-4")
 
     # Mock Claude to fail
     mock_claude.return_value = 1
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
-    fetched = await db.get_cell(cell.id)
+    fetched = await db.get_worktop(worktop.id)
     assert fetched.sync_status == SyncStatus.behind
 
     # Verify a failed daemon session was created
-    sessions = await db.list_sessions(cell.id)
+    sessions = await db.list_sessions(worktop.id)
     assert len(sessions) == 1
     assert sessions[0].succeeded is False
 
 
 async def test_ci_status_update(git_env, init_db, mock_gh):
-    """If cell has a PR, daemon should check and update CI status."""
+    """If worktop has a PR, daemon should check and update CI status."""
     git_env.create_branch("ci-branch")
     git_env.add_commit("file.txt", "content", "add file")
     git_env.push("ci-branch")
     git_env.checkout("main")
 
-    cell = await _create_cell_in_db(git_env, "ci-branch", "daemon-5")
+    worktop = await _create_worktop_in_db(git_env, "ci-branch", "daemon-5")
     # Manually set pr_number so CI check runs
-    await db.update_cell(cell.id, pr_number=99)
-    cell.pr_number = 99
+    await db.update_worktop(worktop.id, pr_number=99)
+    worktop.pr_number = 99
 
     _mock_pr_data(
         mock_gh,
@@ -250,9 +250,9 @@ async def test_ci_status_update(git_env, init_db, mock_gh):
         ],
     )
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
-    fetched = await db.get_cell(cell.id)
+    fetched = await db.get_worktop(worktop.id)
     assert fetched.ci_status == CIStatus.passing
 
 
@@ -263,9 +263,9 @@ async def test_ci_fix_on_failure(git_env, init_db, mock_gh, mock_claude):
     git_env.push("ci-fix-branch")
     git_env.checkout("main")
 
-    cell = await _create_cell_in_db(git_env, "ci-fix-branch", "daemon-6")
-    await db.update_cell(cell.id, pr_number=100)
-    cell.pr_number = 100
+    worktop = await _create_worktop_in_db(git_env, "ci-fix-branch", "daemon-6")
+    await db.update_worktop(worktop.id, pr_number=100)
+    worktop.pr_number = 100
 
     _mock_pr_data(
         mock_gh,
@@ -285,13 +285,13 @@ async def test_ci_fix_on_failure(git_env, init_db, mock_gh, mock_claude):
     # Mock Claude to succeed at fixing
     mock_claude.return_value = 0
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
-    fetched = await db.get_cell(cell.id)
+    fetched = await db.get_worktop(worktop.id)
     assert fetched.ci_status == CIStatus.failing
 
     # Verify a ci_fix session was created
-    sessions = await db.list_sessions(cell.id)
+    sessions = await db.list_sessions(worktop.id)
     assert len(sessions) == 1
     assert sessions[0].trigger == "tend"
     assert sessions[0].succeeded is True
@@ -306,16 +306,16 @@ async def test_ci_failure_expected_cleared_on_head_change(
     git_env.push("ci-expected")
     git_env.checkout("main")
 
-    cell = await _create_cell_in_db(git_env, "ci-expected", "daemon-ci-expected")
-    await db.update_cell(
-        cell.id,
+    worktop = await _create_worktop_in_db(git_env, "ci-expected", "daemon-ci-expected")
+    await db.update_worktop(
+        worktop.id,
         pr_number=150,
         ci_status=CIStatus.failing,
         ci_failure_expected_sha="old_sha",
     )
-    cell.pr_number = 150
-    cell.ci_status = CIStatus.failing
-    cell.ci_failure_expected_sha = "old_sha"
+    worktop.pr_number = 150
+    worktop.ci_status = CIStatus.failing
+    worktop.ci_failure_expected_sha = "old_sha"
 
     # PR HEAD has moved to a new SHA
     _mock_pr_data(
@@ -328,10 +328,10 @@ async def test_ci_failure_expected_cleared_on_head_change(
     )
     mock_claude.return_value = 0
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
     # Flag should be cleared because HEAD changed
-    fetched = await db.get_cell(cell.id)
+    fetched = await db.get_worktop(worktop.id)
     assert fetched.ci_failure_expected_sha is None
 
     # And Claude should have been invoked to fix the CI failure
@@ -347,16 +347,16 @@ async def test_ci_failure_expected_suppresses_when_head_matches(
     git_env.push("ci-suppress")
     git_env.checkout("main")
 
-    cell = await _create_cell_in_db(git_env, "ci-suppress", "daemon-ci-suppress")
-    await db.update_cell(
-        cell.id,
+    worktop = await _create_worktop_in_db(git_env, "ci-suppress", "daemon-ci-suppress")
+    await db.update_worktop(
+        worktop.id,
         pr_number=151,
         ci_status=CIStatus.failing,
         ci_failure_expected_sha="same_sha",
     )
-    cell.pr_number = 151
-    cell.ci_status = CIStatus.failing
-    cell.ci_failure_expected_sha = "same_sha"
+    worktop.pr_number = 151
+    worktop.ci_status = CIStatus.failing
+    worktop.ci_failure_expected_sha = "same_sha"
 
     # PR HEAD is still the same SHA
     _mock_pr_data(
@@ -368,10 +368,10 @@ async def test_ci_failure_expected_suppresses_when_head_matches(
         ],
     )
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
     # Flag should still be set
-    fetched = await db.get_cell(cell.id)
+    fetched = await db.get_worktop(worktop.id)
     assert fetched.ci_failure_expected_sha == "same_sha"
 
     # Claude should NOT have been invoked
@@ -385,13 +385,13 @@ async def test_ci_fix_skipped_while_running(git_env, init_db, mock_gh, mock_clau
     git_env.push("ci-norepeat")
     git_env.checkout("main")
 
-    cell = await _create_cell_in_db(git_env, "ci-norepeat", "daemon-7")
-    await db.update_cell(cell.id, pr_number=101, ci_status=CIStatus.failing)
-    cell.pr_number = 101
-    cell.ci_status = CIStatus.failing
+    worktop = await _create_worktop_in_db(git_env, "ci-norepeat", "daemon-7")
+    await db.update_worktop(worktop.id, pr_number=101, ci_status=CIStatus.failing)
+    worktop.pr_number = 101
+    worktop.ci_status = CIStatus.failing
 
     # Simulate an in-flight tend session
-    key = (cell.id, "tend")
+    key = (worktop.id, "tend")
     daemon._in_flight.add(key)
     try:
         _mock_pr_data(
@@ -402,7 +402,7 @@ async def test_ci_fix_skipped_while_running(git_env, init_db, mock_gh, mock_clau
             ],
         )
 
-        await process_cell(cell)
+        await process_worktop(worktop)
 
         # Claude should NOT have been called — existing session still running
         mock_claude.assert_not_called()
@@ -419,13 +419,15 @@ async def test_ci_fix_retried_after_previous_failure(
     git_env.push("ci-retry")
     git_env.checkout("main")
 
-    cell = await _create_cell_in_db(git_env, "ci-retry", "daemon-8")
-    await db.update_cell(cell.id, pr_number=102, ci_status=CIStatus.failing)
-    cell.pr_number = 102
-    cell.ci_status = CIStatus.failing
+    worktop = await _create_worktop_in_db(git_env, "ci-retry", "daemon-8")
+    await db.update_worktop(worktop.id, pr_number=102, ci_status=CIStatus.failing)
+    worktop.pr_number = 102
+    worktop.ci_status = CIStatus.failing
 
     # Previous ci_fix session that ended (failed)
-    prev_session = Session(cell_id=cell.id, role=SessionRole.daemon, trigger="tend")
+    prev_session = Session(
+        worktop_id=worktop.id, role=SessionRole.daemon, trigger="tend"
+    )
     await db.create_session(prev_session)
     await db.update_session(
         prev_session.id, succeeded=0, ended_at="2024-01-01T00:00:00+00:00"
@@ -446,7 +448,7 @@ async def test_ci_fix_retried_after_previous_failure(
     )
     mock_gh.set_response("run view", 0, "Error: tests failed")
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
     # Claude SHOULD have been called — previous session ended
     mock_claude.assert_called_once()
@@ -462,12 +464,12 @@ async def test_merge_retried_after_previous_failure(git_env, init_db, mock_claud
     git_env.add_commit("README.md", "main version", "edit on main")
     git_env.push("main")
 
-    cell = await _create_cell_in_db(git_env, "retry-branch", "daemon-retry")
+    worktop = await _create_worktop_in_db(git_env, "retry-branch", "daemon-retry")
 
     # Pre-fill several failed merge sessions (all ended)
     for _ in range(5):
         s = Session(
-            cell_id=cell.id,
+            worktop_id=worktop.id,
             role=SessionRole.daemon,
             trigger="tend",
             succeeded=False,
@@ -489,58 +491,58 @@ async def test_merge_retried_after_previous_failure(git_env, init_db, mock_claud
 
     mock_claude.side_effect = fake_spawn
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
-    sessions = await db.list_sessions(cell.id)
+    sessions = await db.list_sessions(worktop.id)
     assert len(sessions) == 6
     succeeded = [s for s in sessions if s.succeeded is True]
     assert len(succeeded) == 1
 
 
 async def test_auto_archive_on_pr_merged(git_env, init_db, mock_gh):
-    """If the PR has been merged, the cell should be auto-archived."""
+    """If the PR has been merged, the worktop should be auto-archived."""
     git_env.create_branch("merged-branch")
     git_env.add_commit("file.txt", "content", "add file")
     git_env.push("merged-branch")
     git_env.checkout("main")
 
-    cell = await _create_cell_in_db(git_env, "merged-branch", "daemon-merged")
-    await db.update_cell(cell.id, pr_number=200)
-    cell.pr_number = 200
+    worktop = await _create_worktop_in_db(git_env, "merged-branch", "daemon-merged")
+    await db.update_worktop(worktop.id, pr_number=200)
+    worktop.pr_number = 200
 
     _mock_pr_data(mock_gh, pr_number=200, state="merged")
 
-    result = await process_cell(cell)
+    result = await process_worktop(worktop)
 
     assert result["decision"] == "archived"
     assert "pr_merged" in result["reasons"]
 
-    fetched = await db.get_cell(cell.id)
-    assert fetched.status == CellStatus.archived
+    fetched = await db.get_worktop(worktop.id)
+    assert fetched.status == WorktopStatus.archived
     assert fetched.archived_at is not None
     assert fetched.archive_reason == "merged"
 
 
 async def test_auto_archive_on_pr_closed(git_env, init_db, mock_gh):
-    """If the PR has been closed without merging, the cell should be auto-archived."""
+    """If the PR has been closed without merging, the worktop should be auto-archived."""
     git_env.create_branch("closed-branch")
     git_env.add_commit("file.txt", "content", "add file")
     git_env.push("closed-branch")
     git_env.checkout("main")
 
-    cell = await _create_cell_in_db(git_env, "closed-branch", "daemon-closed")
-    await db.update_cell(cell.id, pr_number=201)
-    cell.pr_number = 201
+    worktop = await _create_worktop_in_db(git_env, "closed-branch", "daemon-closed")
+    await db.update_worktop(worktop.id, pr_number=201)
+    worktop.pr_number = 201
 
     _mock_pr_data(mock_gh, pr_number=201, state="closed")
 
-    result = await process_cell(cell)
+    result = await process_worktop(worktop)
 
     assert result["decision"] == "archived"
     assert "pr_closed" in result["reasons"]
 
-    fetched = await db.get_cell(cell.id)
-    assert fetched.status == CellStatus.archived
+    fetched = await db.get_worktop(worktop.id)
+    assert fetched.status == WorktopStatus.archived
     assert fetched.archive_reason == "closed"
 
 
@@ -553,10 +555,10 @@ async def test_pr_activity_cooldown_skips_recent(
     git_env.push("cooldown-branch")
     git_env.checkout("main")
 
-    cell = await _create_cell_in_db(git_env, "cooldown-branch", "daemon-cooldown")
-    await db.update_cell(cell.id, pr_number=300, pr_comment_count=0)
-    cell.pr_number = 300
-    cell.pr_comment_count = 0
+    worktop = await _create_worktop_in_db(git_env, "cooldown-branch", "daemon-cooldown")
+    await db.update_worktop(worktop.id, pr_number=300, pr_comment_count=0)
+    worktop.pr_number = 300
+    worktop.pr_comment_count = 0
 
     # New comment created just now — within cooldown window
     recent_time = datetime.now(timezone.utc).isoformat()
@@ -572,61 +574,61 @@ async def test_pr_activity_cooldown_skips_recent(
         ],
     )
 
-    result = await process_cell(cell)
+    result = await process_worktop(worktop)
 
     # Should NOT have triggered a tend (cooldown active)
     mock_claude.assert_not_called()
     assert result["decision"] == "ok"
 
     # Comment count should NOT have been updated in DB (so next run re-detects)
-    fetched = await db.get_cell(cell.id)
+    fetched = await db.get_worktop(worktop.id)
     assert fetched.pr_comment_count == 0
 
 
 # --- Local-only repo daemon tests ---
 
 
-async def _create_local_cell(git_env_local, branch: str, cell_id: str) -> Cell:
-    wt_path = await git.create_worktree(git_env_local.repo_id, branch, cell_id)
-    cell = Cell(
-        id=cell_id,
+async def _create_local_worktop(git_env_local, branch: str, worktop_id: str) -> Worktop:
+    wt_path = await git.create_worktree(git_env_local.repo_id, branch, worktop_id)
+    worktop = Worktop(
+        id=worktop_id,
         repo=git_env_local.repo_id,
         branch=branch,
         worktree_path=wt_path,
     )
-    await db.create_cell(cell)
-    return cell
+    await db.create_worktop(worktop)
+    return worktop
 
 
-async def test_local_cell_current_no_action(git_env_local, init_db, mock_claude):
-    """A current local cell does nothing."""
-    cell = await _create_local_cell(git_env_local, "feature", "local-1")
+async def test_local_worktop_current_no_action(git_env_local, init_db, mock_claude):
+    """A current local worktop does nothing."""
+    worktop = await _create_local_worktop(git_env_local, "feature", "local-1")
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
-    fetched = await db.get_cell(cell.id)
+    fetched = await db.get_worktop(worktop.id)
     assert fetched.sync_status == SyncStatus.current
     mock_claude.assert_not_called()
 
 
-async def test_local_cell_behind_no_conflict_no_action(
+async def test_local_worktop_behind_no_conflict_no_action(
     git_env_local, init_db, mock_claude
 ):
-    """A behind-but-mergeable local cell shouldn't trigger a tend session."""
-    cell = await _create_local_cell(git_env_local, "feature", "local-2")
+    """A behind-but-mergeable local worktop shouldn't trigger a tend session."""
+    worktop = await _create_local_worktop(git_env_local, "feature", "local-2")
     # Add a non-conflicting commit to main from the clone.
     git_env_local.add_commit("main.txt", "main", "advance main")
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
-    fetched = await db.get_cell(cell.id)
+    fetched = await db.get_worktop(worktop.id)
     assert fetched.sync_status == SyncStatus.behind
     mock_claude.assert_not_called()
 
 
-async def test_local_cell_conflict_invokes_tend(git_env_local, init_db, mock_claude):
+async def test_local_worktop_conflict_invokes_tend(git_env_local, init_db, mock_claude):
     """A conflict against local main triggers a tend session."""
-    cell = await _create_local_cell(git_env_local, "conflict", "local-3")
+    worktop = await _create_local_worktop(git_env_local, "conflict", "local-3")
     # Edit README.md on the branch (in the worktree)
     await git.run(
         "git",
@@ -634,11 +636,11 @@ async def test_local_cell_conflict_invokes_tend(git_env_local, init_db, mock_cla
         "--allow-empty",
         "-m",
         "noop",
-        cwd=cell.worktree_path,
+        cwd=worktop.worktree_path,
     )
-    (Path(cell.worktree_path) / "README.md").write_text("branch")
-    await git.run("git", "add", "README.md", cwd=cell.worktree_path)
-    await git.run("git", "commit", "-m", "edit branch", cwd=cell.worktree_path)
+    (Path(worktop.worktree_path) / "README.md").write_text("branch")
+    await git.run("git", "add", "README.md", cwd=worktop.worktree_path)
+    await git.run("git", "commit", "-m", "edit branch", cwd=worktop.worktree_path)
     # Edit README.md on main (in the clone)
     git_env_local.add_commit("README.md", "main", "edit on main")
 
@@ -650,34 +652,34 @@ async def test_local_cell_conflict_invokes_tend(git_env_local, init_db, mock_cla
 
     mock_claude.side_effect = fake_spawn
 
-    await process_cell(cell)
+    await process_worktop(worktop)
 
-    sessions = await db.list_sessions(cell.id)
+    sessions = await db.list_sessions(worktop.id)
     assert len(sessions) == 1
     assert sessions[0].trigger == "tend"
     assert sessions[0].succeeded is True
 
 
-async def test_local_cell_archived_when_merged_into_main(
+async def test_local_worktop_archived_when_merged_into_main(
     git_env_local, init_db, mock_claude
 ):
-    """When the cell's branch is merged into local main, the cell is archived."""
-    cell = await _create_local_cell(git_env_local, "done", "local-4")
+    """When the worktop's branch is merged into local main, the worktop is archived."""
+    worktop = await _create_local_worktop(git_env_local, "done", "local-4")
     # Add a commit to the branch in the worktree.
-    (Path(cell.worktree_path) / "done.txt").write_text("done")
-    await git.run("git", "add", "done.txt", cwd=cell.worktree_path)
-    await git.run("git", "commit", "-m", "done work", cwd=cell.worktree_path)
+    (Path(worktop.worktree_path) / "done.txt").write_text("done")
+    await git.run("git", "add", "done.txt", cwd=worktop.worktree_path)
+    await git.run("git", "commit", "-m", "done work", cwd=worktop.worktree_path)
 
     # Merge done into main from the clone (which is on main).
     git_env_local.run_git("merge", "--no-ff", "-m", "merge done", "done")
 
-    result = await process_cell(cell)
+    result = await process_worktop(worktop)
 
     assert result["decision"] == "archived"
     assert "local_merged" in result["reasons"]
 
-    fetched = await db.get_cell(cell.id)
-    assert fetched.status == CellStatus.archived
+    fetched = await db.get_worktop(worktop.id)
+    assert fetched.status == WorktopStatus.archived
     assert fetched.archive_reason == "merged"
 
     # Branch should have been deleted by the daemon.
@@ -692,13 +694,15 @@ async def test_local_cell_archived_when_merged_into_main(
     mock_claude.assert_not_called()
 
 
-async def test_local_cell_no_pr_polling(git_env_local, init_db, mock_gh, mock_claude):
-    """The daemon must not call gh for local cells."""
-    cell = await _create_local_cell(git_env_local, "clean", "local-5")
+async def test_local_worktop_no_pr_polling(
+    git_env_local, init_db, mock_gh, mock_claude
+):
+    """The daemon must not call gh for local worktops."""
+    worktop = await _create_local_worktop(git_env_local, "clean", "local-5")
 
     # No mock_gh responses set; if any gh command runs, the mock returns rc=1
     # with "no mock for: ..." — but more importantly we just confirm no tend.
-    await process_cell(cell)
+    await process_worktop(worktop)
     mock_claude.assert_not_called()
 
 
@@ -709,10 +713,10 @@ async def test_pr_activity_cooldown_allows_old(git_env, init_db, mock_gh, mock_c
     git_env.push("cooldown-ok")
     git_env.checkout("main")
 
-    cell = await _create_cell_in_db(git_env, "cooldown-ok", "daemon-cooldown-ok")
-    await db.update_cell(cell.id, pr_number=301, pr_comment_count=0)
-    cell.pr_number = 301
-    cell.pr_comment_count = 0
+    worktop = await _create_worktop_in_db(git_env, "cooldown-ok", "daemon-cooldown-ok")
+    await db.update_worktop(worktop.id, pr_number=301, pr_comment_count=0)
+    worktop.pr_number = 301
+    worktop.pr_comment_count = 0
 
     # Comment from 10 minutes ago — past cooldown window
     old_time = (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
@@ -730,12 +734,12 @@ async def test_pr_activity_cooldown_allows_old(git_env, init_db, mock_gh, mock_c
 
     mock_claude.return_value = 0
 
-    result = await process_cell(cell)
+    result = await process_worktop(worktop)
 
     # Should have triggered a tend
     mock_claude.assert_called_once()
     assert result["decision"] == "tended"
 
     # Comment count should be updated
-    fetched = await db.get_cell(cell.id)
+    fetched = await db.get_worktop(worktop.id)
     assert fetched.pr_comment_count == 1
