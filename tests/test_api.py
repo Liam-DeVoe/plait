@@ -420,6 +420,33 @@ async def test_resume_session(client, mock_pty):
     assert resp.status_code == 200
     assert resp.json()["ended_at"] is None
 
+    # `claude --resume` does not preserve the original --system-prompt, so the
+    # resume cmd must re-pass it. Verify the resumed worktop session got one.
+    cmd = mock_pty.spawn.call_args.kwargs["cmd"]
+    assert "--system-prompt" in cmd
+
+
+async def test_resume_slate_session_passes_system_prompt(client, mock_pty):
+    """Resuming a slate session must re-pass the slate orchestrator system
+    prompt, since `claude --resume` does not preserve it."""
+    c, _, _ = client
+    resp = await c.post("/slates")
+    slate_id = resp.json()["id"]
+    session_id = resp.json()["session_id"]
+
+    from server import db
+
+    await mock_pty.terminate(session_id)
+    await db.update_session(session_id, ended_at="2024-01-01T00:00:00+00:00")
+
+    resp = await c.post(f"/slates/{slate_id}/sessions/{session_id}/resume")
+    assert resp.status_code == 200
+
+    cmd = mock_pty.spawn.call_args.kwargs["cmd"]
+    assert "--system-prompt" in cmd
+    sp = cmd[cmd.index("--system-prompt") + 1]
+    assert "orchestrator" in sp.lower() or "slate" in sp.lower()
+
 
 async def test_repos_endpoint_includes_kind(client):
     c, _, _ = client
