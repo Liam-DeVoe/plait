@@ -23,6 +23,8 @@ class PtySession:
     pid: int
     listeners: list[Callable[[bytes], None]] = field(default_factory=list)
     output_buffer: bytearray = field(default_factory=bytearray)
+    write_buffer: bytearray = field(default_factory=bytearray)
+    writer_registered: bool = False
     exit_code: int | None = None
     last_output_at: float = field(default_factory=time.monotonic)
 
@@ -108,27 +110,55 @@ class PtyManager:
             loop.remove_reader(pty_session.master_fd)
         except Exception:
             pass
+        if pty_session.writer_registered:
+            try:
+                loop.remove_writer(pty_session.master_fd)
+            except Exception:
+                pass
+            pty_session.writer_registered = False
         try:
             os.close(pty_session.master_fd)
         except OSError:
             pass
         pty_session.master_fd = -1
+        pty_session.write_buffer.clear()
+
+    def _drain_write_buffer(self, pty_session: PtySession) -> None:
+        while pty_session.write_buffer:
+            try:
+                n = os.write(pty_session.master_fd, pty_session.write_buffer)
+            except BlockingIOError:
+                return
+            except OSError:
+                logger.exception(f"Failed to write to PTY {pty_session.session_id}")
+                pty_session.write_buffer.clear()
+                return
+            del pty_session.write_buffer[:n]
+
+    def _on_writable(self, session_id: str) -> None:
+        pty_session = self._sessions.get(session_id)
+        if pty_session is None or pty_session.master_fd == -1:
+            return
+        self._drain_write_buffer(pty_session)
+        if not pty_session.write_buffer and pty_session.writer_registered:
+            loop = asyncio.get_event_loop()
+            try:
+                loop.remove_writer(pty_session.master_fd)
+            except Exception:
+                pass
+            pty_session.writer_registered = False
 
     def write(self, session_id: str, data: bytes) -> None:
         pty_session = self._sessions.get(session_id)
         if pty_session is None or pty_session.master_fd == -1:
             return
-        view = memoryview(data)
-        while len(view) > 0:
-            try:
-                n = os.write(pty_session.master_fd, view)
-                view = view[n:]
-            except BlockingIOError:
-                # Kernel buffer full — busy-wait briefly and retry
-                time.sleep(0.01)
-            except OSError:
-                logger.exception(f"Failed to write to PTY {session_id}")
-                break
+        pty_session.write_buffer.extend(data)
+        if not pty_session.writer_registered:
+            self._drain_write_buffer(pty_session)
+            if pty_session.write_buffer and pty_session.master_fd != -1:
+                loop = asyncio.get_event_loop()
+                loop.add_writer(pty_session.master_fd, self._on_writable, session_id)
+                pty_session.writer_registered = True
 
     def resize(self, session_id: str, rows: int, cols: int) -> None:
         pty_session = self._sessions.get(session_id)
