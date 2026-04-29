@@ -1,10 +1,11 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import {
-  useParams,
   useNavigate,
   useLocation,
-  useOutletContext,
+  useLoaderData,
+  useRevalidator,
   Link,
+  type LoaderFunctionArgs,
 } from "react-router-dom";
 import {
   fetchWorktop,
@@ -18,13 +19,16 @@ import {
   deleteSession,
   resumeSession,
   fetchXtermState,
-  type Worktop,
   type Session,
-  type Repo,
 } from "../api";
 import Terminal from "../Terminal";
 import { StatusBadge, OverflowMenu } from "../components/shared";
-import type { LayoutContext } from "../components/Layout";
+
+export async function worktopDetailLoader({ params }: LoaderFunctionArgs) {
+  const id = params.id!;
+  const [worktop, repos] = await Promise.all([fetchWorktop(id), fetchRepos()]);
+  return { worktop, repos };
+}
 
 function CollapsibleSession({
   session,
@@ -91,67 +95,47 @@ function CollapsibleSession({
 }
 
 export default function WorktopDetailPage() {
-  const { id } = useParams();
+  const { worktop, repos } = useLoaderData() as Awaited<
+    ReturnType<typeof worktopDetailLoader>
+  >;
   const navigate = useNavigate();
   const location = useLocation();
-  const { run } = useOutletContext<LayoutContext>();
-  const [worktop, setWorktop] = useState<(Worktop & { sessions: Session[] }) | null>(
-    null,
-  );
-  const [repos, setRepos] = useState<Repo[]>([]);
+  const revalidator = useRevalidator();
   const [launching, setLaunching] = useState(false);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     (location.state as any)?.autoFocusSessionId ?? null,
   );
 
-  const load = useCallback(async () => {
-    if (!id) return;
-    setWorktop(await fetchWorktop(id));
-  }, [id]);
+  const refresh = () => revalidator.revalidate();
 
   useEffect(() => {
-    load();
-  }, [load, run]);
-
-  useEffect(() => {
-    fetchRepos().then(setRepos);
-  }, []);
-
-  useEffect(() => {
-    if (worktop) {
-      document.title = `${worktop.branch} | Plait`;
-    }
+    document.title = `${worktop.branch} | Plait`;
     return () => {
       document.title = "Plait";
     };
-  }, [worktop?.branch]);
+  }, [worktop.branch]);
 
   const handleLaunchSession = async () => {
-    if (!id) return;
     setLaunching(true);
     try {
-      const session = await createInteractiveSession(id);
+      const session = await createInteractiveSession(worktop.id);
       setSelectedSessionId(session.id);
-      load();
+      refresh();
     } finally {
       setLaunching(false);
     }
   };
 
   const handleDeleteSession = async (sessionId: string) => {
-    if (!id) return;
-    await deleteSession(id, sessionId);
+    await deleteSession(worktop.id, sessionId);
     if (selectedSessionId === sessionId) setSelectedSessionId(null);
-    load();
+    refresh();
   };
 
   const handleResumeSession = async (sessionId: string) => {
-    if (!id) return;
-    await resumeSession(id, sessionId);
-    load();
+    await resumeSession(worktop.id, sessionId);
+    refresh();
   };
-
-  if (!worktop) return null;
 
   const isLocal = repos.find((r) => r.id === worktop.repo)?.kind === "local";
   const userSessions = worktop.sessions.filter((s) => s.role === "user");
@@ -276,7 +260,7 @@ export default function WorktopDetailPage() {
                       className="btn btn--sm btn--soft-gray"
                       onClick={async () => {
                         await openSessionInVSCode(worktop.id, selectedSession.id);
-                        load();
+                        refresh();
                       }}
                     >
                       VS Code
@@ -347,7 +331,7 @@ export default function WorktopDetailPage() {
                 onResume={() => handleResumeSession(s.id)}
                 onVSCode={async () => {
                   await openSessionInVSCode(worktop.id, s.id);
-                  load();
+                  refresh();
                 }}
               />
             ))}

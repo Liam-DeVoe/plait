@@ -14,16 +14,21 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _use_memory_db(tmp_path):
+async def _use_memory_db(tmp_path):
     """Override DB_PATH to use a temporary file DB for every test.
-    We use a temp file rather than :memory: because db.py opens a new
-    connection per call, and :memory: would give each call a different DB."""
+
+    db.py caches a single connection at module level. We must close it before
+    and after each test so that DB_PATH overrides take effect and tests don't
+    share state through a stale connection.
+    """
     import server.db as db_module
 
     db_file = tmp_path / "test.db"
     original = db_module.DB_PATH
     db_module.DB_PATH = db_file
+    await db_module.close_db()
     yield
+    await db_module.close_db()
     db_module.DB_PATH = original
 
 

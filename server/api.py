@@ -62,6 +62,7 @@ async def lifespan(app: FastAPI):
     yield
     daemon_task.cancel()
     broadcast_task.cancel()
+    await db.close_db()
 
 
 app = FastAPI(title="Plait", lifespan=lifespan)
@@ -214,7 +215,14 @@ async def _worktop_dict(worktop: Worktop) -> dict:
 async def list_worktops(status: str | None = None):
     worktop_status = WorktopStatus(status) if status else None
     worktops = await db.list_worktops(worktop_status)
-    return [await _worktop_dict(c) for c in worktops]
+    # Batch-fetch tend status for all worktops in one query (avoids N+1).
+    running_ids = await db.list_running_tend_worktop_ids()
+    result = []
+    for w in worktops:
+        d = asdict(w)
+        d["tend_status"] = "running" if w.id in running_ids else "current"
+        result.append(d)
+    return result
 
 
 @app.get("/worktops/{worktop_id}")

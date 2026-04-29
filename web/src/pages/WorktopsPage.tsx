@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import { useNavigate, NavLink, useOutletContext } from "react-router-dom";
+import { useState } from "react";
+import { useNavigate, NavLink, useLoaderData, useRevalidator } from "react-router-dom";
 import {
   fetchWorktops,
   fetchDaemonRuns,
@@ -14,10 +14,17 @@ import {
   createInteractiveSession,
   type Worktop,
   type DaemonRun,
-  type Repo,
 } from "../api";
 import { StatusBadge, OverflowMenu, timeAgo, navigateTo } from "../components/shared";
-import type { LayoutContext } from "../components/Layout";
+
+export async function worktopsLoader() {
+  const [worktops, repos, runs] = await Promise.all([
+    fetchWorktops(),
+    fetchRepos(),
+    fetchDaemonRuns(10),
+  ]);
+  return { worktops, repos, runs };
+}
 
 function WorktopRow({
   worktop,
@@ -367,25 +374,14 @@ function WorktopTable({
 }
 
 export default function WorktopsPage() {
-  const { run } = useOutletContext<LayoutContext>();
+  const { worktops, repos, runs } = useLoaderData() as Awaited<
+    ReturnType<typeof worktopsLoader>
+  >;
   const navigate = useNavigate();
-  const [worktops, setWorktops] = useState<Worktop[]>([]);
-  const [repos, setRepos] = useState<Repo[]>([]);
-  const [runs, setRuns] = useState<DaemonRun[]>([]);
+  const revalidator = useRevalidator();
   const [importOpen, setImportOpen] = useState(false);
 
-  const loadWorktops = useCallback(async () => {
-    setWorktops(await fetchWorktops());
-  }, []);
-
-  useEffect(() => {
-    fetchRepos().then(setRepos);
-  }, []);
-
-  useEffect(() => {
-    loadWorktops();
-    fetchDaemonRuns(10).then(setRuns);
-  }, [loadWorktops, run]);
+  const refresh = () => revalidator.revalidate();
 
   const handleNewLocalWorktop = async (repo: string) => {
     const worktop = await createLocalWorktop(repo);
@@ -418,7 +414,7 @@ export default function WorktopsPage() {
       <CreateWorktopForm
         open={importOpen}
         onClose={() => setImportOpen(false)}
-        onCreated={loadWorktops}
+        onCreated={refresh}
       />
 
       {repos.length === 0 ? (
@@ -452,11 +448,11 @@ export default function WorktopsPage() {
                   onSync={(id) => triggerSync(id)}
                   onArchive={async (id) => {
                     await archiveWorktop(id);
-                    loadWorktops();
+                    refresh();
                   }}
                   onDelete={async (id) => {
                     await deleteWorktop(id);
-                    loadWorktops();
+                    refresh();
                   }}
                   onVSCode={(id) => openInVSCode(id)}
                 />

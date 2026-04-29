@@ -1,23 +1,46 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import {
+  createBrowserRouter,
+  RouterProvider,
+  Navigate,
+} from "react-router-dom";
 import Layout from "./components/Layout";
-import WorktopsPage from "./pages/WorktopsPage";
-import WorktopDetailPage from "./pages/WorktopDetailPage";
-import SlatesPage from "./pages/SlatesPage";
-import SlateDetailPage from "./pages/SlateDetailPage";
+import WorktopsPage, { worktopsLoader } from "./pages/WorktopsPage";
+import WorktopDetailPage, {
+  worktopDetailLoader,
+} from "./pages/WorktopDetailPage";
+import SlatesPage, { slatesLoader } from "./pages/SlatesPage";
+import SlateDetailPage, { slateDetailLoader } from "./pages/SlateDetailPage";
 import "./App.css";
 
+const router = createBrowserRouter([
+  {
+    element: <Layout />,
+    children: [
+      { index: true, element: <Navigate to="/worktops" replace /> },
+      {
+        path: "/worktops",
+        element: <WorktopsPage />,
+        loader: worktopsLoader,
+      },
+      {
+        path: "/worktops/:id",
+        element: <WorktopDetailPage />,
+        loader: worktopDetailLoader,
+      },
+      {
+        path: "/slates",
+        element: <SlatesPage />,
+        loader: slatesLoader,
+      },
+      {
+        path: "/slates/:id",
+        element: <SlateDetailPage />,
+        loader: slateDetailLoader,
+      },
+    ],
+  },
+]);
+
 export default function App() {
-  return (
-    <BrowserRouter>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route index element={<Navigate to="/worktops" replace />} />
-          <Route path="/worktops" element={<WorktopsPage />} />
-          <Route path="/worktops/:id" element={<WorktopDetailPage />} />
-          <Route path="/slates" element={<SlatesPage />} />
-          <Route path="/slates/:id" element={<SlateDetailPage />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
-  );
+  return <RouterProvider router={router} />;
 }
