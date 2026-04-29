@@ -27,6 +27,12 @@ export default function Layout() {
       <div className="layout__header">
         <div className="layout__header-inner">
           <NavLink to="/" className="layout__logo">
+            <img
+              src="/favicon.svg"
+              alt=""
+              aria-hidden="true"
+              className="layout__logo-icon"
+            />
             Plait
           </NavLink>
           <div className="layout__nav">
