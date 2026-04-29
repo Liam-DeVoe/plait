@@ -6,7 +6,7 @@ upstream = "hegeldev/hegel-core"
 
 [repos.hegel-typescript]
 path = "/Users/tybug/Desktop/Liam/coding/hegel/typescript"
-upstream = "antithesishq/hegel-typescript"
+upstream = "hegeldev/hegel-typescript"
 
 [repos.hegel-go]
 path = "/Users/tybug/Desktop/Liam/coding/hegel/go"
