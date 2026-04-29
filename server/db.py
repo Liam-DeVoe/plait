@@ -71,12 +71,33 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 """
 
+# Process-wide cached connection. Opened lazily on first use, closed on
+# shutdown (or between tests, see _use_memory_db fixture). aiosqlite serializes
+# all calls on a single worker thread per connection, which is the right
+# concurrency model for this single-user app.
+_conn: aiosqlite.Connection | None = None
+
 
 async def get_db() -> aiosqlite.Connection:
-    db = await aiosqlite.connect(DB_PATH)
-    db.row_factory = aiosqlite.Row
-    await db.executescript(SCHEMA)
-    return db
+    global _conn
+    if _conn is None:
+        conn = await aiosqlite.connect(DB_PATH)
+        conn.row_factory = aiosqlite.Row
+        await conn.executescript(SCHEMA)
+        # WAL allows concurrent readers; synchronous=NORMAL is the recommended
+        # pairing — durable enough for our use case, faster than FULL.
+        await conn.execute("PRAGMA journal_mode=WAL")
+        await conn.execute("PRAGMA synchronous=NORMAL")
+        _conn = conn
+    return _conn
+
+
+async def close_db() -> None:
+    """Close the cached connection. Used at shutdown and between tests."""
+    global _conn
+    if _conn is not None:
+        await _conn.close()
+        _conn = None
 
 
 async def init_db() -> None:
@@ -97,7 +118,6 @@ async def init_db() -> None:
             await db.commit()
         except Exception:
             pass
-    await db.close()
 
 
 # --- Worktops ---
@@ -105,95 +125,80 @@ async def init_db() -> None:
 
 async def create_worktop(worktop: Worktop) -> Worktop:
     db = await get_db()
-    try:
-        await db.execute(
-            """INSERT INTO worktops (id, slate_id, repo, branch, worktree_path,
-               pr_number, pr_url, ci_status, ci_failure_expected_sha,
-               pr_comment_count, pr_reaction_count,
-               sync_status, status, created_at, archived_at, archive_reason,
-               last_activity_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                worktop.id,
-                worktop.slate_id,
-                worktop.repo,
-                worktop.branch,
-                worktop.worktree_path,
-                worktop.pr_number,
-                worktop.pr_url,
-                worktop.ci_status.value,
-                worktop.ci_failure_expected_sha,
-                worktop.pr_comment_count,
-                worktop.pr_reaction_count,
-                worktop.sync_status.value,
-                worktop.status.value,
-                worktop.created_at,
-                worktop.archived_at,
-                worktop.archive_reason,
-                worktop.last_activity_at,
-            ),
-        )
-        await db.commit()
-        return worktop
-    finally:
-        await db.close()
+    await db.execute(
+        """INSERT INTO worktops (id, slate_id, repo, branch, worktree_path,
+           pr_number, pr_url, ci_status, ci_failure_expected_sha,
+           pr_comment_count, pr_reaction_count,
+           sync_status, status, created_at, archived_at, archive_reason,
+           last_activity_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            worktop.id,
+            worktop.slate_id,
+            worktop.repo,
+            worktop.branch,
+            worktop.worktree_path,
+            worktop.pr_number,
+            worktop.pr_url,
+            worktop.ci_status.value,
+            worktop.ci_failure_expected_sha,
+            worktop.pr_comment_count,
+            worktop.pr_reaction_count,
+            worktop.sync_status.value,
+            worktop.status.value,
+            worktop.created_at,
+            worktop.archived_at,
+            worktop.archive_reason,
+            worktop.last_activity_at,
+        ),
+    )
+    await db.commit()
+    return worktop
 
 
 async def list_worktops(status: WorktopStatus | None = None) -> list[Worktop]:
     db = await get_db()
-    try:
-        if status:
-            cursor = await db.execute(
-                "SELECT * FROM worktops WHERE status = ? ORDER BY created_at DESC",
-                (status.value,),
-            )
-        else:
-            cursor = await db.execute("SELECT * FROM worktops ORDER BY created_at DESC")
-        rows = await cursor.fetchall()
-        return [_row_to_worktop(row) for row in rows]
-    finally:
-        await db.close()
+    if status:
+        cursor = await db.execute(
+            "SELECT * FROM worktops WHERE status = ? ORDER BY created_at DESC",
+            (status.value,),
+        )
+    else:
+        cursor = await db.execute("SELECT * FROM worktops ORDER BY created_at DESC")
+    rows = await cursor.fetchall()
+    return [_row_to_worktop(row) for row in rows]
 
 
 async def get_worktop(worktop_id: str) -> Worktop | None:
     db = await get_db()
-    try:
-        cursor = await db.execute("SELECT * FROM worktops WHERE id = ?", (worktop_id,))
-        row = await cursor.fetchone()
-        return _row_to_worktop(row) if row else None
-    finally:
-        await db.close()
+    cursor = await db.execute("SELECT * FROM worktops WHERE id = ?", (worktop_id,))
+    row = await cursor.fetchone()
+    return _row_to_worktop(row) if row else None
 
 
 async def update_worktop(worktop_id: str, **kwargs: object) -> Worktop | None:
     db = await get_db()
-    try:
-        sets = []
-        values = []
-        for key, value in kwargs.items():
-            if isinstance(value, Enum):
-                value = value.value
-            sets.append(f"{key} = ?")
-            values.append(value)
-        values.append(worktop_id)
-        await db.execute(
-            f"UPDATE worktops SET {', '.join(sets)} WHERE id = ?",
-            values,
-        )
-        await db.commit()
-        return await get_worktop(worktop_id)
-    finally:
-        await db.close()
+    sets = []
+    values = []
+    for key, value in kwargs.items():
+        if isinstance(value, Enum):
+            value = value.value
+        sets.append(f"{key} = ?")
+        values.append(value)
+    values.append(worktop_id)
+    await db.execute(
+        f"UPDATE worktops SET {', '.join(sets)} WHERE id = ?",
+        values,
+    )
+    await db.commit()
+    return await get_worktop(worktop_id)
 
 
 async def delete_worktop(worktop_id: str) -> bool:
     db = await get_db()
-    try:
-        cursor = await db.execute("DELETE FROM worktops WHERE id = ?", (worktop_id,))
-        await db.commit()
-        return cursor.rowcount > 0
-    finally:
-        await db.close()
+    cursor = await db.execute("DELETE FROM worktops WHERE id = ?", (worktop_id,))
+    await db.commit()
+    return cursor.rowcount > 0
 
 
 def _row_to_worktop(row: aiosqlite.Row) -> Worktop:
@@ -223,84 +228,85 @@ def _row_to_worktop(row: aiosqlite.Row) -> Worktop:
 
 async def create_session(session: Session) -> Session:
     db = await get_db()
-    try:
-        succeeded_val = None if session.succeeded is None else int(session.succeeded)
-        await db.execute(
-            """INSERT INTO sessions (id, worktop_id, slate_id, role, trigger_name,
-               succeeded, transcript, xterm_state, started_at, ended_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                session.id,
-                session.worktop_id,
-                session.slate_id,
-                session.role.value,
-                session.trigger,
-                succeeded_val,
-                session.transcript,
-                session.xterm_state,
-                session.started_at,
-                session.ended_at,
-            ),
-        )
-        await db.commit()
-        return session
-    finally:
-        await db.close()
+    succeeded_val = None if session.succeeded is None else int(session.succeeded)
+    await db.execute(
+        """INSERT INTO sessions (id, worktop_id, slate_id, role, trigger_name,
+           succeeded, transcript, xterm_state, started_at, ended_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            session.id,
+            session.worktop_id,
+            session.slate_id,
+            session.role.value,
+            session.trigger,
+            succeeded_val,
+            session.transcript,
+            session.xterm_state,
+            session.started_at,
+            session.ended_at,
+        ),
+    )
+    await db.commit()
+    return session
 
 
 async def list_sessions(worktop_id: str) -> list[Session]:
     db = await get_db()
-    try:
-        cursor = await db.execute(
-            "SELECT * FROM sessions WHERE worktop_id = ? ORDER BY started_at ASC",
-            (worktop_id,),
-        )
-        rows = await cursor.fetchall()
-        return [_row_to_session(row) for row in rows]
-    finally:
-        await db.close()
+    cursor = await db.execute(
+        "SELECT * FROM sessions WHERE worktop_id = ? ORDER BY started_at ASC",
+        (worktop_id,),
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_session(row) for row in rows]
+
+
+async def list_running_tend_worktop_ids() -> set[str]:
+    """Return the set of worktop IDs with an active (un-ended) tend session.
+
+    Single aggregate query — avoids the N+1 you'd get from calling
+    `list_sessions` for each worktop just to derive tend_status.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT DISTINCT worktop_id FROM sessions "
+        "WHERE trigger_name = 'tend' AND ended_at IS NULL "
+        "AND worktop_id IS NOT NULL"
+    )
+    rows = await cursor.fetchall()
+    return {row["worktop_id"] for row in rows}
 
 
 async def update_session(session_id: str, **kwargs: object) -> Session | None:
     db = await get_db()
-    try:
-        sets = []
-        values = []
-        for key, value in kwargs.items():
-            if isinstance(value, Enum):
-                value = value.value
-            sets.append(f"{key} = ?")
-            values.append(value)
-        values.append(session_id)
-        await db.execute(
-            f"UPDATE sessions SET {', '.join(sets)} WHERE id = ?",
-            values,
-        )
-        await db.commit()
-        cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
-        row = await cursor.fetchone()
-        return _row_to_session(row) if row else None
-    finally:
-        await db.close()
+    sets = []
+    values = []
+    for key, value in kwargs.items():
+        if isinstance(value, Enum):
+            value = value.value
+        sets.append(f"{key} = ?")
+        values.append(value)
+    values.append(session_id)
+    await db.execute(
+        f"UPDATE sessions SET {', '.join(sets)} WHERE id = ?",
+        values,
+    )
+    await db.commit()
+    cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+    row = await cursor.fetchone()
+    return _row_to_session(row) if row else None
 
 
 async def delete_session(session_id: str) -> None:
     db = await get_db()
-    try:
-        await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
-        await db.commit()
-    finally:
-        await db.close()
+    await db.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
+    await db.commit()
 
 
 async def get_session(session_id: str) -> Session | None:
     db = await get_db()
-    try:
-        cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
-        row = await cursor.fetchone()
-        return _row_to_session(row) if row else None
-    finally:
-        await db.close()
+    cursor = await db.execute("SELECT * FROM sessions WHERE id = ?", (session_id,))
+    row = await cursor.fetchone()
+    return _row_to_session(row) if row else None
 
 
 def _row_to_session(row: aiosqlite.Row) -> Session:
@@ -324,42 +330,33 @@ def _row_to_session(row: aiosqlite.Row) -> Session:
 
 async def create_slate(slate: Slate) -> Slate:
     db = await get_db()
-    try:
-        await db.execute(
-            """INSERT INTO slates (id, session_id, name, archived, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (
-                slate.id,
-                slate.session_id,
-                slate.name,
-                int(slate.archived),
-                slate.created_at,
-            ),
-        )
-        await db.commit()
-        return slate
-    finally:
-        await db.close()
+    await db.execute(
+        """INSERT INTO slates (id, session_id, name, archived, created_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (
+            slate.id,
+            slate.session_id,
+            slate.name,
+            int(slate.archived),
+            slate.created_at,
+        ),
+    )
+    await db.commit()
+    return slate
 
 
 async def list_slates() -> list[Slate]:
     db = await get_db()
-    try:
-        cursor = await db.execute("SELECT * FROM slates ORDER BY created_at DESC")
-        rows = await cursor.fetchall()
-        return [_row_to_slate(row) for row in rows]
-    finally:
-        await db.close()
+    cursor = await db.execute("SELECT * FROM slates ORDER BY created_at DESC")
+    rows = await cursor.fetchall()
+    return [_row_to_slate(row) for row in rows]
 
 
 async def get_slate(slate_id: str) -> Slate | None:
     db = await get_db()
-    try:
-        cursor = await db.execute("SELECT * FROM slates WHERE id = ?", (slate_id,))
-        row = await cursor.fetchone()
-        return _row_to_slate(row) if row else None
-    finally:
-        await db.close()
+    cursor = await db.execute("SELECT * FROM slates WHERE id = ?", (slate_id,))
+    row = await cursor.fetchone()
+    return _row_to_slate(row) if row else None
 
 
 def _row_to_slate(row: aiosqlite.Row) -> Slate:
@@ -374,52 +371,43 @@ def _row_to_slate(row: aiosqlite.Row) -> Slate:
 
 async def update_slate(slate_id: str, **kwargs: object) -> Slate | None:
     conn = await get_db()
-    try:
-        sets = []
-        values = []
-        for key, value in kwargs.items():
-            if isinstance(value, Enum):
-                value = value.value
-            sets.append(f"{key} = ?")
-            values.append(value)
-        values.append(slate_id)
-        await conn.execute(
-            f"UPDATE slates SET {', '.join(sets)} WHERE id = ?",
-            values,
-        )
-        await conn.commit()
-        return await get_slate(slate_id)
-    finally:
-        await conn.close()
+    sets = []
+    values = []
+    for key, value in kwargs.items():
+        if isinstance(value, Enum):
+            value = value.value
+        sets.append(f"{key} = ?")
+        values.append(value)
+    values.append(slate_id)
+    await conn.execute(
+        f"UPDATE slates SET {', '.join(sets)} WHERE id = ?",
+        values,
+    )
+    await conn.commit()
+    return await get_slate(slate_id)
 
 
 async def list_worktops_by_slate(slate_id: str) -> list[Worktop]:
     conn = await get_db()
-    try:
-        cursor = await conn.execute(
-            "SELECT * FROM worktops WHERE slate_id = ? ORDER BY created_at DESC",
-            (slate_id,),
-        )
-        rows = await cursor.fetchall()
-        return [_row_to_worktop(row) for row in rows]
-    finally:
-        await conn.close()
+    cursor = await conn.execute(
+        "SELECT * FROM worktops WHERE slate_id = ? ORDER BY created_at DESC",
+        (slate_id,),
+    )
+    rows = await cursor.fetchall()
+    return [_row_to_worktop(row) for row in rows]
 
 
 async def delete_slate(slate_id: str) -> None:
     conn = await get_db()
-    try:
-        # Delete slate-level sessions (orchestrator etc)
-        await conn.execute("DELETE FROM sessions WHERE slate_id = ?", (slate_id,))
-        # Detach worktops — they continue to exist independently
-        await conn.execute(
-            "UPDATE worktops SET slate_id = NULL WHERE slate_id = ?",
-            (slate_id,),
-        )
-        await conn.execute("DELETE FROM slates WHERE id = ?", (slate_id,))
-        await conn.commit()
-    finally:
-        await conn.close()
+    # Delete slate-level sessions (orchestrator etc)
+    await conn.execute("DELETE FROM sessions WHERE slate_id = ?", (slate_id,))
+    # Detach worktops — they continue to exist independently
+    await conn.execute(
+        "UPDATE worktops SET slate_id = NULL WHERE slate_id = ?",
+        (slate_id,),
+    )
+    await conn.execute("DELETE FROM slates WHERE id = ?", (slate_id,))
+    await conn.commit()
 
 
 # --- Daemon Ticks ---
@@ -431,39 +419,33 @@ async def create_daemon_run(
     tick_id: str, started_at: str, ended_at: str, results: list[dict]
 ) -> None:
     db = await get_db()
-    try:
-        await db.execute(
-            "INSERT INTO daemon_runs (id, started_at, ended_at, results) VALUES (?, ?, ?, ?)",
-            (tick_id, started_at, ended_at, json.dumps(results)),
-        )
-        # Prune old ticks beyond MAX_RUNS
-        await db.execute(
-            """DELETE FROM daemon_runs WHERE id NOT IN (
-                SELECT id FROM daemon_runs ORDER BY started_at DESC LIMIT ?
-            )""",
-            (MAX_RUNS,),
-        )
-        await db.commit()
-    finally:
-        await db.close()
+    await db.execute(
+        "INSERT INTO daemon_runs (id, started_at, ended_at, results) VALUES (?, ?, ?, ?)",
+        (tick_id, started_at, ended_at, json.dumps(results)),
+    )
+    # Prune old ticks beyond MAX_RUNS
+    await db.execute(
+        """DELETE FROM daemon_runs WHERE id NOT IN (
+            SELECT id FROM daemon_runs ORDER BY started_at DESC LIMIT ?
+        )""",
+        (MAX_RUNS,),
+    )
+    await db.commit()
 
 
 async def list_daemon_runs(limit: int = 20) -> list[dict]:
     db = await get_db()
-    try:
-        cursor = await db.execute(
-            "SELECT * FROM daemon_runs ORDER BY started_at DESC LIMIT ?",
-            (limit,),
-        )
-        rows = await cursor.fetchall()
-        return [
-            {
-                "id": row["id"],
-                "started_at": row["started_at"],
-                "ended_at": row["ended_at"],
-                "results": json.loads(row["results"]),
-            }
-            for row in rows
-        ]
-    finally:
-        await db.close()
+    cursor = await db.execute(
+        "SELECT * FROM daemon_runs ORDER BY started_at DESC LIMIT ?",
+        (limit,),
+    )
+    rows = await cursor.fetchall()
+    return [
+        {
+            "id": row["id"],
+            "started_at": row["started_at"],
+            "ended_at": row["ended_at"],
+            "results": json.loads(row["results"]),
+        }
+        for row in rows
+    ]

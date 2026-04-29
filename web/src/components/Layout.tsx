@@ -1,18 +1,29 @@
-import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import {
+  NavLink,
+  Outlet,
+  ScrollRestoration,
+  useRevalidator,
+} from "react-router-dom";
 import { connectWebSocket } from "../api";
 
-export type LayoutContext = { run: number };
-
 export default function Layout() {
-  const [run, setRun] = useState(0);
+  const revalidator = useRevalidator();
+  // Stash in a ref so the WS effect doesn't re-subscribe when the
+  // revalidator's identity changes between renders.
+  const revalidatorRef = useRef(revalidator);
   useEffect(() => {
-    const ws = connectWebSocket(() => setRun((r) => r + 1));
+    revalidatorRef.current = revalidator;
+  });
+
+  useEffect(() => {
+    const ws = connectWebSocket(() => revalidatorRef.current.revalidate());
     return () => ws.close();
   }, []);
 
   return (
     <div className="layout">
+      <ScrollRestoration />
       <div className="layout__header">
         <div className="layout__header-inner">
           <NavLink to="/" className="layout__logo">
@@ -39,7 +50,7 @@ export default function Layout() {
         </div>
       </div>
       <div className="layout__main">
-        <Outlet context={{ run } satisfies LayoutContext} />
+        <Outlet />
       </div>
     </div>
   );

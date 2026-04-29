@@ -1,5 +1,11 @@
-import { useEffect, useState, useCallback, useRef } from "react";
-import { useParams, useNavigate, useOutletContext, Link } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import {
+  useNavigate,
+  useLoaderData,
+  useRevalidator,
+  Link,
+  type LoaderFunctionArgs,
+} from "react-router-dom";
 import {
   fetchSlate,
   archiveSlate,
@@ -10,47 +16,38 @@ import {
   startSlateSession,
   resumeSlateSession,
   type Worktop,
-  type Slate,
 } from "../api";
 import Terminal from "../Terminal";
 import { StatusBadge, OverflowMenu, ExternalLinkIcon, navigateTo } from "../components/shared";
-import type { LayoutContext } from "../components/Layout";
+
+export async function slateDetailLoader({ params }: LoaderFunctionArgs) {
+  const slate = await fetchSlate(params.id!);
+  return { slate };
+}
 
 export default function SlateDetailPage() {
-  const { id } = useParams();
+  const { slate } = useLoaderData() as Awaited<ReturnType<typeof slateDetailLoader>>;
   const navigate = useNavigate();
-  const { run } = useOutletContext<LayoutContext>();
-  const [slate, setSlate] = useState<(Slate & { worktops: Worktop[] }) | null>(
-    null,
-  );
+  const revalidator = useRevalidator();
 
   const startingRef = useRef(false);
 
-  const load = useCallback(async () => {
-    if (!id) return;
-    setSlate(await fetchSlate(id));
-  }, [id]);
-
-  useEffect(() => {
-    load();
-  }, [load, run]);
+  const refresh = () => revalidator.revalidate();
 
   // Auto-start session on first load (PTY not yet spawned).
   // Uses empty transcript (not ended_at) to detect "never started", because
   // _cleanup_stale_sessions may set ended_at on server restart.
   useEffect(() => {
     if (
-      slate?.session &&
+      slate.session &&
       !slate.session.alive &&
       !slate.session.transcript &&
       !startingRef.current
     ) {
       startingRef.current = true;
-      startSlateSession(slate.id, slate.session.id).then(() => load());
+      startSlateSession(slate.id, slate.session.id).then(() => refresh());
     }
   }, [slate]);
-
-  if (!slate) return null;
 
   const sessionReady =
     slate.session && (slate.session.alive || slate.session.transcript);
@@ -77,14 +74,14 @@ export default function SlateDetailPage() {
                       label: "Unarchive",
                       onClick: async () => {
                         await unarchiveSlate(slate.id);
-                        load();
+                        refresh();
                       },
                     }
                   : {
                       label: "Archive",
                       onClick: async () => {
                         await archiveSlate(slate.id);
-                        load();
+                        refresh();
                       },
                     },
                 {
@@ -116,7 +113,7 @@ export default function SlateDetailPage() {
             alive={slate.session!.alive}
             onResume={async () => {
               await resumeSlateSession(slate.id, slate.session!.id);
-              load();
+              refresh();
             }}
             fetchXtermState={() => fetchSlateXtermState(slate.id, slate.session!.id)}
           />

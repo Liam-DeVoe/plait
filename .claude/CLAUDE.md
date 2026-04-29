@@ -97,7 +97,7 @@ The prompts in `prompts.toml` instruct Claude on when/how to call these hooks.
 
 ### Database
 
-SQLite via `aiosqlite` (`server/db.py`). Each function opens its own connection (no connection pooling). The DB file is `plait.db` at the project root. Schema is auto-created on every `get_db()` call via `CREATE TABLE IF NOT EXISTS`.
+SQLite via `aiosqlite` (`server/db.py`). A single process-wide connection is cached at module level (opened lazily on first `get_db()` call, closed on shutdown via `close_db()`). aiosqlite serializes all calls through one worker thread per connection — fine for this single-user app, and avoids `database is locked` failures. WAL + `synchronous=NORMAL` are set at open. The DB file is `plait.db` at the project root.
 
 **NEVER delete or recreate the database.** When a schema change is needed, write a migration SQL script (e.g. `ALTER TABLE ... ADD COLUMN ...`) and run it against the production `plait.db` via `sqlite3` to migrate in-place, preserving all existing data. Always ask before running the migration. Do not add migration logic to `init_db` or anywhere else — this is a single-user tool with one database.
 

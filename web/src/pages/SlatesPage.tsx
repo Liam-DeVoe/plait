@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from "react";
-import { useNavigate, useOutletContext } from "react-router-dom";
+import { useState } from "react";
+import { useNavigate, useLoaderData, useRevalidator } from "react-router-dom";
 import {
   fetchSlates,
   createSlate,
@@ -9,7 +9,11 @@ import {
   type Slate,
 } from "../api";
 import { OverflowMenu, navigateTo } from "../components/shared";
-import type { LayoutContext } from "../components/Layout";
+
+export async function slatesLoader() {
+  const slates = await fetchSlates();
+  return { slates };
+}
 
 function SlateRow({
   slate,
@@ -58,21 +62,13 @@ function SlateRow({
 }
 
 export default function SlatesPage() {
+  const { slates } = useLoaderData() as Awaited<ReturnType<typeof slatesLoader>>;
   const navigate = useNavigate();
-  const { run } = useOutletContext<LayoutContext>();
-  const [slates, setSlates] = useState<(Slate & { worktop_count: number })[]>(
-    [],
-  );
+  const revalidator = useRevalidator();
   const [creating, setCreating] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
 
-  const loadSlates = useCallback(async () => {
-    setSlates(await fetchSlates());
-  }, []);
-
-  useEffect(() => {
-    loadSlates();
-  }, [loadSlates, run]);
+  const refresh = () => revalidator.revalidate();
 
   const handleNewSlate = async () => {
     setCreating(true);
@@ -122,15 +118,15 @@ export default function SlatesPage() {
                     slate={s}
                     onArchive={async () => {
                       await archiveSlate(s.id);
-                      loadSlates();
+                      refresh();
                     }}
                     onUnarchive={async () => {
                       await unarchiveSlate(s.id);
-                      loadSlates();
+                      refresh();
                     }}
                     onDelete={async () => {
                       await deleteSlate(s.id);
-                      loadSlates();
+                      refresh();
                     }}
                   />
                 ))}
@@ -161,15 +157,15 @@ export default function SlatesPage() {
                     slate={s}
                     onArchive={async () => {
                       await archiveSlate(s.id);
-                      loadSlates();
+                      refresh();
                     }}
                     onUnarchive={async () => {
                       await unarchiveSlate(s.id);
-                      loadSlates();
+                      refresh();
                     }}
                     onDelete={async () => {
                       await deleteSlate(s.id);
-                      loadSlates();
+                      refresh();
                     }}
                   />
                 ))}
