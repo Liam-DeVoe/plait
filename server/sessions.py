@@ -198,16 +198,13 @@ async def _watch_pty(
     )
 
     conn = await db.get_db()
-    try:
-        cursor = await conn.execute(
-            "SELECT worktop_id, slate_id FROM sessions WHERE id = ?", (session_id,)
-        )
-        row = await cursor.fetchone()
-        if row and row["worktop_id"]:
-            await notify("worktop_updated", {"id": row["worktop_id"]})
-        if row and row["slate_id"]:
-            await notify("slate_updated", {"id": row["slate_id"]})
-    finally:
-        await conn.close()
+    cursor = await conn.execute(
+        "SELECT worktop_id, slate_id FROM sessions WHERE id = ?", (session_id,)
+    )
+    row = await cursor.fetchone()
+    if row and row["worktop_id"]:
+        await notify("worktop_updated", {"id": row["worktop_id"]})
+    if row and row["slate_id"]:
+        await notify("slate_updated", {"id": row["slate_id"]})
 
     return exit_code
