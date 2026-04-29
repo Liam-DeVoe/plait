@@ -23,13 +23,121 @@ async def run(*args: str, cwd: str | Path | None = None) -> tuple[int, str, str]
     return proc.returncode, stdout.decode(), stderr.decode()
 
 
-async def fetch_origin(repo_id: str) -> None:
+def _normalize_github_url(url: str) -> str | None:
+    """Extract "owner/repo" (lowercased) from a GitHub remote URL, or None.
+
+    Handles SSH (`git@github.com:owner/repo[.git]`),
+    HTTPS (`https://[user[:token]@]github.com/owner/repo[.git]`),
+    and `ssh://git@github.com/owner/repo[.git]`. Anything else returns None.
+    Names are lowercased because GitHub repo identifiers are case-insensitive.
+    """
+    s = url.strip().rstrip("/")
+    if s.endswith(".git"):
+        s = s[:-4]
+    m = re.match(r"^git@github\.com:([^/]+/[^/]+)$", s)
+    if m:
+        return m.group(1).lower()
+    m = re.match(r"^ssh://git@github\.com/([^/]+/[^/]+)$", s)
+    if m:
+        return m.group(1).lower()
+    m = re.match(r"^https?://(?:[^@/]+(?::[^@/]+)?@)?github\.com/([^/]+/[^/]+)$", s)
+    if m:
+        return m.group(1).lower()
+    return None
+
+
+_upstream_remote_cache: dict[str, str] = {}
+
+
+async def upstream_remote(repo_id: str) -> str:
+    """Return the local git remote name whose URL matches `config.upstream`.
+
+    For most repos that's `origin`. For fork-and-PR setups (local clone has
+    `origin` pointing at the user's fork plus a separate remote pointing at
+    the upstream) this resolves to that separate remote.
+
+    Raises if no remote matches — config.upstream is wrong, or the user
+    forgot `git remote add` in their local clone.
+
+    Cached for the process lifetime.
+    """
+    if repo_id in _upstream_remote_cache:
+        return _upstream_remote_cache[repo_id]
+    repo = config.get_repo(repo_id)
+    if repo.upstream is None:
+        raise ValueError(f"Repo {repo_id!r} is local-only — has no upstream remote")
+    rc, out, err = await run("git", "remote", "-v", cwd=repo.path)
+    if rc != 0:
+        raise RuntimeError(
+            f"Failed to list remotes in {repo.path} for {repo_id!r}: {err}"
+        )
+    target = repo.upstream.lower()
+    matches: set[str] = set()
+    seen: list[tuple[str, str]] = []
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        name, url = parts[0], parts[1]
+        seen.append((name, url))
+        if _normalize_github_url(url) == target:
+            matches.add(name)
+    if not matches:
+        remotes_str = (
+            "\n".join(f"  {n}\t{u}" for n, u in seen) if seen else "  (no remotes)"
+        )
+        raise RuntimeError(
+            f"Repo {repo_id!r}: upstream {repo.upstream!r} does not match any "
+            f"remote in {repo.path}.\nRemotes:\n{remotes_str}\n"
+            f"Either fix `upstream` in config.toml or `git remote add` the "
+            f"missing remote."
+        )
+    # If multiple remotes match (e.g. origin and a duplicate), prefer origin.
+    chosen = "origin" if "origin" in matches else sorted(matches)[0]
+    _upstream_remote_cache[repo_id] = chosen
+    return chosen
+
+
+async def validate_upstream_remotes() -> None:
+    """Resolve every remote repo's upstream remote at startup.
+
+    Surfaces config / local-clone misconfigurations loudly (raises) and
+    logs the resolved (upstream, remote) per repo so the inferred mode
+    (standard vs fork-and-PR) is auditable.
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    for repo_id, repo in config.get_repos().items():
+        if repo.kind == "local":
+            logger.info("Loaded %r: local-only (no upstream)", repo_id)
+            continue
+        remote = await upstream_remote(repo_id)
+        mode = "standard" if remote == "origin" else "fork-and-PR"
+        logger.info(
+            "Loaded %r: upstream %s via remote %r (push: origin) [%s]",
+            repo_id,
+            repo.upstream,
+            remote,
+            mode,
+        )
+
+
+async def fetch_upstream(repo_id: str) -> None:
+    """Fetch from the upstream remote (where `main` is authoritative).
+
+    No-op for local repos. For fork-and-PR setups this fetches the upstream
+    remote, *not* origin (the fork) — the fork's branches are updated via
+    `git push origin <branch>` from inside worktrees, so we don't need to
+    pull them down separately.
+    """
     if config.is_local(repo_id):
         return
     repo = config.get_repo(repo_id)
-    rc, out, err = await run("git", "fetch", "origin", cwd=repo.path)
+    remote = await upstream_remote(repo_id)
+    rc, out, err = await run("git", "fetch", remote, cwd=repo.path)
     if rc != 0:
-        raise RuntimeError(f"Failed to fetch origin for {repo_id}: {err}")
+        raise RuntimeError(f"Failed to fetch {remote!r} for {repo_id}: {err}")
 
 
 _main_branch_cache: dict[str, str] = {}
@@ -38,7 +146,7 @@ _main_branch_cache: dict[str, str] = {}
 async def main_branch(repo_id: str) -> str:
     """Return the default branch name for the given repo.
 
-    For remote repos: resolved from `refs/remotes/origin/HEAD`.
+    For remote repos: resolved from `refs/remotes/<upstream-remote>/HEAD`.
     For local repos: tries `refs/heads/main` then `refs/heads/master`.
     Cached for the lifetime of the process.
     """
@@ -57,15 +165,16 @@ async def main_branch(repo_id: str) -> str:
             f"Could not resolve default branch for local repo {repo_id}: "
             f"neither 'main' nor 'master' exists in {repo.path}"
         )
+    remote = await upstream_remote(repo_id)
     rc, out, err = await run(
-        "git", "symbolic-ref", "refs/remotes/origin/HEAD", cwd=repo.path
+        "git", "symbolic-ref", f"refs/remotes/{remote}/HEAD", cwd=repo.path
     )
     if rc != 0:
         raise RuntimeError(
             f"Could not resolve default branch for {repo_id}: {err}. "
-            f"Try `git remote set-head origin --auto` in {repo.path}."
+            f"Try `git remote set-head {remote} --auto` in {repo.path}."
         )
-    # Output is like "refs/remotes/origin/main"
+    # Output is like "refs/remotes/<remote>/main"
     name = out.strip().rsplit("/", 1)[-1]
     _main_branch_cache[repo_id] = name
     return name
@@ -74,18 +183,23 @@ async def main_branch(repo_id: str) -> str:
 async def main_ref(repo_id: str) -> str:
     """Return the ref to compare against for "main".
 
-    For remote repos: "origin/<branch>". For local repos: "<branch>".
+    For remote repos: "<upstream-remote>/<branch>" — that's the source of
+    truth for main, even when the user pushes branches to a fork (origin).
+    For local repos: "<branch>".
     """
     mb = await main_branch(repo_id)
     if config.is_local(repo_id):
         return mb
-    return f"origin/{mb}"
+    remote = await upstream_remote(repo_id)
+    return f"{remote}/{mb}"
 
 
 async def branch_ref(repo_id: str, branch: str) -> str:
     """Return the ref for a worktop's branch.
 
-    For remote repos: "origin/<branch>" (the published tip).
+    For remote repos: "origin/<branch>" — worktop branches are always
+    pushed to `origin`, regardless of whether origin is the upstream or
+    a fork.
     For local repos: just "<branch>" (the local branch).
     """
     if config.is_local(repo_id):
@@ -94,7 +208,7 @@ async def branch_ref(repo_id: str, branch: str) -> str:
 
 
 async def create_slate_worktrees(slate_id: str) -> dict[str, str]:
-    """Create read-only worktrees for all repos at origin/main.
+    """Create read-only worktrees for all repos at the upstream's main.
 
     Returns a dict mapping repo_id to worktree path.
     Worktrees are created at worktrees/slate-{id}/{repo_id}/ using
@@ -104,7 +218,7 @@ async def create_slate_worktrees(slate_id: str) -> dict[str, str]:
     slate_dir.mkdir(parents=True, exist_ok=True)
 
     async def _create_one(repo_id: str, repo: config.Repo) -> tuple[str, str]:
-        await fetch_origin(repo_id)
+        await fetch_upstream(repo_id)
         ref = await main_ref(repo_id)
         wt_dir = slate_dir / repo_id
         rc, out, err = await run(
@@ -224,8 +338,8 @@ async def create_worktree(repo_id: str, branch: str, worktop_id: str) -> str:
                 cwd=repo_dir,
             )
     else:
-        # Create new branch from origin/<main_branch>
-        await fetch_origin(repo_id)
+        # Create new branch off the upstream's main.
+        await fetch_upstream(repo_id)
         ref = await main_ref(repo_id)
         rc, out, err = await run(
             "git",
@@ -294,7 +408,8 @@ async def check_merge_conflicts(
     main = await main_ref(repo_id)
     if not config.is_local(repo_id):
         mb = await main_branch(repo_id)
-        rc, _, err = await run("git", "fetch", "origin", mb, cwd=worktree_path)
+        remote = await upstream_remote(repo_id)
+        rc, _, err = await run("git", "fetch", remote, mb, cwd=worktree_path)
         if rc != 0:
             raise RuntimeError(f"fetch failed: {err}")
 

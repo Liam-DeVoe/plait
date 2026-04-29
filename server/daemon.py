@@ -209,8 +209,8 @@ async def _process_worktop(worktop: Worktop) -> dict:
 
         await git.assert_not_detached(worktop.worktree_path)
 
-        # Fetch latest from origin
-        await git.fetch_origin(worktop.repo)
+        # Fetch latest from the upstream (where main is authoritative).
+        await git.fetch_upstream(worktop.repo)
 
         # --- Derive sync status from remote refs ---
         await _derive_sync_status(worktop)

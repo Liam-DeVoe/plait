@@ -47,6 +47,10 @@ def _slate_repo_worktrees(slate_id: str) -> dict[str, str]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
+    # Resolve every repo's upstream remote up front so config typos / missing
+    # `git remote add` calls fail loudly at startup rather than silently
+    # mis-tracking main forever.
+    await git.validate_upstream_remotes()
     # Sweep stale sessions from a previous crash
     await _cleanup_stale_sessions()
     # Start daemon

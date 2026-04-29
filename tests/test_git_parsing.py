@@ -2,7 +2,34 @@ import json
 
 import pytest
 
-from server.git import get_ci_status, get_pr_info_from_url
+from server.git import _normalize_github_url, get_ci_status, get_pr_info_from_url
+
+
+def test_normalize_github_url_ssh():
+    assert (
+        _normalize_github_url("git@github.com:HypothesisWorks/hypothesis.git")
+        == "hypothesisworks/hypothesis"
+    )
+    assert _normalize_github_url("git@github.com:foo/bar") == "foo/bar"
+
+
+def test_normalize_github_url_https():
+    assert (
+        _normalize_github_url("https://github.com/HypothesisWorks/hypothesis.git")
+        == "hypothesisworks/hypothesis"
+    )
+    assert _normalize_github_url("https://github.com/foo/bar/") == "foo/bar"
+    assert _normalize_github_url("https://user:tok@github.com/foo/bar.git") == "foo/bar"
+
+
+def test_normalize_github_url_ssh_protocol():
+    assert _normalize_github_url("ssh://git@github.com/foo/bar.git") == "foo/bar"
+
+
+def test_normalize_github_url_non_github():
+    assert _normalize_github_url("git@gitlab.com:foo/bar.git") is None
+    assert _normalize_github_url("/local/path") is None
+    assert _normalize_github_url("") is None
 
 
 async def test_get_pr_info_parses_url(mock_gh, git_env):

@@ -150,12 +150,18 @@ def git_env(tmp_path, _git_env_template) -> GitEnv:
     }
 
     git_module._main_branch_cache.clear()
+    # The test clone's `origin` URL is a local path, which doesn't normalize
+    # to a GitHub identity. Skip the live `git remote -v` resolution by
+    # seeding the cache directly.
+    git_module._upstream_remote_cache.clear()
+    git_module._upstream_remote_cache[repo_id] = "origin"
 
     yield env
 
     git_module.WORKTREE_ROOT = original_worktree_root
     config_module._data = original_data
     git_module._main_branch_cache.clear()
+    git_module._upstream_remote_cache.clear()
 
 
 @pytest.fixture(scope="session")
@@ -241,12 +247,14 @@ def git_env_local(tmp_path, _git_env_local_template) -> LocalGitEnv:
     }
 
     git_module._main_branch_cache.clear()
+    git_module._upstream_remote_cache.clear()
 
     yield env
 
     git_module.WORKTREE_ROOT = original_worktree_root
     config_module._data = original_data
     git_module._main_branch_cache.clear()
+    git_module._upstream_remote_cache.clear()
 
 
 # --- Mock gh CLI ---

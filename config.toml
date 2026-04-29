@@ -30,7 +30,7 @@ upstream = "hegeldev/website"
 
 [repos.hypothesis]
 path = "/Users/tybug/Desktop/Liam/coding/hypothesis"
-upstream = "liam-devoe/hypothesis"
+upstream = "HypothesisWorks/hypothesis"
 
 [repos.plait]
 path = "/Users/tybug/Desktop/Liam/coding/hegel/plait"

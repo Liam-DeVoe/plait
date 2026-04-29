@@ -42,7 +42,9 @@ path = "/absolute/path/to/local/clone"
 upstream = "owner/repo"
 ```
 
-Each repo entry needs `path` (local clone) and `upstream` (GitHub `owner/repo` for `gh` CLI). The `author` field is used to detect PR comment reactions (thumbs-up acknowledgments).
+Each repo entry needs `path` (local clone) and `upstream` (GitHub `owner/repo` — where PRs live and `main` is authoritative; used for `gh` CLI calls). The `author` field is used to detect PR comment reactions (thumbs-up acknowledgments).
+
+**Fork-and-PR workflows.** `upstream` is the *upstream* repo, not the user's fork. For repos cloned with two remotes (e.g. `origin = my-fork`, `upstream = parent-org/repo`), `git.upstream_remote(repo_id)` resolves the local git remote name by URL-matching against `config.upstream`. Plait fetches main and reads `<remote>/<main>` via that remote, while still pushing branches to `origin`. For standard same-repo workflows (single remote == upstream), this resolves to `origin` and behaves the same as before. The validator runs at startup and raises if no remote matches — a missing `git remote add` or a typo'd `upstream` fails loudly instead of silently mis-tracking main.
 
 ## Architecture
 
@@ -53,7 +55,7 @@ The FastAPI app (`server/api.py`) starts the daemon and a WebSocket broadcaster 
 ### Daemon Processing Pipeline
 
 For each active worktop, `daemon.process_worktop()`:
-1. `git.fetch_origin()` then `git.is_behind_main()` — if behind, merge
+1. `git.fetch_upstream()` then `git.is_behind_main()` — if behind, merge
 2. `git.merge_from_main()` — if clean, push (only if branch is published); if conflicts, mark conflict status
 3. Auto-archive if PR is merged/closed
 4. Check CI via `git.get_ci_status()` (uses `gh pr checks`), comment count, and reaction count
@@ -104,8 +106,8 @@ Four tables: `worktops`, `slates`, `sessions`, `daemon_runs`. Session trigger ty
 ### Git/Worktree Layout
 
 `server/git.py` manages worktrees. `WORKTREE_ROOT` is `./worktrees/`. Two worktree patterns:
-- **Worktop worktrees**: `worktrees/<worktop-uuid>/` — created from an existing remote branch or a new branch off `origin/main`
-- **Slate exploration worktrees**: `worktrees/slate-<slate-id>/<repo-id>/` — read-only detached HEAD at `origin/main` for each configured repo
+- **Worktop worktrees**: `worktrees/<worktop-uuid>/` — created from an existing remote branch (on `origin`) or a new branch off the upstream's main (`<upstream-remote>/<main>`)
+- **Slate exploration worktrees**: `worktrees/slate-<slate-id>/<repo-id>/` — read-only detached HEAD at the upstream's main for each configured repo
 
 Repos are identified by their config key (e.g. `hegel-core`), and `config.get_repo()` resolves that to a `Repo` with a local path and GitHub upstream.
 
