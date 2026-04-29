@@ -436,16 +436,31 @@ async def hook_ci_failure_expected(worktop_id: str):
     return {"status": "ok"}
 
 
+DONE_HOOK_GRACE_SECONDS = 10
+
+
+async def _delayed_terminate(session_id: str, expected_pid: int) -> None:
+    await asyncio.sleep(DONE_HOOK_GRACE_SECONDS)
+    pty_session = pty_manager.get(session_id)
+    if pty_session is None or pty_session.pid != expected_pid:
+        return
+    if pty_manager.is_alive(session_id):
+        await pty_manager.terminate(session_id)
+
+
 @app.post("/hooks/sessions/{session_id}/done")
 async def hook_session_done(session_id: str):
     """Called by a session when it has finished its work.
 
-    Terminates the PTY process. The watcher task will finalize the transcript
-    and xterm state as usual. The session remains viewable and resumable.
+    Schedules termination after a short grace period so any final assistant
+    turn Claude is streaming after the curl call has time to complete before
+    SIGHUP arrives. The watcher task finalizes the transcript and xterm state
+    as usual; the session remains viewable and resumable.
     """
-    if not pty_manager.is_alive(session_id):
+    pty_session = pty_manager.get(session_id)
+    if pty_session is None or not pty_manager.is_alive(session_id):
         raise HTTPException(status_code=404, detail="Session not alive")
-    await pty_manager.terminate(session_id)
+    asyncio.create_task(_delayed_terminate(session_id, pty_session.pid))
     return {"status": "ok"}
 
 
