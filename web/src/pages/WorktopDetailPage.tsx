@@ -23,7 +23,7 @@ import {
   type Repo,
 } from "../api";
 import Terminal from "../Terminal";
-import { StatusBadge, OverflowMenu } from "../components/shared";
+import { StatusBadge, OverflowMenu, ExternalLinkIcon } from "../components/shared";
 import type { LayoutContext } from "../components/Layout";
 
 function CollapsibleSession({
@@ -202,20 +202,20 @@ export default function WorktopDetailPage() {
                 label={`Tend: ${worktop.tend_status}`}
               />
             </div>
-            {worktop.pr_url && (
-              <div className="worktop-detail__pr">
-                <a
-                  href={worktop.pr_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="link"
-                >
-                  PR #{worktop.pr_number} ↗
-                </a>
-              </div>
-            )}
           </div>
           <div className="worktop-detail__actions">
+            {worktop.pr_url && (
+              <a
+                href={worktop.pr_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn--md btn--soft-blue pr-btn"
+                title="Open PR in new tab"
+              >
+                PR #{worktop.pr_number}
+                <ExternalLinkIcon />
+              </a>
+            )}
             <div
               className="btn btn--md btn--gray"
               onClick={() => openInVSCode(worktop.id)}

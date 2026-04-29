@@ -261,6 +261,21 @@
   pointer-events: none;
 }
 
+.pr-btn {
+  text-decoration: none;
+  gap: 6px;
+}
+
+.pr-btn:hover {
+  text-decoration: none;
+}
+
+.external-link-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
 /* === Card === */
 .card {
   background: white;
@@ -542,12 +557,6 @@
   display: flex;
   gap: 12px;
   margin-bottom: 12px;
-}
-
-.worktop-detail__pr {
-  font-size: 14px;
-  line-height: 20px;
-  color: #4b5563;
 }
 
 .worktop-detail__actions {

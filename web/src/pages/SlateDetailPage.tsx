@@ -13,7 +13,7 @@ import {
   type Slate,
 } from "../api";
 import Terminal from "../Terminal";
-import { StatusBadge, OverflowMenu, navigateTo } from "../components/shared";
+import { StatusBadge, OverflowMenu, ExternalLinkIcon, navigateTo } from "../components/shared";
 import type { LayoutContext } from "../components/Layout";
 
 export default function SlateDetailPage() {
@@ -155,10 +155,12 @@ export default function SlateDetailPage() {
                     href={worktop.pr_url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="link"
+                    className="btn btn--sm btn--soft-blue pr-btn"
                     onClick={(e) => e.stopPropagation()}
+                    title="Open PR in new tab"
                   >
                     #{worktop.pr_number}
+                    <ExternalLinkIcon />
                   </a>
                 ) : (
                   <span className="worktop-row__no-pr">pending</span>
