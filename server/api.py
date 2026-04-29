@@ -614,14 +614,11 @@ async def _cleanup_stale_sessions() -> None:
     """On startup, mark any sessions without ended_at as ended.
     Their PTY processes died when the previous server process exited."""
     conn = await db.get_db()
-    try:
-        await conn.execute(
-            "UPDATE sessions SET ended_at = ? WHERE ended_at IS NULL",
-            (datetime.now(timezone.utc).isoformat(),),
-        )
-        await conn.commit()
-    finally:
-        await conn.close()
+    await conn.execute(
+        "UPDATE sessions SET ended_at = ? WHERE ended_at IS NULL",
+        (datetime.now(timezone.utc).isoformat(),),
+    )
+    await conn.commit()
 
 
 # --- Slate endpoints ---
