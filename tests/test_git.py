@@ -239,10 +239,72 @@ async def test_is_merged_into_main_local_not_merged(git_env_local):
     assert not await git.is_merged_into_main(git_env_local.repo_id, "not-done")
 
 
-async def test_fetch_origin_local_is_noop(git_env_local):
-    """fetch_origin must not network for local repos."""
-    # Should not raise — there is no origin remote in a local repo.
-    await git.fetch_origin(git_env_local.repo_id)
+async def test_fetch_upstream_local_is_noop(git_env_local):
+    """fetch_upstream must not network for local repos."""
+    # Should not raise — there is no remote in a local repo.
+    await git.fetch_upstream(git_env_local.repo_id)
+
+
+async def test_upstream_remote_matches_origin(git_env):
+    """In a standard setup (single remote == upstream), upstream_remote → origin."""
+    # Rewrite origin's URL to a synthetic GitHub URL that matches the
+    # configured upstream so we exercise the live URL matcher rather than
+    # the cache-seeding shortcut in conftest.
+    git._upstream_remote_cache.clear()
+    rc, _, err = await git.run(
+        "git",
+        "remote",
+        "set-url",
+        "origin",
+        "git@github.com:testorg/testrepo.git",
+        cwd=git_env.clone,
+    )
+    assert rc == 0, err
+
+    assert await git.upstream_remote(git_env.repo_id) == "origin"
+
+
+async def test_upstream_remote_picks_fork_remote(git_env):
+    """Fork-and-PR setup: origin points to fork, separate remote is upstream."""
+    git._upstream_remote_cache.clear()
+    # origin → fork (does NOT match config's `testorg/testrepo`)
+    await git.run(
+        "git",
+        "remote",
+        "set-url",
+        "origin",
+        "git@github.com:myfork/testrepo.git",
+        cwd=git_env.clone,
+    )
+    # add a separate "upstream" remote that DOES match
+    await git.run(
+        "git",
+        "remote",
+        "add",
+        "upstream",
+        "https://github.com/testorg/testrepo.git",
+        cwd=git_env.clone,
+    )
+
+    assert await git.upstream_remote(git_env.repo_id) == "upstream"
+
+
+async def test_upstream_remote_no_match_raises(git_env):
+    """No remote URL matches config.upstream → raise loudly."""
+    git._upstream_remote_cache.clear()
+    await git.run(
+        "git",
+        "remote",
+        "set-url",
+        "origin",
+        "git@github.com:wrong/repo.git",
+        cwd=git_env.clone,
+    )
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="does not match any remote"):
+        await git.upstream_remote(git_env.repo_id)
 
 
 async def test_push(git_env):

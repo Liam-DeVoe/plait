@@ -13,7 +13,13 @@ class Repo:
     id: str
     path: Path
     kind: str  # "remote" or "local"
-    upstream: str | None  # GitHub "owner/repo" for gh CLI; None for local repos
+    # The GitHub "owner/repo" where PRs live and `main` is authoritative.
+    # For "fork-and-PR" workflows this is the *upstream* repo, not the user's
+    # fork — the fork is identified at runtime by matching this against the
+    # local clone's git remotes (see `git.upstream_remote`). Plait still
+    # pushes to whatever remote is named `origin` in the local clone.
+    # None for kind == "local".
+    upstream: str | None
 
 
 def _load() -> dict:

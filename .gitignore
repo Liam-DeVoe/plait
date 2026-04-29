@@ -1,5 +1,8 @@
 CLAUDE.local.md
 
+.claude/*
+!.claude/CLAUDE.md
+
 # Logs
 logs
 *.log
