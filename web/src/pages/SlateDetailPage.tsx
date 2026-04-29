@@ -181,7 +181,7 @@ export default function SlateDetailPage() {
               <td className="table__worktop">
                 <StatusBadge
                   status={worktop.ci_status}
-                  label={`CI: ${worktop.ci_status}`}
+                  label={worktop.ci_status}
                 />
               </td>
             </tr>

@@ -66,13 +66,13 @@ function WorktopRow({
         {isLocal ? (
           <span className="worktop-row__no-pr">—</span>
         ) : (
-          <StatusBadge status={worktop.ci_status} label={`CI: ${worktop.ci_status}`} />
+          <StatusBadge status={worktop.ci_status} label={worktop.ci_status} />
         )}
       </td>
       <td className="table__worktop">
         <StatusBadge
           status={worktop.tend_status}
-          label={`Tend: ${worktop.tend_status}`}
+          label={worktop.tend_status}
         />
       </td>
       <td className="table__worktop">
