@@ -139,11 +139,20 @@
 }
 
 .layout__logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   font-size: 24px;
   line-height: 32px;
   font-weight: 700;
   color: #111827;
   text-decoration: none;
+}
+
+.layout__logo-icon {
+  width: 28px;
+  height: 28px;
+  display: block;
 }
 
 .layout__logo:hover {
