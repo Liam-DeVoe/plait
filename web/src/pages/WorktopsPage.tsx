@@ -65,7 +65,7 @@ function WorktopRow({
         ) : worktop.pr_url ? (
           <PrPill worktop={worktop} />
         ) : (
-          <span className="worktop-row__no-pr">no PR</span>
+          <span className="worktop-row__no-pr">—</span>
         )}
       </td>
       <td className="table__worktop">
