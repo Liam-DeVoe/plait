@@ -16,6 +16,8 @@ lerna-debug.log*
 worktrees/
 *.pyc
 plait.db
+plait.db-shm
+plait.db-wal
 .hypothesis
 
 node_modules
