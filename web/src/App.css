@@ -523,6 +523,54 @@
   justify-content: space-between;
 }
 
+.worktops-page__group-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid #d0d7de;
+  min-height: 28px;
+}
+
+.worktops-page__group-footer-left {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.worktops-page__group-footer-right {
+  display: flex;
+  align-items: center;
+  padding-right: 8px;
+}
+
+.worktops-page__drag-handle {
+  color: #c8cdd3;
+  font-size: 11px;
+  letter-spacing: -2px;
+  user-select: none;
+  cursor: grab;
+  padding: 4px 6px;
+  line-height: 1;
+}
+
+.worktops-page__drag-handle:hover {
+  color: #6b7280;
+}
+
+.worktops-page__drag-handle:active {
+  cursor: grabbing;
+}
+
+.worktops-page__group--dragging {
+  opacity: 0.4;
+}
+
+.worktops-page__group--drag-over {
+  outline: 2px solid #3b82f6;
+  outline-offset: -1px;
+}
+
 .worktops-page__group-title {
   font-size: 14px;
   line-height: 20px;
@@ -549,7 +597,6 @@
   font-weight: 500;
   color: #6b7280;
   cursor: pointer;
-  border-top: 1px solid #d0d7de;
 }
 
 .worktops-page__archived-toggle:hover {

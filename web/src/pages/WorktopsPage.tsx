@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 import { useNavigate, NavLink, useLoaderData, useRevalidator } from "react-router-dom";
 import {
   fetchWorktops,
@@ -12,6 +12,7 @@ import {
   deleteWorktop,
   openInVSCode,
   createInteractiveSession,
+  setRepoOrder,
   type Worktop,
   type DaemonRun,
 } from "../api";
@@ -24,6 +25,12 @@ export async function worktopsLoader() {
     fetchDaemonRuns(10),
   ]);
   return { worktops, repos, runs };
+}
+
+function arraysEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }
 
 function WorktopRow({
@@ -292,6 +299,7 @@ function WorktopTable({
   onArchive,
   onDelete,
   onVSCode,
+  footerRight,
 }: {
   worktops: Worktop[];
   isLocal: boolean;
@@ -299,6 +307,7 @@ function WorktopTable({
   onArchive: (id: string) => void;
   onDelete: (id: string) => void;
   onVSCode: (id: string) => void;
+  footerRight?: React.ReactNode;
 }) {
   const [showArchived, setShowArchived] = useState(false);
   const activeWorktops = worktops.filter((c) => c.status !== "archived");
@@ -317,14 +326,6 @@ function WorktopTable({
       />
     ));
 
-  if (activeWorktops.length === 0 && archivedWorktops.length === 0) {
-    return (
-      <div className="muted" style={{ padding: "12px 16px" }}>
-        No worktops
-      </div>
-    );
-  }
-
   return (
     <>
       {activeWorktops.length > 0 ? (
@@ -340,22 +341,33 @@ function WorktopTable({
           </thead>
           <tbody>{renderRows(activeWorktops)}</tbody>
         </table>
+      ) : archivedWorktops.length === 0 ? (
+        <div className="muted" style={{ padding: "12px 16px" }}>
+          No worktops
+        </div>
       ) : (
         <div className="muted" style={{ padding: "12px 16px" }}>
           No open worktops
         </div>
       )}
-      {archivedWorktops.length > 0 && (
-        <div
-          className="worktops-page__archived-toggle"
-          onClick={() => setShowArchived(!showArchived)}
-        >
-          <span className="worktops-page__archived-arrow">
-            {showArchived ? "▾" : "▸"}
-          </span>
-          Archived ({archivedWorktops.length})
+      <div className="worktops-page__group-footer">
+        <div className="worktops-page__group-footer-left">
+          {archivedWorktops.length > 0 && (
+            <div
+              className="worktops-page__archived-toggle"
+              onClick={() => setShowArchived(!showArchived)}
+            >
+              <span className="worktops-page__archived-arrow">
+                {showArchived ? "▾" : "▸"}
+              </span>
+              Archived ({archivedWorktops.length})
+            </div>
+          )}
         </div>
-      )}
+        {footerRight && (
+          <div className="worktops-page__group-footer-right">{footerRight}</div>
+        )}
+      </div>
       {showArchived && archivedWorktops.length > 0 && (
         <table className="table worktops-page__archived-table">
           <tbody>{renderRows(archivedWorktops)}</tbody>
@@ -372,6 +384,18 @@ export default function WorktopsPage() {
   const navigate = useNavigate();
   const revalidator = useRevalidator();
   const [importOpen, setImportOpen] = useState(false);
+  const serverOrder = repos.map((r) => r.id);
+  const [order, setOrder] = useState<string[]>(serverOrder);
+  const [draggingRepo, setDraggingRepo] = useState<string | null>(null);
+  const [dragOverRepo, setDragOverRepo] = useState<string | null>(null);
+
+  // Resync local order with the server-supplied order when the loader data
+  // changes (e.g. after a revalidation). The server is the source of truth;
+  // local state is just for optimistic updates during drag.
+  useEffect(() => {
+    setOrder((prev) => (arraysEqual(prev, serverOrder) ? prev : serverOrder));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverOrder.join(" ")]);
 
   const refresh = () => revalidator.revalidate();
 
@@ -392,6 +416,58 @@ export default function WorktopsPage() {
   }
   const repoKind = new Map<string, "remote" | "local">();
   for (const repo of repos) repoKind.set(repo.id, repo.kind);
+
+  // Apply the (possibly optimistic) order to the available repo ids. New repos
+  // not yet in `order` get appended in their grouped/loader order.
+  const repoIds = [...grouped.keys()];
+  const known = new Set(repoIds);
+  const seen = new Set<string>();
+  const orderedRepoIds: string[] = [];
+  for (const id of order) {
+    if (known.has(id) && !seen.has(id)) {
+      orderedRepoIds.push(id);
+      seen.add(id);
+    }
+  }
+  for (const id of repoIds) {
+    if (!seen.has(id)) orderedRepoIds.push(id);
+  }
+
+  const handleDragStart = (e: DragEvent<HTMLElement>, repo: string) => {
+    setDraggingRepo(repo);
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", repo);
+  };
+
+  const handleDragOver = (e: DragEvent<HTMLDivElement>, repo: string) => {
+    if (!draggingRepo) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverRepo !== repo) setDragOverRepo(repo);
+  };
+
+  const handleDrop = async (e: DragEvent<HTMLDivElement>, target: string) => {
+    e.preventDefault();
+    const source = draggingRepo;
+    setDraggingRepo(null);
+    setDragOverRepo(null);
+    if (!source || source === target) return;
+    const next = orderedRepoIds.filter((id) => id !== source);
+    const idx = next.indexOf(target);
+    next.splice(idx === -1 ? next.length : idx, 0, source);
+    setOrder(next);
+    try {
+      await setRepoOrder(next);
+    } catch (err) {
+      console.error("Failed to persist repo order", err);
+      refresh();
+    }
+  };
+
+  const handleDragEnd = () => {
+    setDraggingRepo(null);
+    setDragOverRepo(null);
+  };
 
   return (
     <>
@@ -415,10 +491,23 @@ export default function WorktopsPage() {
         </div>
       ) : (
         <div className="worktops-page__groups">
-          {[...grouped.entries()].map(([repo, repoWorktops]) => {
+          {orderedRepoIds.map((repo) => {
+            const repoWorktops = grouped.get(repo) ?? [];
             const isLocal = repoKind.get(repo) === "local";
+            const isDragging = draggingRepo === repo;
+            const isDragOver = dragOverRepo === repo && draggingRepo !== repo;
             return (
-              <div key={repo} className="card card--clipped">
+              <div
+                key={repo}
+                className={`card card--clipped worktops-page__group${
+                  isDragging ? " worktops-page__group--dragging" : ""
+                }${isDragOver ? " worktops-page__group--drag-over" : ""}`}
+                onDragOver={(e) => handleDragOver(e, repo)}
+                onDrop={(e) => handleDrop(e, repo)}
+                onDragLeave={() =>
+                  setDragOverRepo((cur) => (cur === repo ? null : cur))
+                }
+              >
                 <div className="worktops-page__group-header">
                   <div className="worktops-page__group-title">
                     {repo}
@@ -447,6 +536,18 @@ export default function WorktopsPage() {
                     refresh();
                   }}
                   onVSCode={(id) => openInVSCode(id)}
+                  footerRight={
+                    <span
+                      className="worktops-page__drag-handle"
+                      title="Drag to reorder"
+                      aria-hidden="true"
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, repo)}
+                      onDragEnd={handleDragEnd}
+                    >
+                      ⋮⋮
+                    </span>
+                  }
                 />
               </div>
             );

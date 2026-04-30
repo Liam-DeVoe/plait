@@ -78,6 +78,18 @@ export async function fetchRepos(): Promise<Repo[]> {
   return res.json();
 }
 
+export async function setRepoOrder(order: string[]): Promise<void> {
+  const res = await fetch(`${BASE}/repos/order`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ order }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to update repo order");
+  }
+}
+
 export async function fetchWorktops(status?: string): Promise<Worktop[]> {
   const params = status ? `?status=${status}` : "";
   const res = await fetch(`${BASE}/worktops${params}`);

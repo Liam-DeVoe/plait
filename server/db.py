@@ -69,6 +69,11 @@ CREATE TABLE IF NOT EXISTS sessions (
     FOREIGN KEY (worktop_id) REFERENCES worktops(id),
     FOREIGN KEY (slate_id) REFERENCES slates(id)
 );
+
+CREATE TABLE IF NOT EXISTS repo_order (
+    repo_id TEXT PRIMARY KEY,
+    position INTEGER NOT NULL
+);
 """
 
 # Process-wide cached connection. Opened lazily on first use, closed on
@@ -430,6 +435,24 @@ async def create_daemon_run(
         )""",
         (MAX_RUNS,),
     )
+    await db.commit()
+
+
+async def get_repo_order() -> list[str]:
+    db = await get_db()
+    cursor = await db.execute("SELECT repo_id FROM repo_order ORDER BY position ASC")
+    rows = await cursor.fetchall()
+    return [row["repo_id"] for row in rows]
+
+
+async def set_repo_order(order: list[str]) -> None:
+    db = await get_db()
+    await db.execute("DELETE FROM repo_order")
+    if order:
+        await db.executemany(
+            "INSERT INTO repo_order (repo_id, position) VALUES (?, ?)",
+            [(repo_id, idx) for idx, repo_id in enumerate(order)],
+        )
     await db.commit()
 
 

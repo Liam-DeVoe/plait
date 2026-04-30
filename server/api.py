@@ -107,15 +107,45 @@ async def websocket_endpoint(ws: WebSocket):
 @app.get("/repos")
 async def list_repos():
     repos = config.get_repos()
+    order = await db.get_repo_order()
+    known = set(repos)
+    seen: set[str] = set()
+    ordered_ids: list[str] = []
+    for repo_id in order:
+        if repo_id in known and repo_id not in seen:
+            ordered_ids.append(repo_id)
+            seen.add(repo_id)
+    for repo_id in repos:
+        if repo_id not in seen:
+            ordered_ids.append(repo_id)
     return [
         {
-            "id": r.id,
-            "path": str(r.path),
-            "upstream": r.upstream,
-            "kind": r.kind,
+            "id": repos[repo_id].id,
+            "path": str(repos[repo_id].path),
+            "upstream": repos[repo_id].upstream,
+            "kind": repos[repo_id].kind,
         }
-        for r in repos.values()
+        for repo_id in ordered_ids
     ]
+
+
+class RepoOrderRequest(BaseModel):
+    order: list[str]
+
+
+@app.put("/repos/order")
+async def set_repo_order(req: RepoOrderRequest):
+    repos = config.get_repos()
+    unknown = [r for r in req.order if r not in repos]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown repo(s): {', '.join(unknown)}",
+        )
+    if len(set(req.order)) != len(req.order):
+        raise HTTPException(status_code=400, detail="Duplicate repo ids in order")
+    await db.set_repo_order(req.order)
+    return {"status": "ok"}
 
 
 # --- Daemon endpoints ---
