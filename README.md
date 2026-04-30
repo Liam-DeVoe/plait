@@ -2,4 +2,6 @@
 
 # Plait
 
-My personal software for managing coding agents.
+My personal software for managing coding agents. [I wrote about Plait here](https://tybug.dev/plait/).
+
+![Plait worktops view](images/homepage.png)
