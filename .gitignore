@@ -1,7 +1,8 @@
-CLAUDE.local.md
+config.toml
 
 .claude/*
 !.claude/CLAUDE.md
+CLAUDE.local.md
 
 # Logs
 logs
