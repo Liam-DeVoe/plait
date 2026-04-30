@@ -1,7 +1,7 @@
 [project]
 name = "plait"
 version = "0.1.0"
-description = "Local development tool for managing PRs across multiple repositories"
+description = "Personal coding agent management"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
