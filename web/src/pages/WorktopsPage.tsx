@@ -15,7 +15,7 @@ import {
   type Worktop,
   type DaemonRun,
 } from "../api";
-import { StatusBadge, OverflowMenu, ExternalLinkIcon, timeAgo, navigateTo } from "../components/shared";
+import { StatusBadge, OverflowMenu, PrPill, timeAgo, navigateTo } from "../components/shared";
 
 export async function worktopsLoader() {
   const [worktops, repos, runs] = await Promise.all([
@@ -56,17 +56,7 @@ function WorktopRow({
         {isLocal ? (
           <span className="worktop-row__no-pr">—</span>
         ) : worktop.pr_url ? (
-          <a
-            href={worktop.pr_url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="btn btn--sm btn--soft-blue pr-btn"
-            onClick={(e) => e.stopPropagation()}
-            title="Open PR in new tab"
-          >
-            #{worktop.pr_number}
-            <ExternalLinkIcon />
-          </a>
+          <PrPill worktop={worktop} />
         ) : (
           <span className="worktop-row__no-pr">no PR</span>
         )}

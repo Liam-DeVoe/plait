@@ -18,7 +18,7 @@ import {
   type Worktop,
 } from "../api";
 import Terminal from "../Terminal";
-import { StatusBadge, OverflowMenu, ExternalLinkIcon, navigateTo } from "../components/shared";
+import { StatusBadge, OverflowMenu, PrPill, navigateTo } from "../components/shared";
 
 export async function slateDetailLoader({ params }: LoaderFunctionArgs) {
   const slate = await fetchSlate(params.id!);
@@ -148,34 +148,10 @@ export default function SlateDetailPage() {
               </td>
               <td className="table__worktop">
                 {worktop.pr_url ? (
-                  <a
-                    href={worktop.pr_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="btn btn--sm btn--soft-blue pr-btn"
-                    onClick={(e) => e.stopPropagation()}
-                    title="Open PR in new tab"
-                  >
-                    #{worktop.pr_number}
-                    <ExternalLinkIcon />
-                  </a>
+                  <PrPill worktop={worktop} />
                 ) : (
                   <span className="worktop-row__no-pr">pending</span>
                 )}
-              </td>
-              <td className="table__worktop">
-                <StatusBadge
-                  status={
-                    worktop.status === "archived"
-                      ? worktop.archive_reason === "merged" ? "completed" : worktop.archive_reason === "closed" ? "closed" : "archived"
-                      : worktop.status
-                  }
-                  label={
-                    worktop.status === "archived"
-                      ? worktop.archive_reason === "merged" ? "merged" : worktop.archive_reason === "closed" ? "closed" : "archived"
-                      : worktop.status
-                  }
-                />
               </td>
               <td className="table__worktop">
                 <StatusBadge
@@ -193,7 +169,6 @@ export default function SlateDetailPage() {
                   <tr>
                     <th className="table__header-worktop">Repo / Branch</th>
                     <th className="table__header-worktop">PR</th>
-                    <th className="table__header-worktop">Status</th>
                     <th className="table__header-worktop">CI</th>
                   </tr>
                 </thead>
@@ -201,7 +176,7 @@ export default function SlateDetailPage() {
                   {activeWorktops.map(renderWorktopRow)}
                   {archivedWorktops.length > 0 && (
                     <tr className="slate-detail__section-header">
-                      <td colSpan={4}>Archived</td>
+                      <td colSpan={3}>Archived</td>
                     </tr>
                   )}
                   {archivedWorktops.map(renderWorktopRow)}

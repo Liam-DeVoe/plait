@@ -22,7 +22,7 @@ import {
   type Session,
 } from "../api";
 import Terminal from "../Terminal";
-import { StatusBadge, OverflowMenu, ExternalLinkIcon } from "../components/shared";
+import { StatusBadge, OverflowMenu, PrPill } from "../components/shared";
 
 export async function worktopDetailLoader({ params }: LoaderFunctionArgs) {
   const id = params.id!;
@@ -188,18 +188,7 @@ export default function WorktopDetailPage() {
             </div>
           </div>
           <div className="worktop-detail__actions">
-            {worktop.pr_url && (
-              <a
-                href={worktop.pr_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn btn--md btn--soft-blue pr-btn"
-                title="Open PR in new tab"
-              >
-                PR #{worktop.pr_number}
-                <ExternalLinkIcon />
-              </a>
-            )}
+            {worktop.pr_url && <PrPill worktop={worktop} size="md" />}
             <div
               className="btn btn--md btn--gray"
               onClick={() => openInVSCode(worktop.id)}
