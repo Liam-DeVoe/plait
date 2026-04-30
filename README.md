@@ -1,4 +1,4 @@
-<img src="web/public/favicon.svg" alt="Plait logo" width="100" />
+<img src="web/public/favicon.svg" alt="Plait logo" width="95" />
 
 # Plait
 
