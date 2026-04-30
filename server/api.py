@@ -689,6 +689,8 @@ async def create_slate():
     except RuntimeError:
         raise HTTPException(status_code=500, detail="Failed to create slate worktrees")
 
+    claude.install_claude_files(str(git.WORKTREE_ROOT / f"slate-{slate.id}"))
+
     session = Session(
         slate_id=slate.id,
         role=SessionRole.user,

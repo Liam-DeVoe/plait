@@ -13,6 +13,35 @@ PROMPTS_PATH = PLAIT_ROOT / "prompts.toml"
 CLAUDE_FILES_SRC = PLAIT_ROOT / "claude_files"
 
 
+def install_claude_files(worktree_path: str | Path) -> None:
+    """Copy claude_files/ into <worktree>/.claude/ and render the
+    settings template.
+
+    `claude_files/` holds plait's per-worktree Claude config (skills,
+    agents, hook scripts, settings.local.json). It's copied wholesale
+    into the worktree so every Claude session — plait-spawned or
+    user-launched — picks it up automatically and the worktree stays
+    self-contained.
+
+    The settings template uses `{worktree_root}` as a placeholder for
+    the absolute worktree path; it's substituted in-place after copy
+    so hook commands resolve to the local copy of each script.
+
+    PreToolUse hooks declared in settings.local.json fire even under
+    `--dangerously-skip-permissions`, making them a hard guardrail.
+    Edit `claude_files/settings.local.json` directly to adjust hooks,
+    permissions, or anything else in the Claude settings schema.
+    """
+    worktree = Path(worktree_path).resolve()
+    claude_dir = worktree / ".claude"
+    shutil.copytree(CLAUDE_FILES_SRC, claude_dir, dirs_exist_ok=True)
+    settings = claude_dir / "settings.local.json"
+    if settings.exists():
+        settings.write_text(
+            settings.read_text().replace("{worktree_root}", str(worktree))
+        )
+
+
 def _load_prompts() -> dict:
     return tomllib.loads(PROMPTS_PATH.read_text())
 
@@ -55,7 +84,7 @@ async def write_worktop_claude_md(
             f.write("\n")
         f.write(f"\n{content}\n")
 
-    shutil.copytree(CLAUDE_FILES_SRC, worktree / ".claude", dirs_exist_ok=True)
+    install_claude_files(worktree_path)
 
 
 def plait_system_prompt(session_id: str) -> str:
