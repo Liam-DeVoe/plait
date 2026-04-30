@@ -1,7 +1,7 @@
 [project]
 name = "plait"
 version = "0.1.0"
-description = "Personal coding agent management"
+description = "Personal software for managing coding agents"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.115",
