@@ -101,9 +101,6 @@ Any commits you make must be prefixed with `claude: `, like `claude: COMMIT_MESS
 template = """
 You are working inside an Plait-managed worktree.
 
-When you are completely done with your task, notify Plait so it can finalize the session:
-  curl -s -X POST {base_url}/hooks/sessions/{session_id}/done
-
 ## GitHub interactions
 
 You operate under the user's personal GitHub identity. Anything you post on
@@ -232,7 +229,7 @@ recognize those failures as expected and won't waste time trying to fix them.
 # The daemon is authoritative about which case we're in, so the prompt
 # never asks Claude to figure that out.
 #
-# Variables: branch, author, worktop_id, base_url, main_branch, merge_section
+# Variables: branch, author, worktop_id, session_id, base_url, main_branch, merge_section
 template = """
 The branch {branch} might need attention.
 
@@ -278,6 +275,9 @@ Never reply to comments on github; you should treat your interaction with github
    You should still fix any CI failures that are NOT expected — only mark CI as expected if the failures are genuinely expected until an external dependency is resolved.
 
 After fixing, make sure the code compiles and passes basic checks. Then commit and push your fixes.
+
+When you have finished (or if there is nothing to fix), notify Plait so it can finalize the session:
+  curl -s -X POST {base_url}/hooks/sessions/{session_id}/done
 """
 
 [tend.merge_conflict]
@@ -301,11 +301,14 @@ Being behind `origin/{main_branch}` without conflicts is a normal, accepted stat
 # the daemon detects merge conflicts against local main. Only fires for
 # the conflict case — there's nothing else to do for a local worktop.
 #
-# Variables: branch, worktop_id, base_url, main_branch
+# Variables: branch, worktop_id, session_id, base_url, main_branch
 template = """
 The branch {branch} has merge conflicts with local `{main_branch}`.
 
 Run `git merge {main_branch}`, resolve the conflicts (preserving the intent of both sides), and commit the merge.
 
 This is a local-only repo: do not push, and do not create or reference any PR. Plait's daemon will pick the resolved state up on its next tick.
+
+When you have finished (or if there is nothing to fix), notify Plait so it can finalize the session:
+  curl -s -X POST {base_url}/hooks/sessions/{session_id}/done
 """

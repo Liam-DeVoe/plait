@@ -87,15 +87,10 @@ async def write_worktop_claude_md(
     install_claude_files(worktree_path)
 
 
-def plait_system_prompt(session_id: str) -> str:
-    """Generate the session-scoped system prompt (done hook)."""
-    base_url = f"http://localhost:{PLAIT_PORT}"
+def plait_system_prompt() -> str:
+    """Generate the system prompt for worktop sessions."""
     prompts = _load_prompts()
-    return (
-        prompts["worktop_system"]["template"]
-        .strip()
-        .format(session_id=session_id, base_url=base_url)
-    )
+    return prompts["worktop_system"]["template"].strip()
 
 
 def slate_system_prompt(
@@ -122,6 +117,7 @@ def slate_system_prompt(
 def tend_prompt(
     branch: str,
     worktop_id: str,
+    session_id: str,
     main_branch: str,
     has_conflict: bool,
     is_local: bool = False,
@@ -146,6 +142,7 @@ def tend_prompt(
             .format(
                 branch=branch,
                 worktop_id=worktop_id,
+                session_id=session_id,
                 base_url=base_url,
                 main_branch=main_branch,
             )
@@ -162,6 +159,7 @@ def tend_prompt(
             branch=branch,
             author=author,
             worktop_id=worktop_id,
+            session_id=session_id,
             base_url=base_url,
             main_branch=main_branch,
             merge_section=merge_section,

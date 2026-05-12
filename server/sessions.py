@@ -35,6 +35,7 @@ async def tend_cmd(
     prompt = claude.tend_prompt(
         worktop.branch,
         worktop.id,
+        session_id,
         mb,
         has_conflict,
         is_local=config.is_local(worktop.repo),
@@ -47,7 +48,7 @@ async def tend_cmd(
             "--session-id",
             session_id,
             "--system-prompt",
-            claude.plait_system_prompt(session_id),
+            claude.plait_system_prompt(),
         ],
         worktop.worktree_path,
         prompt,
@@ -63,7 +64,7 @@ def user_worktop_cmd(session_id: str, worktop: Worktop) -> tuple[list[str], str]
         "--session-id",
         session_id,
         "--system-prompt",
-        claude.plait_system_prompt(session_id),
+        claude.plait_system_prompt(),
     ], worktop.worktree_path
 
 

@@ -563,7 +563,7 @@ async def resume_session(worktop_id: str, session_id: str):
     cmd, cwd = resume_cmd(
         session.id,
         worktop.worktree_path,
-        claude.plait_system_prompt(session.id),
+        claude.plait_system_prompt(),
     )
     idle_timeout = (
         daemon.SESSION_IDLE_TIMEOUT if session.role == SessionRole.daemon else None
