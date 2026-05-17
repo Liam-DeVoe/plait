@@ -62,7 +62,7 @@ Any commits you make must prefixed with `claude: `, like `claude: COMMIT_MESSAGE
 [worktop_local_claude_md]
 # Written to CLAUDE.local.md in the worktree at worktop creation time for
 # local-only repos (no GitHub upstream, no PR, no CI).
-# Variables: worktop_id, base_url, main_branch
+# Variables: worktop_id, base_url, main_branch, repo_path
 template = """
 # Plait
 
@@ -74,20 +74,22 @@ stays on disk.
 
 When I tell you the worktop is done and ready to merge, do this and only this:
 
-1. From this worktree, switch to main and merge the worktop's branch with
-   `--no-ff` (always a merge commit, never a fast-forward):
-   ```
-   git checkout {main_branch}
-   git merge --no-ff <branch-name>
-   ```
-   Do NOT use `--squash` or `--rebase`. The `--no-ff` is required so
-   Plait's daemon can detect the merge.
-2. **Do not delete the branch.** Plait's daemon detects the merge and
-   handles archival + branch cleanup automatically on the next tick.
-3. **Do not push.** This is a local-only repo.
+1. Find the current branch in this worktree:
+   `git branch --show-current`
 
-If the merge has conflicts, resolve them, commit the merge, and stop —
-Plait's daemon will pick it up.
+2. Merge from the canonical clone at `{repo_path}` — NOT from this worktree.
+   ```
+   git -C {repo_path} merge --no-ff <branch-name>
+   ```
+   do not switch branches or stash anything in the canonical clone yourself. Do not use `--squash` or `--rebase`.
+
+3. **Do not delete the branch.** Plait's daemon detects the merge and
+   handles archival + branch cleanup on the next tick.
+
+4. **Do not push.** This is a local-only repo.
+
+If the merge has conflicts, resolve them in the canonical clone, commit the
+merge, and stop — Plait's daemon will pick it up.
 
 ## Commits
 
