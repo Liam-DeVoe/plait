@@ -28,8 +28,9 @@ This worktree is managed by Plait (worktop id: {worktop_id}).
    then use `--body-file`:
 
    ```
-   (write body to /tmp/pr-body.txt)
-   gh pr create --title "claude: ..." --body-file /tmp/pr-body.txt
+   body=$(mktemp -u -t plait-pr-body)
+   # write the PR body to "$body"
+   gh pr create --title "claude: ..." --body-file "$body"
    ```
 
    Your PR title must be prefixed with `claude: `.
@@ -175,11 +176,12 @@ This returns JSON: {{"worktop_id": "...", "worktree_path": "...", "branch": "...
 **Spawn a session** in each worktop to do the work. Write the task prompt to a file
 first, then reference it — this avoids bash escaping issues with complex prompts:
   # Write the prompt to a file
-  (write prompt to /tmp/prompt-<name>.txt)
+  prompt=$(mktemp -u -t plait-session-prompt)
+  # write the prompt to "$prompt"
   # Spawn the session
   curl -s -X POST {base_url}/worktops/<worktop_id>/sessions \
     -H 'Content-Type: application/json' \
-    -d '{{"prompt_file": "/tmp/prompt-<name>.txt"}}'
+    -d "{{\"prompt_file\": \"$prompt\"}}"
 
 The session runs autonomously — it will make changes, commit, push, and create a
 PR. You do not need to monitor it.
