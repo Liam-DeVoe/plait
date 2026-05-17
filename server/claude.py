@@ -65,10 +65,16 @@ async def write_worktop_claude_md(
     prompts = _load_prompts()
     if config.is_local(repo_id):
         main_branch = await git.main_branch(repo_id)
+        repo_path = str(config.get_repo(repo_id).path)
         content = (
             prompts["worktop_local_claude_md"]["template"]
             .strip()
-            .format(worktop_id=worktop_id, base_url=base_url, main_branch=main_branch)
+            .format(
+                worktop_id=worktop_id,
+                base_url=base_url,
+                main_branch=main_branch,
+                repo_path=repo_path,
+            )
         )
     else:
         content = (
