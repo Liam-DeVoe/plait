@@ -30,6 +30,17 @@ just install     # uv sync, then npm install in web/
 
 After making changes to Python files, run `just format` to format them with `shed`.
 
+## Previewing locally
+
+When asked to "preview this locally" or similar, start the Vite dev server so the user can view this worktree's frontend in their browser:
+
+1. If `web/node_modules` is missing, run `(cd web && npm install)` first.
+2. Start Vite in the background: `just web`.
+3. Wait briefly, then read the command's output and find the `➜  Local:` line — that's the URL (default `http://localhost:5173/`; Vite picks the next free port if 5173 is taken).
+4. Report that URL to the user as a clickable link.
+
+Do NOT also start the backend (`just server` or `just dev`/`just serve`, which spawn one). The user's primary plait instance is already running on port 57381 (it's what's managing this worktop); a second one would collide. Vite proxies `/api`, `/ws`, and `/ws/sessions` to that existing backend, so the page shows live data with your in-progress UI changes layered on top. Vite hot-reloads, so subsequent file edits show up immediately without restarting.
+
 ## Configuration
 
 `config.toml` at the project root defines the managed repos and author:
