@@ -107,6 +107,39 @@ def resume_cmd(session_id: str, cwd: str, system_prompt: str) -> tuple[list[str]
     ], cwd
 
 
+def fork_cmd(
+    new_session_id: str,
+    source_session_id: str,
+    cwd: str,
+    system_prompt: str,
+) -> tuple[list[str], str]:
+    """Fork an existing session into a new, independent one.
+
+    Combines `--resume <source>` (load the source's conversation) with
+    `--fork-session` (write a new transcript instead of mutating the source's)
+    and `--session-id <new>` (pin the new id to one plait pre-allocated).
+
+    The source session is never touched: its on-disk jsonl is read-only here,
+    and if its PTY is alive it keeps appending to its own file independently.
+    See claude code's `--fork-session` flag for the underlying mechanism.
+
+    As with `resume_cmd`, `--system-prompt` must be re-passed — `--resume`
+    does not preserve the original.
+    """
+    return [
+        "claude",
+        "--verbose",
+        "--dangerously-skip-permissions",
+        "--resume",
+        source_session_id,
+        "--fork-session",
+        "--session-id",
+        new_session_id,
+        "--system-prompt",
+        system_prompt,
+    ], cwd
+
+
 # --- Spawn mechanics ---
 
 

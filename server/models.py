@@ -78,3 +78,6 @@ class Session:
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
     ended_at: str | None = None
+    # Set when this session was created as a fork of another session via the
+    # "Fork" UI button. Points to the source session's id.
+    parent_session_id: str | None = None

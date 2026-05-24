@@ -25,6 +25,7 @@ export interface Session {
   started_at: string;
   ended_at: string | null;
   alive: boolean;
+  parent_session_id: string | null;
 }
 
 export interface Slate {
@@ -228,6 +229,17 @@ export async function resumeSession(worktopId: string, sessionId: string): Promi
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || "Failed to resume session");
+  }
+  return res.json();
+}
+
+export async function forkSession(worktopId: string, sessionId: string): Promise<Session> {
+  const res = await fetch(`${BASE}/worktops/${worktopId}/sessions/${sessionId}/fork`, {
+    method: "POST",
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to fork session");
   }
   return res.json();
 }
