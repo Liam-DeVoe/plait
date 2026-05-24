@@ -426,6 +426,119 @@ async def test_resume_session(client, mock_pty):
     assert "--system-prompt" in cmd
 
 
+async def test_fork_session(client, mock_pty):
+    """POST /worktops/:id/sessions/:sid/fork should spawn an independent
+    forked session and leave the source session untouched."""
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
+    c, _, _ = client
+
+    # Create a source session.
+    resp = await c.post(f"/worktops/{worktop_id}/sessions", json={})
+    source_id = resp.json()["id"]
+    assert mock_pty.spawn.called
+
+    # Snapshot the source's spawn call so we can confirm it was not re-spawned.
+    source_call_count = mock_pty.spawn.call_count
+
+    # Fork it.
+    resp = await c.post(f"/worktops/{worktop_id}/sessions/{source_id}/fork")
+    assert resp.status_code == 200
+    fork = resp.json()
+    fork_id = fork["id"]
+    assert fork_id != source_id
+    assert fork["worktop_id"] == worktop_id
+    assert fork["role"] == "user"
+    assert fork["trigger"] is None
+    assert fork["parent_session_id"] == source_id
+    assert fork["alive"] is True
+
+    # The fork command should be `claude --resume <source> --fork-session
+    # --session-id <new> --system-prompt ...` in the worktop's worktree.
+    cmd = mock_pty.spawn.call_args.kwargs["cmd"]
+    assert "--resume" in cmd
+    assert cmd[cmd.index("--resume") + 1] == source_id
+    assert "--fork-session" in cmd
+    assert "--session-id" in cmd
+    assert cmd[cmd.index("--session-id") + 1] == fork_id
+    # --system-prompt must be re-passed (--resume does not preserve it).
+    assert "--system-prompt" in cmd
+
+    # The source session should not have been re-spawned by the fork — only
+    # the new fork session was. (Source was spawned once, fork once.)
+    assert mock_pty.spawn.call_count == source_call_count + 1
+
+    # Worktop session listing should include both source and fork.
+    resp = await c.get(f"/worktops/{worktop_id}/sessions")
+    ids = {s["id"] for s in resp.json()}
+    assert source_id in ids
+    assert fork_id in ids
+
+
+async def test_fork_session_worktop_not_found(client, mock_pty):
+    c, _, _ = client
+    resp = await c.post("/worktops/nonexistent/sessions/abc/fork")
+    assert resp.status_code == 404
+
+
+async def test_fork_session_source_not_found(client, mock_pty):
+    """Forking a nonexistent source session returns 404."""
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
+    c, _, _ = client
+
+    resp = await c.post(f"/worktops/{worktop_id}/sessions/nonexistent/fork")
+    assert resp.status_code == 404
+
+
+async def test_fork_daemon_session_becomes_user(client, mock_pty):
+    """Forking a daemon (tend) session produces a user-role session.
+
+    Once forked it's user-driven, so the daemon should never see it.
+    """
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
+    c, _, _ = client
+
+    # Manually insert a daemon-role session to simulate a tend session.
+    from server import db
+    from server.models import Session, SessionRole
+
+    daemon_source = Session(
+        worktop_id=worktop_id,
+        role=SessionRole.daemon,
+        trigger="tend",
+    )
+    await db.create_session(daemon_source)
+
+    resp = await c.post(f"/worktops/{worktop_id}/sessions/{daemon_source.id}/fork")
+    assert resp.status_code == 200
+    fork = resp.json()
+    assert fork["role"] == "user"
+    assert fork["trigger"] is None
+    assert fork["parent_session_id"] == daemon_source.id
+
+
+async def test_session_dict_includes_parent_session_id(client, mock_pty):
+    """The session-listing GET should round-trip parent_session_id."""
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
+    c, _, _ = client
+
+    resp = await c.post(f"/worktops/{worktop_id}/sessions", json={})
+    source_id = resp.json()["id"]
+    # A freshly-created (non-forked) session has parent_session_id == None.
+    assert resp.json()["parent_session_id"] is None
+
+    resp = await c.post(f"/worktops/{worktop_id}/sessions/{source_id}/fork")
+    fork_id = resp.json()["id"]
+
+    resp = await c.get(f"/worktops/{worktop_id}/sessions")
+    by_id = {s["id"]: s for s in resp.json()}
+    assert by_id[source_id]["parent_session_id"] is None
+    assert by_id[fork_id]["parent_session_id"] == source_id
+
+
 async def test_resume_slate_session_passes_system_prompt(client, mock_pty):
     """Resuming a slate session must re-pass the slate orchestrator system
     prompt, since `claude --resume` does not preserve it."""

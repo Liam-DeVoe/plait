@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     xterm_state BLOB,
     started_at TEXT NOT NULL,
     ended_at TEXT,
+    parent_session_id TEXT REFERENCES sessions(id),
     FOREIGN KEY (worktop_id) REFERENCES worktops(id),
     FOREIGN KEY (slate_id) REFERENCES slates(id)
 );
@@ -236,8 +237,9 @@ async def create_session(session: Session) -> Session:
     succeeded_val = None if session.succeeded is None else int(session.succeeded)
     await db.execute(
         """INSERT INTO sessions (id, worktop_id, slate_id, role, trigger_name,
-           succeeded, transcript, xterm_state, started_at, ended_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           succeeded, transcript, xterm_state, started_at, ended_at,
+           parent_session_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             session.id,
             session.worktop_id,
@@ -249,6 +251,7 @@ async def create_session(session: Session) -> Session:
             session.xterm_state,
             session.started_at,
             session.ended_at,
+            session.parent_session_id,
         ),
     )
     await db.commit()
@@ -327,6 +330,7 @@ def _row_to_session(row: aiosqlite.Row) -> Session:
         xterm_state=row["xterm_state"],
         started_at=row["started_at"],
         ended_at=row["ended_at"],
+        parent_session_id=row["parent_session_id"],
     )
 
 

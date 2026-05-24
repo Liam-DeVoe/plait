@@ -18,6 +18,7 @@ import {
   createInteractiveSession,
   deleteSession,
   resumeSession,
+  forkSession,
   fetchXtermState,
   type Session,
 } from "../api";
@@ -35,11 +36,13 @@ function CollapsibleSession({
   worktopId,
   onResume,
   onVSCode,
+  onFork,
 }: {
   session: Session;
   worktopId: string;
   onResume: () => void;
   onVSCode: () => void;
+  onFork: () => void;
 }) {
   const [expanded, setExpanded] = useState(session.alive);
 
@@ -79,6 +82,16 @@ function CollapsibleSession({
             Resume
           </div>
         )}
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            onFork();
+          }}
+          className="btn btn--xs btn--soft-gray collapsible-session__resume"
+          title="Spawn a new session forked from this one. The original is unaffected."
+        >
+          Fork
+        </div>
       </div>
       {expanded && (
         <div className="collapsible-session__body">
@@ -134,6 +147,13 @@ export default function WorktopDetailPage() {
 
   const handleResumeSession = async (sessionId: string) => {
     await resumeSession(worktop.id, sessionId);
+    refresh();
+  };
+
+  const handleForkSession = async (sessionId: string) => {
+    const fork = await forkSession(worktop.id, sessionId);
+    // Focus the new session so the user lands inside the fork.
+    setSelectedSessionId(fork.id);
     refresh();
   };
 
@@ -264,6 +284,13 @@ export default function WorktopDetailPage() {
                     </div>
                   )}
                   <div
+                    className="btn btn--sm btn--soft-gray"
+                    onClick={() => handleForkSession(selectedSession.id)}
+                    title="Spawn a new session forked from this one. The original is unaffected."
+                  >
+                    Fork
+                  </div>
+                  <div
                     className="btn btn--sm btn--soft-red"
                     onClick={() => handleDeleteSession(selectedSession.id)}
                   >
@@ -322,6 +349,7 @@ export default function WorktopDetailPage() {
                   await openSessionInVSCode(worktop.id, s.id);
                   refresh();
                 }}
+                onFork={() => handleForkSession(s.id)}
               />
             ))}
           </div>

@@ -27,6 +27,7 @@ from server.models import (
 )
 from server.pty import pty_manager
 from server.sessions import (
+    fork_cmd,
     resume_cmd,
     spawn_session,
     user_slate_cmd,
@@ -541,6 +542,46 @@ async def create_session_endpoint(worktop_id: str, req: CreateSessionRequest):
     spawn_session(session.id, cmd, cwd, initial_input=prompt)
 
     return _session_dict(session)
+
+
+@app.post("/worktops/{worktop_id}/sessions/{session_id}/fork")
+async def fork_session(worktop_id: str, session_id: str):
+    """Fork a session into a new, independent one.
+
+    The new session starts with the source's full conversation history as
+    of right now (i.e. whatever the source has flushed to its on-disk
+    transcript). The source is unaffected — it keeps running, and its
+    transcript file is read-only from the fork's perspective. The fork
+    becomes a fresh user session that the user can drive on its own.
+    """
+    worktop = await db.get_worktop(worktop_id)
+    if not worktop:
+        raise HTTPException(status_code=404, detail="Worktop not found")
+
+    session_list = await db.list_sessions(worktop_id)
+    source = next((s for s in session_list if s.id == session_id), None)
+    if not source:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # The fork is always a plain user session regardless of the source's role.
+    # Once forked, the daemon is no longer responsible for it.
+    fork = Session(
+        worktop_id=worktop.id,
+        role=SessionRole.user,
+        parent_session_id=source.id,
+    )
+    await db.create_session(fork)
+
+    cmd, cwd = fork_cmd(
+        fork.id,
+        source.id,
+        worktop.worktree_path,
+        claude.plait_system_prompt(),
+    )
+    spawn_session(fork.id, cmd, cwd)
+
+    await daemon.notify("worktop_updated", {"id": worktop_id})
+    return _session_dict(fork)
 
 
 @app.post("/worktops/{worktop_id}/sessions/{session_id}/resume")
