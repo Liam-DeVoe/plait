@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from server import config, db, git
 from server.models import (
     CIStatus,
+    MergeableState,
     Session,
     SessionRole,
     SyncStatus,
@@ -26,6 +27,12 @@ SESSION_IDLE_TIMEOUT = (
     300  # seconds — kill interactive sessions after 5 min of no output
 )
 PR_ACTIVITY_COOLDOWN = 300  # seconds — wait for PR activity to settle
+
+# Conflicts in these paths are treated as transient — another PR was merged
+# but the release job hasn't yet cut a release that deletes the file from
+# main. Acting on them is wasted work; they resolve themselves once the
+# release job runs.
+IGNORED_CONFLICT_PATHS = frozenset({"RELEASE.md", "RELEASE.rst"})
 
 # Backoff tiers for PR polling.
 # (max_idle_seconds, poll_interval_seconds)
@@ -70,7 +77,7 @@ async def _derive_sync_status(worktop: Worktop) -> None:
         worktop.repo, worktop.worktree_path, worktop.branch
     )
     sync = SyncStatus.behind if behind else SyncStatus.current
-    if sync != worktop.sync_status:
+    if sync is not worktop.sync_status:
         await db.update_worktop(worktop.id, sync_status=sync)
         await notify("worktop_updated", {"id": worktop.id, "sync_status": sync.value})
         worktop.sync_status = sync
@@ -215,33 +222,35 @@ async def _process_worktop(worktop: Worktop) -> dict:
         # --- Derive sync status from remote refs ---
         await _derive_sync_status(worktop)
 
-        # --- Detect (but don't perform) a merge if behind main ---
-        # We deliberately don't create the merge commit ourselves: clean
-        # merges produce noisy "Merge remote-tracking branch ..." commits
-        # on the PR for no real benefit. Conflicts still need a tend
-        # session — Claude does the actual merge there.
-        #
-        # Conflicts in transient release-marker files are ignored: another
-        # PR was merged but the release job hasn't yet cut a release that
-        # deletes the file from main. Acting on these conflicts is wasted
-        # work — they resolve themselves once the release job runs.
+        # We deliberately don't auto-create the merge commit when a branch
+        # is behind but mergeable: clean merges produce noisy "Merge
+        # remote-tracking branch ..." commits on the PR for no benefit.
+        # Tend sessions only fire when there's something Claude actually
+        # needs to do (conflict, CI failure, reviewer feedback, etc.).
         has_conflicts = False
-        if worktop.sync_status == SyncStatus.behind:
+        needs_tend = False
+        if worktop.sync_status is SyncStatus.behind:
             reasons.append("behind_main")
+
+        # --- Conflict detection: local fallback ---
+        # When there's no GitHub authority to consult (local-only repo,
+        # or remote repo with no PR yet) we use the local merge-tree check.
+        # Worktops with a PR defer to GitHub's `mergeable_state` below.
+        if worktop.sync_status is SyncStatus.behind and (
+            config.is_local(worktop.repo) or not worktop.pr_number
+        ):
             conflicts = await git.check_merge_conflicts(
-                worktop.repo,
-                worktop.worktree_path,
-                ignore=frozenset({"RELEASE.md", "RELEASE.rst"}),
+                worktop.repo, worktop.worktree_path
             )
-            if conflicts:
+            actionable = [c for c in conflicts if c not in IGNORED_CONFLICT_PATHS]
+            if actionable:
                 logger.info(
                     f"Worktop {worktop.id} ({worktop.repo}:{worktop.branch}) "
-                    f"has merge conflicts with main: {', '.join(conflicts)}"
+                    f"has merge conflicts with main: {', '.join(actionable)}"
                 )
                 has_conflicts = True
-                reasons.append(f"conflicts: {', '.join(conflicts)}")
-
-        needs_tend = has_conflicts
+                needs_tend = True
+                reasons.append(f"conflicts: {', '.join(actionable)}")
 
         if worktop.pr_number:
             # --- Backoff check: skip expensive API calls for idle worktops ---
@@ -347,6 +356,34 @@ async def _process_worktop(worktop: Worktop) -> dict:
                                 pr_reaction_count=pr_data.reaction_count,
                             )
                         needs_tend = True
+
+                # --- Conflict signal from GitHub ---
+                # GitHub is authoritative for what blocks the merge button.
+                # We use it instead of our local merge-tree check because
+                # git's default rename detection can resolve "conflicts"
+                # that GitHub still blocks on (e.g. modify/delete after a
+                # rename). Only `dirty` triggers a tend; `behind`
+                # (strict-mode out of date) is left alone so the user can
+                # one-click "Update branch" when they next review the PR.
+                if pr_data.mergeable_state is MergeableState.dirty:
+                    # The local check is only consulted to apply the
+                    # ignore filter: if every local conflict is in the
+                    # ignore set (e.g. RELEASE.md), the release job will
+                    # resolve it and tending is wasted work. In every
+                    # other case — including when the local check returns
+                    # no paths at all — we trust GitHub.
+                    conflicts = await git.check_merge_conflicts(
+                        worktop.repo, worktop.worktree_path
+                    )
+                    actionable = [
+                        c for c in conflicts if c not in IGNORED_CONFLICT_PATHS
+                    ]
+                    all_ignored = conflicts and not actionable
+                    if not all_ignored:
+                        has_conflicts = True
+                        needs_tend = True
+                        detail = ", ".join(actionable) if actionable else "unknown"
+                        reasons.append(f"conflicts: {detail}")
 
         # --- Spawn a tend session if anything changed ---
         key = (worktop.id, "tend")

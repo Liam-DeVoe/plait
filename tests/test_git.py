@@ -102,54 +102,6 @@ async def test_check_merge_conflicts_with_conflict(git_env):
     assert out.strip() == ""
 
 
-async def test_check_merge_conflicts_ignores_listed_paths(git_env):
-    """Paths in `ignore` are filtered out of the returned conflict list."""
-    git_env.create_branch("ignore-branch")
-    git_env.add_commit("RELEASE.md", "branch release notes", "add release on branch")
-    git_env.push("ignore-branch")
-    git_env.checkout("main")
-
-    git_env.add_commit("RELEASE.md", "main release notes", "add release on main")
-    git_env.push("main")
-
-    wt_path = await git.create_worktree(
-        git_env.repo_id, "ignore-branch", "worktop-ignore"
-    )
-
-    # Without ignore: conflict shows up.
-    assert await git.check_merge_conflicts(git_env.repo_id, wt_path) == ["RELEASE.md"]
-
-    # With ignore: filtered out.
-    assert (
-        await git.check_merge_conflicts(
-            git_env.repo_id, wt_path, ignore=frozenset({"RELEASE.md"})
-        )
-        == []
-    )
-
-
-async def test_check_merge_conflicts_ignore_with_other_conflict(git_env):
-    """An ignored path is filtered, but other conflicts are still reported."""
-    git_env.create_branch("mixed-branch")
-    git_env.add_commit("RELEASE.md", "branch release", "add release on branch")
-    git_env.add_commit("README.md", "branch readme", "edit readme on branch")
-    git_env.push("mixed-branch")
-    git_env.checkout("main")
-
-    git_env.add_commit("RELEASE.md", "main release", "add release on main")
-    git_env.add_commit("README.md", "main readme", "edit readme on main")
-    git_env.push("main")
-
-    wt_path = await git.create_worktree(
-        git_env.repo_id, "mixed-branch", "worktop-mixed"
-    )
-
-    conflicts = await git.check_merge_conflicts(
-        git_env.repo_id, wt_path, ignore=frozenset({"RELEASE.md"})
-    )
-    assert conflicts == ["README.md"]
-
-
 # --- Local-only repo tests ---
 
 

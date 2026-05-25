@@ -294,7 +294,7 @@ async def reopen_worktop(worktop_id: str):
     worktop = await db.get_worktop(worktop_id)
     if not worktop:
         raise HTTPException(status_code=404, detail="Worktop not found")
-    if worktop.status != WorktopStatus.archived:
+    if worktop.status is not WorktopStatus.archived:
         raise HTTPException(status_code=400, detail="Worktop is not archived")
 
     # Recreate worktree
@@ -607,7 +607,7 @@ async def resume_session(worktop_id: str, session_id: str):
         claude.plait_system_prompt(),
     )
     idle_timeout = (
-        daemon.SESSION_IDLE_TIMEOUT if session.role == SessionRole.daemon else None
+        daemon.SESSION_IDLE_TIMEOUT if session.role is SessionRole.daemon else None
     )
     spawn_session(session.id, cmd, cwd, idle_timeout=idle_timeout)
 
@@ -714,7 +714,7 @@ def _slate_dict(slate: Slate, worktops: list[Worktop]) -> dict:
     """Serialize a slate with derived is_archived field."""
     d = asdict(slate)
     all_worktops_archived = len(worktops) > 0 and all(
-        c.status == WorktopStatus.archived for c in worktops
+        c.status is WorktopStatus.archived for c in worktops
     )
     d["is_archived"] = slate.archived or all_worktops_archived
     return d
@@ -803,7 +803,7 @@ async def resume_slate_session(slate_id: str, session_id: str):
         ),
     )
     idle_timeout = (
-        daemon.SESSION_IDLE_TIMEOUT if session.role == SessionRole.daemon else None
+        daemon.SESSION_IDLE_TIMEOUT if session.role is SessionRole.daemon else None
     )
     spawn_session(session.id, cmd, cwd, idle_timeout=idle_timeout)
 

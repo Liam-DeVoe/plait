@@ -12,9 +12,9 @@ from server.models import (
 def test_worktop_defaults():
     worktop = Worktop()
     assert worktop.id  # non-empty UUID
-    assert worktop.status == WorktopStatus.open
-    assert worktop.ci_status == CIStatus.unknown
-    assert worktop.sync_status == SyncStatus.current
+    assert worktop.status is WorktopStatus.open
+    assert worktop.ci_status is CIStatus.unknown
+    assert worktop.sync_status is SyncStatus.current
     assert worktop.slate_id is None
     assert worktop.pr_number is None
     assert worktop.pr_url is None
@@ -25,7 +25,7 @@ def test_worktop_defaults():
 def test_session_defaults():
     session = Session()
     assert session.id
-    assert session.role == SessionRole.user
+    assert session.role is SessionRole.user
     assert session.succeeded is None
     assert session.trigger is None
     assert session.ended_at is None

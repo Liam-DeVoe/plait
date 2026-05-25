@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from server import config
+from server.models import MergeableState
 
 WORKTREE_ROOT = Path(__file__).parent.parent / "worktrees"
 
@@ -392,18 +393,12 @@ async def is_behind_main(repo_id: str, worktree_path: str, branch: str) -> bool:
 async def check_merge_conflicts(
     repo_id: str,
     worktree_path: str,
-    ignore: frozenset[str] = frozenset(),
 ) -> list[str]:
     """Return the list of paths that would conflict on a merge from main.
 
     Uses `git merge-tree --write-tree` to compute the merge against the
     object database without touching the working tree, index, or HEAD.
     No commit is created and nothing is pushed.
-
-    Paths in `ignore` are filtered out of the returned list. They're still
-    detected as conflicts internally — callers use this to skip transient
-    conflicts they don't want to act on (e.g. `RELEASE.md` files that get
-    deleted by an upcoming release job).
     """
     main = await main_ref(repo_id)
     if not config.is_local(repo_id):
@@ -434,7 +429,7 @@ async def check_merge_conflicts(
         if p == "":
             break
         conflicts.append(p)
-    return [c for c in conflicts if c not in ignore]
+    return conflicts
 
 
 async def push(worktree_path: str, branch: str) -> tuple[bool, str]:
@@ -682,6 +677,7 @@ class PRData:
     reaction_count: int  # author's reactions on others' comments
     latest_comment_time: datetime | None
     head_sha: str
+    mergeable_state: MergeableState
 
 
 async def get_pr_data(repo_id: str, pr_number: int) -> PRData | None:
@@ -704,6 +700,7 @@ async def get_pr_data(repo_id: str, pr_number: int) -> PRData | None:
     # REST returns "open"/"closed" — merged PRs are "closed" with merged=true
     state = "MERGED" if pr.get("merged") else pr["state"].upper()
     head_sha = pr["head"]["sha"]
+    mergeable_state = MergeableState(pr["mergeable_state"])
 
     # 2. Review comments with reaction counts (1 REST call)
     rc, out, _ = await run("gh", "api", f"repos/{upstream}/pulls/{pr_number}/comments")
@@ -789,6 +786,7 @@ async def get_pr_data(repo_id: str, pr_number: int) -> PRData | None:
         reaction_count=reaction_count,
         latest_comment_time=latest_comment_time,
         head_sha=head_sha,
+        mergeable_state=mergeable_state,
     )
 
 

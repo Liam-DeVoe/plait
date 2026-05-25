@@ -26,6 +26,7 @@ def _mock_pr_data(
     issue_comments: list | None = None,
     reviews: list | None = None,
     check_runs: list | None = None,
+    mergeable_state: str = "clean",
 ):
     """Set up mock_gh responses for the pure-REST get_pr_data and get_ci_status_rest.
 
@@ -73,7 +74,13 @@ def _mock_pr_data(
     # /pulls/N/comments, we need the more specific patterns to be checked first.
     # The mock iterates in insertion order and returns the first match,
     # so this must come AFTER the sub-endpoint patterns.
-    pr_json = json.dumps({"state": state, "head": {"sha": head_sha}})
+    pr_json = json.dumps(
+        {
+            "state": state,
+            "head": {"sha": head_sha},
+            "mergeable_state": mergeable_state,
+        }
+    )
     mock_gh.set_response(f"/pulls/{pr_number}", 0, pr_json)
 
 
@@ -97,7 +104,7 @@ async def test_worktop_current_no_action(git_env, init_db):
     await process_worktop(worktop)
 
     fetched = await db.get_worktop(worktop.id)
-    assert fetched.sync_status == SyncStatus.current
+    assert fetched.sync_status is SyncStatus.current
 
 
 async def test_worktop_clean_merge_no_action(git_env, init_db, mock_claude):
@@ -123,7 +130,7 @@ async def test_worktop_clean_merge_no_action(git_env, init_db, mock_claude):
     await process_worktop(worktop)
 
     fetched = await db.get_worktop(worktop.id)
-    assert fetched.sync_status == SyncStatus.behind
+    assert fetched.sync_status is SyncStatus.behind
 
     # Worktree HEAD should be unchanged — no merge was done.
     head_after = await git.run("git", "rev-parse", "HEAD", cwd=worktop.worktree_path)
@@ -156,7 +163,7 @@ async def test_worktop_release_md_conflict_skipped(git_env, init_db, mock_claude
     await process_worktop(worktop)
 
     fetched = await db.get_worktop(worktop.id)
-    assert fetched.sync_status == SyncStatus.behind
+    assert fetched.sync_status is SyncStatus.behind
     mock_claude.assert_not_called()
     sessions = await db.list_sessions(worktop.id)
     assert sessions == []
@@ -193,7 +200,7 @@ async def test_worktop_conflict_claude_resolves(git_env, init_db, mock_claude):
     await process_worktop(worktop)
 
     fetched = await db.get_worktop(worktop.id)
-    assert fetched.sync_status == SyncStatus.current
+    assert fetched.sync_status is SyncStatus.current
 
     # Verify a daemon session was created
     sessions = await db.list_sessions(worktop.id)
@@ -221,7 +228,7 @@ async def test_worktop_conflict_claude_fails(git_env, init_db, mock_claude):
     await process_worktop(worktop)
 
     fetched = await db.get_worktop(worktop.id)
-    assert fetched.sync_status == SyncStatus.behind
+    assert fetched.sync_status is SyncStatus.behind
 
     # Verify a failed daemon session was created
     sessions = await db.list_sessions(worktop.id)
@@ -253,7 +260,7 @@ async def test_ci_status_update(git_env, init_db, mock_gh):
     await process_worktop(worktop)
 
     fetched = await db.get_worktop(worktop.id)
-    assert fetched.ci_status == CIStatus.passing
+    assert fetched.ci_status is CIStatus.passing
 
 
 async def test_ci_fix_on_failure(git_env, init_db, mock_gh, mock_claude):
@@ -288,7 +295,7 @@ async def test_ci_fix_on_failure(git_env, init_db, mock_gh, mock_claude):
     await process_worktop(worktop)
 
     fetched = await db.get_worktop(worktop.id)
-    assert fetched.ci_status == CIStatus.failing
+    assert fetched.ci_status is CIStatus.failing
 
     # Verify a ci_fix session was created
     sessions = await db.list_sessions(worktop.id)
@@ -518,7 +525,7 @@ async def test_auto_archive_on_pr_merged(git_env, init_db, mock_gh):
     assert "pr_merged" in result["reasons"]
 
     fetched = await db.get_worktop(worktop.id)
-    assert fetched.status == WorktopStatus.archived
+    assert fetched.status is WorktopStatus.archived
     assert fetched.archived_at is not None
     assert fetched.archive_reason == "merged"
 
@@ -542,7 +549,7 @@ async def test_auto_archive_on_pr_closed(git_env, init_db, mock_gh):
     assert "pr_closed" in result["reasons"]
 
     fetched = await db.get_worktop(worktop.id)
-    assert fetched.status == WorktopStatus.archived
+    assert fetched.status is WorktopStatus.archived
     assert fetched.archive_reason == "closed"
 
 
@@ -607,7 +614,7 @@ async def test_local_worktop_current_no_action(git_env_local, init_db, mock_clau
     await process_worktop(worktop)
 
     fetched = await db.get_worktop(worktop.id)
-    assert fetched.sync_status == SyncStatus.current
+    assert fetched.sync_status is SyncStatus.current
     mock_claude.assert_not_called()
 
 
@@ -622,7 +629,7 @@ async def test_local_worktop_behind_no_conflict_no_action(
     await process_worktop(worktop)
 
     fetched = await db.get_worktop(worktop.id)
-    assert fetched.sync_status == SyncStatus.behind
+    assert fetched.sync_status is SyncStatus.behind
     mock_claude.assert_not_called()
 
 
@@ -679,7 +686,7 @@ async def test_local_worktop_archived_when_merged_into_main(
     assert "local_merged" in result["reasons"]
 
     fetched = await db.get_worktop(worktop.id)
-    assert fetched.status == WorktopStatus.archived
+    assert fetched.status is WorktopStatus.archived
     assert fetched.archive_reason == "merged"
 
     # Branch should have been deleted by the daemon.
@@ -743,3 +750,152 @@ async def test_pr_activity_cooldown_allows_old(git_env, init_db, mock_gh, mock_c
     # Comment count should be updated
     fetched = await db.get_worktop(worktop.id)
     assert fetched.pr_comment_count == 1
+
+
+# --- GitHub mergeable_state as the conflict signal ---
+
+
+async def _setup_pr_worktop(
+    git_env, branch: str, worktop_id: str, pr_number: int
+) -> Worktop:
+    """Create a worktop with a synthetic PR number set."""
+    git_env.create_branch(branch)
+    git_env.add_commit("file.txt", "content", "add file")
+    git_env.push(branch)
+    git_env.checkout("main")
+    worktop = await _create_worktop_in_db(git_env, branch, worktop_id)
+    await db.update_worktop(worktop.id, pr_number=pr_number)
+    worktop.pr_number = pr_number
+    return worktop
+
+
+async def test_mergeable_state_dirty_triggers_tend(
+    git_env, init_db, mock_gh, mock_claude
+):
+    """GitHub `dirty` → tend, even if our local check would resolve cleanly.
+
+    This is the rename/edit case: the branch renames a file, upstream
+    edits the old path. Git's default rename detection would auto-merge
+    (local check returns []), but GitHub blocks the merge as modify/delete.
+    We trust GitHub.
+    """
+    worktop = await _setup_pr_worktop(git_env, "dirty-branch", "daemon-dirty", 400)
+
+    # Local check returns no conflicts (no actual concurrent edits in the
+    # test fixture) — simulating the rename-detection scenario. Behind+clean
+    # locally, but GitHub says dirty.
+    git_env.add_commit("upstream.txt", "upstream", "advance main")
+    git_env.push("main")
+
+    _mock_pr_data(mock_gh, pr_number=400, mergeable_state="dirty")
+    mock_claude.return_value = 0
+
+    result = await process_worktop(worktop)
+
+    mock_claude.assert_called_once()
+    assert result["decision"] == "tended"
+    assert any("conflict" in r for r in result["reasons"])
+
+
+async def test_mergeable_state_dirty_with_only_ignored_paths_skips(
+    git_env, init_db, mock_gh, mock_claude
+):
+    """GitHub `dirty` but local check shows only RELEASE.md → skip."""
+    git_env.create_branch("release-conflict")
+    git_env.add_commit("RELEASE.md", "branch release", "add release on branch")
+    git_env.push("release-conflict")
+    git_env.checkout("main")
+    git_env.add_commit("RELEASE.md", "main release", "add release on main")
+    git_env.push("main")
+
+    worktop = await _create_worktop_in_db(git_env, "release-conflict", "daemon-rel-pr")
+    await db.update_worktop(worktop.id, pr_number=401)
+    worktop.pr_number = 401
+
+    _mock_pr_data(mock_gh, pr_number=401, mergeable_state="dirty")
+
+    await process_worktop(worktop)
+
+    mock_claude.assert_not_called()
+    sessions = await db.list_sessions(worktop.id)
+    assert sessions == []
+
+
+async def test_mergeable_state_clean_no_tend(git_env, init_db, mock_gh, mock_claude):
+    """GitHub `clean` → no conflict tend, even if behind main.
+
+    Replicates the existing "behind but mergeable → leave it alone"
+    behavior, now sourced from GitHub instead of the local merge-tree
+    check.
+    """
+    worktop = await _setup_pr_worktop(git_env, "clean-branch", "daemon-clean-pr", 402)
+    git_env.add_commit("upstream.txt", "upstream", "advance main")
+    git_env.push("main")
+
+    _mock_pr_data(mock_gh, pr_number=402, mergeable_state="clean")
+
+    await process_worktop(worktop)
+
+    mock_claude.assert_not_called()
+
+
+async def test_mergeable_state_unknown_defers_conflict_signal(
+    git_env, init_db, mock_gh, mock_claude
+):
+    """GitHub `unknown` → don't tend for conflicts (recheck next tick).
+
+    GitHub returns `unknown` for a few seconds after every push while it
+    recomputes. We should not act on that uncertainty.
+    """
+    worktop = await _setup_pr_worktop(
+        git_env, "unknown-branch", "daemon-unknown-pr", 403
+    )
+    git_env.add_commit("upstream.txt", "upstream", "advance main")
+    git_env.push("main")
+
+    _mock_pr_data(mock_gh, pr_number=403, mergeable_state="unknown")
+
+    result = await process_worktop(worktop)
+
+    mock_claude.assert_not_called()
+    assert not any("conflict" in r for r in result["reasons"])
+
+
+async def test_mergeable_state_behind_does_not_tend(
+    git_env, init_db, mock_gh, mock_claude
+):
+    """GitHub `behind` (strict-mode required-up-to-date) → no tend.
+
+    The user prefers the one-click "Update branch" on GitHub for this
+    case — auto-merging would produce the same noisy merge commit
+    earlier than necessary, with no benefit beyond saving a click.
+    """
+    worktop = await _setup_pr_worktop(git_env, "strict-branch", "daemon-strict-pr", 404)
+    git_env.add_commit("upstream.txt", "upstream", "advance main")
+    git_env.push("main")
+
+    _mock_pr_data(mock_gh, pr_number=404, mergeable_state="behind")
+
+    result = await process_worktop(worktop)
+
+    mock_claude.assert_not_called()
+    assert not any("conflict" in r for r in result["reasons"])
+
+
+async def test_mergeable_state_blocked_no_conflict_tend(
+    git_env, init_db, mock_gh, mock_claude
+):
+    """GitHub `blocked` (e.g. missing required review) → no conflict tend.
+
+    `blocked` overlaps with CI/review state, both of which are handled
+    by other signals. The mergeable_state branch alone shouldn't trigger.
+    """
+    worktop = await _setup_pr_worktop(
+        git_env, "blocked-branch", "daemon-blocked-pr", 405
+    )
+    _mock_pr_data(mock_gh, pr_number=405, mergeable_state="blocked")
+
+    result = await process_worktop(worktop)
+
+    mock_claude.assert_not_called()
+    assert not any("conflict" in r for r in result["reasons"])

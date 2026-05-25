@@ -23,6 +23,34 @@ class SyncStatus(str, Enum):
     behind = "behind"
 
 
+class MergeableState(str, Enum):
+    """GitHub's `mergeable_state` field on a pull request.
+
+    Meanings:
+      - clean: no conflicts, all required checks pass
+      - dirty: merge conflict
+      - unknown: GitHub is still computing (typically right after a push)
+      - behind: head is behind base and branch protection requires
+        up-to-date branches (strict mode)
+      - blocked: blocked by some other branch protection rule —
+        required check failing/pending, missing required review,
+        codeowners, ruleset
+      - unstable: a non-required check is failing/pending; can still merge
+      - has_hooks: repo has custom pre-receive hooks (mergeable); rare,
+        primarily seen on GitHub Enterprise
+      - draft: PR is marked draft
+    """
+
+    clean = "clean"
+    dirty = "dirty"
+    unknown = "unknown"
+    behind = "behind"
+    blocked = "blocked"
+    unstable = "unstable"
+    has_hooks = "has_hooks"
+    draft = "draft"
+
+
 class SessionRole(str, Enum):
     daemon = "daemon"
     user = "user"

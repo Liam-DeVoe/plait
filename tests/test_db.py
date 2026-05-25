@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from hypothesis import given, settings, strategies as st
-
 from server import db
 from server.models import (
     CIStatus,
@@ -24,7 +23,7 @@ async def test_create_and_get_worktop(init_db):
     assert fetched is not None
     assert fetched.repo == "org/repo"
     assert fetched.branch == "main"
-    assert fetched.status == WorktopStatus.open
+    assert fetched.status is WorktopStatus.open
 
 
 async def test_list_worktops_empty(init_db):
@@ -59,8 +58,8 @@ async def test_update_worktop(init_db):
         sync_status=SyncStatus.current,
     )
     assert updated is not None
-    assert updated.ci_status == CIStatus.passing
-    assert updated.sync_status == SyncStatus.current
+    assert updated.ci_status is CIStatus.passing
+    assert updated.sync_status is SyncStatus.current
 
 
 async def test_delete_worktop(init_db):
@@ -240,9 +239,9 @@ async def test_worktop_roundtrip(worktop: Worktop):
     assert fetched.slate_id == worktop.slate_id
     assert fetched.pr_number == worktop.pr_number
     assert fetched.pr_url == worktop.pr_url
-    assert fetched.ci_status == worktop.ci_status
-    assert fetched.sync_status == worktop.sync_status
-    assert fetched.status == worktop.status
+    assert fetched.ci_status is worktop.ci_status
+    assert fetched.sync_status is worktop.sync_status
+    assert fetched.status is worktop.status
     assert fetched.archived_at == worktop.archived_at
     assert fetched.archive_reason == worktop.archive_reason
 
@@ -256,7 +255,7 @@ async def test_session_roundtrip(session: Session):
     assert fetched is not None
     assert fetched.worktop_id == session.worktop_id
     assert fetched.slate_id == session.slate_id
-    assert fetched.role == session.role
+    assert fetched.role is session.role
     assert fetched.trigger == session.trigger
     assert fetched.succeeded == session.succeeded
     assert fetched.transcript == session.transcript

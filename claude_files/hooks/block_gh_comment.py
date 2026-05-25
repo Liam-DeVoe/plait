@@ -9,6 +9,7 @@ Reads the PreToolUse JSON payload on stdin, inspects
 `tool_input.command`, and prints a deny JSON if the command matches a
 comment-posting `gh` invocation. Silent (exit 0, no output) otherwise.
 """
+
 from __future__ import annotations
 
 import json
