@@ -304,11 +304,11 @@ async def _process_worktop(worktop: Worktop) -> dict:
                 # --- CI status (REST, using head SHA from PR data) ---
                 ci = await git.get_ci_status_rest(worktop.repo, pr_data.head_sha)
                 ci_status = CIStatus(ci)
-                if ci_status != worktop.ci_status:
+                if ci_status is not worktop.ci_status:
                     await db.update_worktop(worktop.id, ci_status=ci_status)
                     await notify("worktop_updated", {"id": worktop.id, "ci_status": ci})
                 if (
-                    ci_status == CIStatus.failing
+                    ci_status is CIStatus.failing
                     and not worktop.ci_failure_expected_sha
                 ):
                     ci_detail = f"ci: {worktop.ci_status.value}\u2192{ci_status.value}"
