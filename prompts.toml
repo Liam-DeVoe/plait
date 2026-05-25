@@ -287,8 +287,15 @@ When you have finished (or if there is nothing to fix), notify Plait so it can f
 [tend.merge_conflict]
 # Inserted into the tend prompt when the daemon detected real (non-ignored)
 # merge conflicts. Tells Claude to perform the merge and resolve.
+#
+# `{upstream_remote}` is the local git remote that tracks the canonical
+# repo (usually `origin`, but `upstream` in fork-and-PR setups). Always
+# merge from there — the fork's `origin/main` may lag the upstream and
+# merging it would be a no-op against the actual conflict.
+#
+# Variables: main_branch, upstream_remote
 template = """
-Merging `origin/{main_branch}` into this branch will conflict. Run `git merge origin/{main_branch}`, resolve the conflicts (preserving the intent of both sides), and commit the merge before continuing.
+Merging `{upstream_remote}/{main_branch}` into this branch will conflict. Run `git merge {upstream_remote}/{main_branch}`, resolve the conflicts (preserving the intent of both sides), and commit the merge before continuing.
 """
 
 [tend.merge_skip]
@@ -296,8 +303,10 @@ Merging `origin/{main_branch}` into this branch will conflict. Run `git merge or
 # conflicts. Pre-empts Claude's instinct to merge from main during CI/comment
 # work — that would produce noisy merge commits the daemon went out of its
 # way to avoid.
+#
+# Variables: main_branch, upstream_remote
 template = """
-Being behind `origin/{main_branch}` without conflicts is a normal, accepted state for a PR — do not merge from `origin/{main_branch}` during this session, even if a CI log or a reviewer comment suggests otherwise.
+Being behind `{upstream_remote}/{main_branch}` without conflicts is a normal, accepted state for a PR — do not merge from `{upstream_remote}/{main_branch}` during this session, even if a CI log or a reviewer comment suggests otherwise.
 """
 
 [tend_local]

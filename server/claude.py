@@ -127,6 +127,7 @@ def tend_prompt(
     main_branch: str,
     has_conflict: bool,
     is_local: bool = False,
+    upstream_remote: str | None = None,
 ) -> str:
     """Build a prompt for the tend session.
 
@@ -138,6 +139,11 @@ def tend_prompt(
     For local repos, the only thing the daemon ever spawns a tend for is
     a merge conflict — there's no CI / no PR comments — so the prompt is
     simpler.
+
+    `upstream_remote` is the local git remote name that tracks the
+    canonical repo (usually `origin`, but `upstream` in fork-and-PR
+    setups). Required for non-local repos so the merge instructions point
+    at the right ref; omitted for local repos.
     """
     prompts = _load_prompts()
     base_url = f"http://localhost:{PLAIT_PORT}"
@@ -153,10 +159,13 @@ def tend_prompt(
                 main_branch=main_branch,
             )
         )
+    assert upstream_remote is not None
     author = config.get_author()
     section_key = "merge_conflict" if has_conflict else "merge_skip"
     merge_section = (
-        prompts["tend"][section_key]["template"].strip().format(main_branch=main_branch)
+        prompts["tend"][section_key]["template"]
+        .strip()
+        .format(main_branch=main_branch, upstream_remote=upstream_remote)
     )
     return (
         prompts["tend"]["template"]

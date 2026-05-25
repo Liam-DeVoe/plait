@@ -32,13 +32,16 @@ async def tend_cmd(
     to spawn_session rather than baked into the command.
     """
     mb = await git.main_branch(worktop.repo)
+    is_local = config.is_local(worktop.repo)
+    upstream_remote = None if is_local else await git.upstream_remote(worktop.repo)
     prompt = claude.tend_prompt(
         worktop.branch,
         worktop.id,
         session_id,
         mb,
         has_conflict,
-        is_local=config.is_local(worktop.repo),
+        is_local=is_local,
+        upstream_remote=upstream_remote,
     )
     return (
         [
