@@ -62,35 +62,37 @@ function CollapsibleSession({
         <span className="collapsible-session__time">
           {new Date(session.started_at).toLocaleString()}
         </span>
-        <div
-          onClick={(e) => {
-            e.stopPropagation();
-            onVSCode();
-          }}
-          className="btn btn--xs btn--soft-gray collapsible-session__resume"
-        >
-          VS Code
-        </div>
-        {!session.alive && (
+        <div className="collapsible-session__actions">
           <div
             onClick={(e) => {
               e.stopPropagation();
-              onResume();
+              onVSCode();
             }}
-            className="btn btn--xs btn--soft-blue collapsible-session__resume"
+            className="btn btn--xs btn--soft-gray"
           >
-            Resume
+            VS Code
           </div>
-        )}
-        <div
-          onClick={(e) => {
-            e.stopPropagation();
-            onFork();
-          }}
-          className="btn btn--xs btn--soft-gray collapsible-session__resume"
-          title="Spawn a new session forked from this one. The original is unaffected."
-        >
-          Fork
+          {!session.alive && (
+            <div
+              onClick={(e) => {
+                e.stopPropagation();
+                onResume();
+              }}
+              className="btn btn--xs btn--soft-blue"
+            >
+              Resume
+            </div>
+          )}
+          <div
+            onClick={(e) => {
+              e.stopPropagation();
+              onFork();
+            }}
+            className="btn btn--xs btn--soft-gray"
+            title="Spawn a new session forked from this one. The original is unaffected."
+          >
+            Fork
+          </div>
         </div>
       </div>
       {expanded && (
