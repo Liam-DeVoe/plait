@@ -112,7 +112,7 @@ function CreateWorktopForm({
 }: {
   open: boolean;
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (worktop: Worktop) => void;
 }) {
   const [prUrl, setPrUrl] = useState("");
   const [loading, setLoading] = useState(false);
@@ -123,10 +123,10 @@ function CreateWorktopForm({
     setLoading(true);
     setError(null);
     try {
-      await createWorktop(prUrl);
+      const worktop = await createWorktop(prUrl);
       setPrUrl("");
       onClose();
-      onCreated();
+      onCreated(worktop);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -482,7 +482,7 @@ export default function WorktopsPage() {
       <CreateWorktopForm
         open={importOpen}
         onClose={() => setImportOpen(false)}
-        onCreated={refresh}
+        onCreated={(worktop) => navigate(`/worktops/${worktop.id}`)}
       />
 
       {repos.length === 0 ? (
