@@ -817,7 +817,10 @@
   color: #858d97;
 }
 
-.collapsible-session__resume {
+.collapsible-session__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   margin-left: auto;
 }
 
