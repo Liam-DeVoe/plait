@@ -169,6 +169,40 @@ async def test_worktop_release_md_conflict_skipped(git_env, init_db, mock_claude
     assert sessions == []
 
 
+async def test_worktop_release_rst_in_subdir_conflict_skipped(
+    git_env, init_db, mock_claude
+):
+    """A RELEASE.rst conflict in a monorepo subdir should be ignored.
+
+    Hypothesis is a monorepo where RELEASE.rst lives at hypothesis/RELEASE.rst,
+    so git merge-tree reports the conflict path with the subdir prefix.
+    The ignore filter matches by basename.
+    """
+    (git_env.clone / "hypothesis").mkdir()
+    git_env.create_branch("release-subdir-conflict")
+    git_env.add_commit(
+        "hypothesis/RELEASE.rst", "branch release", "add release on branch"
+    )
+    git_env.push("release-subdir-conflict")
+    git_env.checkout("main")
+
+    (git_env.clone / "hypothesis").mkdir(exist_ok=True)
+    git_env.add_commit("hypothesis/RELEASE.rst", "main release", "add release on main")
+    git_env.push("main")
+
+    worktop = await _create_worktop_in_db(
+        git_env, "release-subdir-conflict", "daemon-rel-sub"
+    )
+
+    await process_worktop(worktop)
+
+    fetched = await db.get_worktop(worktop.id)
+    assert fetched.sync_status is SyncStatus.behind
+    mock_claude.assert_not_called()
+    sessions = await db.list_sessions(worktop.id)
+    assert sessions == []
+
+
 async def test_worktop_conflict_claude_resolves(git_env, init_db, mock_claude):
     """If merge has conflicts, Claude should be invoked to resolve them."""
     # Create a branch that edits README.md
@@ -813,6 +847,40 @@ async def test_mergeable_state_dirty_with_only_ignored_paths_skips(
     worktop.pr_number = 401
 
     _mock_pr_data(mock_gh, pr_number=401, mergeable_state="dirty")
+
+    await process_worktop(worktop)
+
+    mock_claude.assert_not_called()
+    sessions = await db.list_sessions(worktop.id)
+    assert sessions == []
+
+
+async def test_mergeable_state_dirty_with_only_ignored_subdir_paths_skips(
+    git_env, init_db, mock_gh, mock_claude
+):
+    """GitHub `dirty` but local check shows only `subdir/RELEASE.rst` → skip.
+
+    Covers the Hypothesis monorepo case where RELEASE.rst lives under
+    hypothesis/, not at the repo root.
+    """
+    (git_env.clone / "hypothesis").mkdir()
+    git_env.create_branch("release-subdir-pr-conflict")
+    git_env.add_commit(
+        "hypothesis/RELEASE.rst", "branch release", "add release on branch"
+    )
+    git_env.push("release-subdir-pr-conflict")
+    git_env.checkout("main")
+    (git_env.clone / "hypothesis").mkdir(exist_ok=True)
+    git_env.add_commit("hypothesis/RELEASE.rst", "main release", "add release on main")
+    git_env.push("main")
+
+    worktop = await _create_worktop_in_db(
+        git_env, "release-subdir-pr-conflict", "daemon-rel-sub-pr"
+    )
+    await db.update_worktop(worktop.id, pr_number=403)
+    worktop.pr_number = 403
+
+    _mock_pr_data(mock_gh, pr_number=403, mergeable_state="dirty")
 
     await process_worktop(worktop)
 

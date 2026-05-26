@@ -4,6 +4,7 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from server import config, db, git
 from server.models import (
@@ -28,11 +29,12 @@ SESSION_IDLE_TIMEOUT = (
 )
 PR_ACTIVITY_COOLDOWN = 300  # seconds — wait for PR activity to settle
 
-# Conflicts in these paths are treated as transient — another PR was merged
-# but the release job hasn't yet cut a release that deletes the file from
-# main. Acting on them is wasted work; they resolve themselves once the
-# release job runs.
-IGNORED_CONFLICT_PATHS = frozenset({"RELEASE.md", "RELEASE.rst"})
+# Conflicts in files with these basenames are treated as transient —
+# another PR was merged but the release job hasn't yet cut a release that
+# deletes the file from main. Acting on them is wasted work; they resolve
+# themselves once the release job runs. Matched by basename so monorepos
+# (e.g. Hypothesis, where the file lives at `hypothesis/RELEASE.rst`) work.
+IGNORED_CONFLICT_BASENAMES = frozenset({"RELEASE.md", "RELEASE.rst"})
 
 # Backoff tiers for PR polling.
 # (max_idle_seconds, poll_interval_seconds)
@@ -242,7 +244,9 @@ async def _process_worktop(worktop: Worktop) -> dict:
             conflicts = await git.check_merge_conflicts(
                 worktop.repo, worktop.worktree_path
             )
-            actionable = [c for c in conflicts if c not in IGNORED_CONFLICT_PATHS]
+            actionable = [
+                c for c in conflicts if Path(c).name not in IGNORED_CONFLICT_BASENAMES
+            ]
             if actionable:
                 logger.info(
                     f"Worktop {worktop.id} ({worktop.repo}:{worktop.branch}) "
@@ -376,7 +380,9 @@ async def _process_worktop(worktop: Worktop) -> dict:
                         worktop.repo, worktop.worktree_path
                     )
                     actionable = [
-                        c for c in conflicts if c not in IGNORED_CONFLICT_PATHS
+                        c
+                        for c in conflicts
+                        if Path(c).name not in IGNORED_CONFLICT_BASENAMES
                     ]
                     all_ignored = conflicts and not actionable
                     if not all_ignored:
