@@ -8,10 +8,12 @@ import aiosqlite
 
 from server.models import (
     CIStatus,
+    Repo,
     Session,
     SessionRole,
     Slate,
     SyncStatus,
+    View,
     Worktop,
     WorktopStatus,
 )
@@ -46,7 +48,9 @@ CREATE TABLE IF NOT EXISTS slates (
     session_id TEXT,
     name TEXT,
     archived INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    repo_ids TEXT NOT NULL DEFAULT '[]',
+    view_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS daemon_runs (
@@ -72,9 +76,26 @@ CREATE TABLE IF NOT EXISTS sessions (
     FOREIGN KEY (slate_id) REFERENCES slates(id)
 );
 
-CREATE TABLE IF NOT EXISTS repo_order (
-    repo_id TEXT PRIMARY KEY,
-    position INTEGER NOT NULL
+CREATE TABLE IF NOT EXISTS repos (
+    id TEXT PRIMARY KEY,
+    path TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('remote', 'local')),
+    upstream TEXT,
+    position INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS views (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    repo_ids TEXT NOT NULL DEFAULT '[]',
+    position INTEGER NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 """
 
@@ -120,6 +141,8 @@ async def init_db() -> None:
         "ALTER TABLE slates ADD COLUMN name TEXT",
         "ALTER TABLE slates ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE worktops ADD COLUMN tends_enabled INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE slates ADD COLUMN repo_ids TEXT NOT NULL DEFAULT '[]'",
+        "ALTER TABLE slates ADD COLUMN view_id TEXT",
     ]:
         try:
             await db.execute(migration)
@@ -344,14 +367,17 @@ def _row_to_session(row: aiosqlite.Row) -> Session:
 async def create_slate(slate: Slate) -> Slate:
     db = await get_db()
     await db.execute(
-        """INSERT INTO slates (id, session_id, name, archived, created_at)
-           VALUES (?, ?, ?, ?, ?)""",
+        """INSERT INTO slates (id, session_id, name, archived, created_at,
+           repo_ids, view_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (
             slate.id,
             slate.session_id,
             slate.name,
             int(slate.archived),
             slate.created_at,
+            json.dumps(slate.repo_ids),
+            slate.view_id,
         ),
     )
     await db.commit()
@@ -373,12 +399,19 @@ async def get_slate(slate_id: str) -> Slate | None:
 
 
 def _row_to_slate(row: aiosqlite.Row) -> Slate:
+    repo_ids_raw = row["repo_ids"] if "repo_ids" in row.keys() else "[]"
+    try:
+        repo_ids = json.loads(repo_ids_raw) if repo_ids_raw else []
+    except (json.JSONDecodeError, TypeError):
+        repo_ids = []
     return Slate(
         id=row["id"],
         session_id=row["session_id"],
         name=row["name"],
         archived=bool(row["archived"]),
         created_at=row["created_at"],
+        repo_ids=repo_ids,
+        view_id=row["view_id"] if "view_id" in row.keys() else None,
     )
 
 
@@ -446,22 +479,192 @@ async def create_daemon_run(
     await db.commit()
 
 
-async def get_repo_order() -> list[str]:
+# --- Repos ---
+
+
+def _row_to_repo(row: aiosqlite.Row) -> Repo:
+    return Repo(
+        id=row["id"],
+        path=Path(row["path"]),
+        kind=row["kind"],
+        upstream=row["upstream"],
+        position=row["position"],
+        created_at=row["created_at"],
+    )
+
+
+async def list_repos() -> list[Repo]:
     db = await get_db()
-    cursor = await db.execute("SELECT repo_id FROM repo_order ORDER BY position ASC")
+    cursor = await db.execute("SELECT * FROM repos ORDER BY position ASC, id ASC")
     rows = await cursor.fetchall()
-    return [row["repo_id"] for row in rows]
+    return [_row_to_repo(r) for r in rows]
 
 
-async def set_repo_order(order: list[str]) -> None:
+async def get_repo(repo_id: str) -> Repo | None:
     db = await get_db()
-    await db.execute("DELETE FROM repo_order")
-    if order:
-        await db.executemany(
-            "INSERT INTO repo_order (repo_id, position) VALUES (?, ?)",
-            [(repo_id, idx) for idx, repo_id in enumerate(order)],
-        )
+    cursor = await db.execute("SELECT * FROM repos WHERE id = ?", (repo_id,))
+    row = await cursor.fetchone()
+    return _row_to_repo(row) if row else None
+
+
+async def create_repo(repo: Repo) -> Repo:
+    db = await get_db()
+    await db.execute(
+        """INSERT INTO repos (id, path, kind, upstream, position, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (
+            repo.id,
+            str(repo.path),
+            repo.kind,
+            repo.upstream,
+            repo.position,
+            repo.created_at,
+        ),
+    )
     await db.commit()
+    return repo
+
+
+async def update_repo(repo_id: str, **kwargs: object) -> Repo | None:
+    db = await get_db()
+    sets = []
+    values: list[object] = []
+    for key, value in kwargs.items():
+        if isinstance(value, Path):
+            value = str(value)
+        sets.append(f"{key} = ?")
+        values.append(value)
+    values.append(repo_id)
+    await db.execute(
+        f"UPDATE repos SET {', '.join(sets)} WHERE id = ?",
+        values,
+    )
+    await db.commit()
+    return await get_repo(repo_id)
+
+
+async def delete_repo(repo_id: str) -> None:
+    db = await get_db()
+    await db.execute("DELETE FROM repos WHERE id = ?", (repo_id,))
+    await db.commit()
+
+
+async def set_repo_positions(order: list[str]) -> None:
+    """Persist a new ordering. `order` is a list of repo IDs."""
+    db = await get_db()
+    await db.executemany(
+        "UPDATE repos SET position = ? WHERE id = ?",
+        [(idx, repo_id) for idx, repo_id in enumerate(order)],
+    )
+    await db.commit()
+
+
+# --- Views ---
+
+
+def _row_to_view(row: aiosqlite.Row) -> View:
+    try:
+        repo_ids = json.loads(row["repo_ids"]) if row["repo_ids"] else []
+    except (json.JSONDecodeError, TypeError):
+        repo_ids = []
+    return View(
+        id=row["id"],
+        name=row["name"],
+        repo_ids=repo_ids,
+        position=row["position"],
+        created_at=row["created_at"],
+    )
+
+
+async def list_views() -> list[View]:
+    db = await get_db()
+    cursor = await db.execute("SELECT * FROM views ORDER BY position ASC, id ASC")
+    rows = await cursor.fetchall()
+    return [_row_to_view(r) for r in rows]
+
+
+async def get_view(view_id: str) -> View | None:
+    db = await get_db()
+    cursor = await db.execute("SELECT * FROM views WHERE id = ?", (view_id,))
+    row = await cursor.fetchone()
+    return _row_to_view(row) if row else None
+
+
+async def create_view(view: View) -> View:
+    db = await get_db()
+    await db.execute(
+        """INSERT INTO views (id, name, repo_ids, position, created_at)
+           VALUES (?, ?, ?, ?, ?)""",
+        (
+            view.id,
+            view.name,
+            json.dumps(view.repo_ids),
+            view.position,
+            view.created_at,
+        ),
+    )
+    await db.commit()
+    return view
+
+
+async def update_view(view_id: str, **kwargs: object) -> View | None:
+    db = await get_db()
+    sets = []
+    values: list[object] = []
+    for key, value in kwargs.items():
+        if key == "repo_ids" and isinstance(value, list):
+            value = json.dumps(value)
+        sets.append(f"{key} = ?")
+        values.append(value)
+    values.append(view_id)
+    await db.execute(
+        f"UPDATE views SET {', '.join(sets)} WHERE id = ?",
+        values,
+    )
+    await db.commit()
+    return await get_view(view_id)
+
+
+async def delete_view(view_id: str) -> None:
+    db = await get_db()
+    await db.execute("DELETE FROM views WHERE id = ?", (view_id,))
+    await db.commit()
+
+
+async def remove_repo_from_views(repo_id: str) -> None:
+    """Strip `repo_id` from every view's `repo_ids` array."""
+    views = await list_views()
+    for v in views:
+        if repo_id in v.repo_ids:
+            new_ids = [r for r in v.repo_ids if r != repo_id]
+            await update_view(v.id, repo_ids=new_ids)
+
+
+# --- Settings ---
+
+
+async def get_setting(key: str) -> str | None:
+    db = await get_db()
+    cursor = await db.execute("SELECT value FROM settings WHERE key = ?", (key,))
+    row = await cursor.fetchone()
+    return row["value"] if row else None
+
+
+async def set_setting(key: str, value: str) -> None:
+    db = await get_db()
+    await db.execute(
+        """INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+        (key, value),
+    )
+    await db.commit()
+
+
+async def list_settings() -> dict[str, str]:
+    db = await get_db()
+    cursor = await db.execute("SELECT key, value FROM settings")
+    rows = await cursor.fetchall()
+    return {row["key"]: row["value"] for row in rows}
 
 
 async def list_daemon_runs(limit: int = 20) -> list[dict]:

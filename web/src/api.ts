@@ -36,8 +36,22 @@ export interface Slate {
   archived: boolean;
   is_archived: boolean;
   created_at: string;
+  repo_ids: string[];
+  view_id: string | null;
   worktops?: Worktop[];
   session?: Session;
+}
+
+export interface View {
+  id: string;
+  name: string;
+  repo_ids: string[];
+  position: number;
+  created_at: string;
+}
+
+export interface Settings {
+  author: string;
 }
 
 export interface DaemonRunResult {
@@ -62,6 +76,7 @@ export interface Repo {
   path: string;
   upstream: string | null;
   kind: "remote" | "local";
+  position: number;
 }
 
 const BASE = "/api";
@@ -90,6 +105,121 @@ export async function setRepoOrder(order: string[]): Promise<void> {
     const err = await res.json();
     throw new Error(err.detail || "Failed to update repo order");
   }
+}
+
+export interface CreateRepoBody {
+  id: string;
+  path: string;
+  kind: "remote" | "local";
+  upstream?: string | null;
+}
+
+export async function createRepo(body: CreateRepoBody): Promise<Repo & { warning?: string }> {
+  const res = await fetch(`${BASE}/repos`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to create repo");
+  }
+  return res.json();
+}
+
+export interface UpdateRepoBody {
+  path?: string;
+  upstream?: string | null;
+  kind?: "remote" | "local";
+}
+
+export async function updateRepo(id: string, body: UpdateRepoBody): Promise<Repo> {
+  const res = await fetch(`${BASE}/repos/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to update repo");
+  }
+  return res.json();
+}
+
+export async function deleteRepo(id: string): Promise<{ worktops_deleted: number }> {
+  const res = await fetch(`${BASE}/repos/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to delete repo");
+  }
+  return res.json();
+}
+
+// --- Views ---
+
+export async function fetchViews(): Promise<View[]> {
+  const res = await fetch(`${BASE}/views`);
+  return res.json();
+}
+
+export async function createView(name: string, repoIds: string[]): Promise<View> {
+  const res = await fetch(`${BASE}/views`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, repo_ids: repoIds }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to create view");
+  }
+  return res.json();
+}
+
+export interface UpdateViewBody {
+  name?: string;
+  repo_ids?: string[];
+  position?: number;
+}
+
+export async function updateView(id: string, body: UpdateViewBody): Promise<View> {
+  const res = await fetch(`${BASE}/views/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to update view");
+  }
+  return res.json();
+}
+
+export async function deleteView(id: string): Promise<void> {
+  const res = await fetch(`${BASE}/views/${id}`, { method: "DELETE" });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to delete view");
+  }
+}
+
+// --- Settings ---
+
+export async function fetchSettings(): Promise<Settings> {
+  const res = await fetch(`${BASE}/settings`);
+  return res.json();
+}
+
+export async function updateSettings(body: Partial<Settings>): Promise<Settings> {
+  const res = await fetch(`${BASE}/settings`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to update settings");
+  }
+  return res.json();
 }
 
 export async function fetchWorktops(status?: string): Promise<Worktop[]> {
@@ -178,8 +308,17 @@ export async function fetchSlate(id: string): Promise<Slate & { worktops: Workto
   return res.json();
 }
 
-export async function createSlate(): Promise<Slate> {
-  const res = await fetch(`${BASE}/slates`, { method: "POST" });
+export interface CreateSlateBody {
+  view_id?: string | null;
+  repo_ids?: string[];
+}
+
+export async function createSlate(body: CreateSlateBody = {}): Promise<Slate> {
+  const res = await fetch(`${BASE}/slates`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || "Failed to create slate");

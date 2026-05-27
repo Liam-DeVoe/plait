@@ -208,17 +208,20 @@ async def branch_ref(repo_id: str, branch: str) -> str:
     return f"origin/{branch}"
 
 
-async def create_slate_worktrees(slate_id: str) -> dict[str, str]:
-    """Create read-only worktrees for all repos at the upstream's main.
+async def create_slate_worktrees(slate_id: str, repo_ids: list[str]) -> dict[str, str]:
+    """Create read-only worktrees for the given repos at the upstream's main.
 
-    Returns a dict mapping repo_id to worktree path.
-    Worktrees are created at worktrees/slate-{id}/{repo_id}/ using
-    detached HEAD (no branch).
+    Returns a dict mapping repo_id to worktree path. Worktrees are created
+    at worktrees/slate-{id}/{repo_id}/ using detached HEAD (no branch).
+    Pass the slate's `repo_ids` snapshot — the slate scope is fixed at
+    creation, so it survives later edits to any view the slate was
+    created from.
     """
     slate_dir = WORKTREE_ROOT / f"slate-{slate_id}"
     slate_dir.mkdir(parents=True, exist_ok=True)
 
-    async def _create_one(repo_id: str, repo: config.Repo) -> tuple[str, str]:
+    async def _create_one(repo_id: str) -> tuple[str, str]:
+        repo = config.get_repo(repo_id)
         await fetch_upstream(repo_id)
         ref = await main_ref(repo_id)
         wt_dir = slate_dir / repo_id
@@ -235,18 +238,25 @@ async def create_slate_worktrees(slate_id: str) -> dict[str, str]:
             raise RuntimeError(f"Failed to create slate worktree for {repo_id}: {err}")
         return repo_id, str(wt_dir)
 
-    pairs = await asyncio.gather(
-        *[_create_one(rid, r) for rid, r in config.get_repos().items()]
-    )
+    pairs = await asyncio.gather(*[_create_one(rid) for rid in repo_ids])
     return dict(pairs)
 
 
-async def remove_slate_worktrees(slate_id: str) -> None:
-    """Remove all exploration worktrees for a slate."""
+async def remove_slate_worktrees(slate_id: str, repo_ids: list[str]) -> None:
+    """Remove the exploration worktrees for the given repos.
+
+    `repo_ids` is the slate's snapshot. Any repo in the snapshot that's
+    since been removed from `config` is skipped (the worktree may still
+    exist on disk but we have no way to address its parent repo).
+    """
     slate_dir = WORKTREE_ROOT / f"slate-{slate_id}"
     if not slate_dir.exists():
         return
-    for repo_id, repo in config.get_repos().items():
+    repos = config.get_repos()
+    for repo_id in repo_ids:
+        repo = repos.get(repo_id)
+        if repo is None:
+            continue
         wt_dir = slate_dir / repo_id
         if wt_dir.exists():
             await run(
@@ -258,7 +268,12 @@ async def remove_slate_worktrees(slate_id: str) -> None:
                 cwd=repo.path,
             )
     if slate_dir.exists():
-        slate_dir.rmdir()
+        try:
+            slate_dir.rmdir()
+        except OSError:
+            # Directory not empty — leftover from a previous repo that's
+            # since been deleted from config. Leave it alone.
+            pass
 
 
 async def create_worktree(repo_id: str, branch: str, worktop_id: str) -> str:

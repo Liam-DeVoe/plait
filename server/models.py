@@ -4,6 +4,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
 
 
 class WorktopStatus(str, Enum):
@@ -90,6 +91,37 @@ class Slate:
     session_id: str | None = None
     name: str | None = None
     archived: bool = False
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+    # Snapshot of repo IDs the slate operates on, taken at creation time.
+    # Editing or deleting the source view later does NOT change this list —
+    # the snapshot is the slate's authoritative scope. Empty list means
+    # "no scope set" (legacy behavior: spans every configured repo).
+    repo_ids: list[str] = field(default_factory=list)
+    # The view this slate was created from, if any. Purely for display
+    # ("Created from view: X"). The actual scope is `repo_ids`.
+    view_id: str | None = None
+
+
+@dataclass
+class Repo:
+    id: str
+    path: Path
+    kind: str  # "remote" or "local"
+    upstream: str | None  # None iff kind == "local"
+    position: int = 0
+    created_at: str = field(
+        default_factory=lambda: datetime.now(timezone.utc).isoformat()
+    )
+
+
+@dataclass
+class View:
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    name: str = ""
+    repo_ids: list[str] = field(default_factory=list)
+    position: int = 0
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )

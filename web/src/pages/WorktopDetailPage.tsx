@@ -24,7 +24,7 @@ import {
   type Session,
 } from "../api";
 import Terminal from "../Terminal";
-import { StatusBadge, OverflowMenu, PrPill } from "../components/shared";
+import { StatusBadge, OverflowMenu, PrPill, TendIcon } from "../components/shared";
 
 export async function worktopDetailLoader({ params }: LoaderFunctionArgs) {
   const id = params.id!;
@@ -214,6 +214,7 @@ export default function WorktopDetailPage() {
             {worktop.pr_url && <PrPill worktop={worktop} size="md" />}
             <div
               className={`btn btn--md ${worktop.tends_enabled ? "btn--soft-gray" : "btn--soft-red"}`}
+              style={{ gap: 6 }}
               onClick={async () => {
                 await setTendsEnabled(worktop.id, !worktop.tends_enabled);
                 refresh();
@@ -224,6 +225,7 @@ export default function WorktopDetailPage() {
                   : "Auto-tends are paused. Click to resume. (Manual 'Tend' still works.)"
               }
             >
+              <TendIcon size={16} filled={worktop.tends_enabled} />
               Auto-tend: {worktop.tends_enabled ? "on" : "off"}
             </div>
             <div
@@ -234,8 +236,10 @@ export default function WorktopDetailPage() {
             </div>
             <div
               className="btn btn--md btn--soft-blue"
+              style={{ gap: 6 }}
               onClick={() => triggerSync(worktop.id)}
             >
+              <TendIcon size={16} />
               Tend
             </div>
             <OverflowMenu

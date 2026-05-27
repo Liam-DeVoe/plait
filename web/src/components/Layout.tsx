@@ -52,6 +52,14 @@ export default function Layout() {
             >
               Slates
             </NavLink>
+            <NavLink
+              to="/repos"
+              className={({ isActive }) =>
+                `layout__nav-link${isActive ? " layout__nav-link--active" : ""}`
+              }
+            >
+              Repos
+            </NavLink>
           </div>
         </div>
       </div>
