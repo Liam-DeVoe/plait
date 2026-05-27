@@ -77,9 +77,6 @@ function SettingsPanel({ initial }: { initial: Settings }) {
           {saving ? "Saving..." : "Save"}
         </div>
       </div>
-      <div className="muted" style={{ fontSize: 12 }}>
-        Used to detect your reactions on PR comments (thumbs-up acknowledgments).
-      </div>
     </div>
   );
 }
@@ -660,7 +657,7 @@ function NewViewForm({ repos, onCreated }: { repos: Repo[]; onCreated: () => voi
       {error && <div className="error-banner">{error}</div>}
       <input
         type="text"
-        placeholder="View name (e.g. Hegel)"
+        placeholder="View name"
         value={name}
         onChange={(e) => setName(e.target.value)}
         className="form__input form__input--full"
@@ -711,11 +708,6 @@ function ViewsSection({ views, repos }: { views: View[]; repos: Repo[] }) {
     <div style={{ marginTop: 32 }}>
       <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 16 }}>
         Views ({views.length})
-      </div>
-      <div className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
-        Views are named filters over your repos. Use them to narrow the Worktops
-        and Slates pages, and to scope new slates to a subset of repos. The
-        implicit "All" view is always available and can't be edited.
       </div>
       {views.length === 0 ? (
         <div className="muted" style={{ marginBottom: 12 }}>
