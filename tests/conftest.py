@@ -32,6 +32,27 @@ async def _use_memory_db(tmp_path):
     db_module.DB_PATH = original
 
 
+@pytest.fixture(autouse=True)
+def _stub_config():
+    """Stub server.config._data for every test.
+
+    Without this, any test that touches code calling config._get_data()
+    (e.g. config.get_author(), config.get_repo()) without going through
+    the git_env / git_env_local fixtures falls back to reading the real
+    config.toml on disk — which is brittle (worktrees don't have it,
+    since it's gitignored) and dangerous (tests would silently read the
+    user's real config).
+
+    git_env and git_env_local override this with their own test repos.
+    """
+    import server.config as config_module
+
+    original = config_module._data
+    config_module._data = {"author": "testuser", "repos": {}}
+    yield
+    config_module._data = original
+
+
 @pytest.fixture
 async def init_db():
     """Initialize the DB schema. Use this in tests that need the database."""

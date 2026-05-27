@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS worktops (
     archived_at TEXT,
     archive_reason TEXT,
     last_activity_at TEXT,
+    tends_enabled INTEGER NOT NULL DEFAULT 1,
     FOREIGN KEY (slate_id) REFERENCES slates(id)
 );
 
@@ -118,6 +119,7 @@ async def init_db() -> None:
         "ALTER TABLE worktops ADD COLUMN ci_failure_expected_sha TEXT",
         "ALTER TABLE slates ADD COLUMN name TEXT",
         "ALTER TABLE slates ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE worktops ADD COLUMN tends_enabled INTEGER NOT NULL DEFAULT 1",
     ]:
         try:
             await db.execute(migration)
@@ -136,8 +138,8 @@ async def create_worktop(worktop: Worktop) -> Worktop:
            pr_number, pr_url, ci_status, ci_failure_expected_sha,
            pr_comment_count, pr_reaction_count,
            sync_status, status, created_at, archived_at, archive_reason,
-           last_activity_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           last_activity_at, tends_enabled)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             worktop.id,
             worktop.slate_id,
@@ -156,6 +158,7 @@ async def create_worktop(worktop: Worktop) -> Worktop:
             worktop.archived_at,
             worktop.archive_reason,
             worktop.last_activity_at,
+            int(worktop.tends_enabled),
         ),
     )
     await db.commit()
@@ -226,6 +229,7 @@ def _row_to_worktop(row: aiosqlite.Row) -> Worktop:
         archived_at=row["archived_at"],
         archive_reason=row["archive_reason"],
         last_activity_at=row["last_activity_at"],
+        tends_enabled=bool(row["tends_enabled"]),
     )
 
 

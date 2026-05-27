@@ -393,7 +393,17 @@ async def _process_worktop(worktop: Worktop) -> dict:
 
         # --- Spawn a tend session if anything changed ---
         key = (worktop.id, "tend")
-        if needs_tend and key not in _in_flight:
+        if needs_tend and not worktop.tends_enabled:
+            # Auto-tends are disabled for this worktop. The user can still
+            # invoke a manual tend via the UI; we just don't spawn one
+            # automatically. All sync-status / CI / comment updates above
+            # still ran, so the worktop's metadata stays fresh.
+            decision = "tends_disabled"
+            reasons.append("tends_disabled")
+            logger.info(
+                f"Worktop {worktop.id} needs fixing but tends are disabled; skipping"
+            )
+        elif needs_tend and key not in _in_flight:
             # Clear the ci_failure_expected flag so the tend session
             # re-evaluates CI with fresh eyes (it was triggered by a
             # non-CI reason since CI alone can't trigger when the flag
@@ -416,7 +426,7 @@ async def _process_worktop(worktop: Worktop) -> dict:
             decision = "skipped"
 
         # Mark activity if anything happened
-        if decision not in ("ok", "deferred"):
+        if decision not in ("ok", "deferred", "tends_disabled"):
             await _mark_activity(worktop)
 
         # --- Re-derive sync status after merge/push/tend ---

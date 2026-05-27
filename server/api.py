@@ -327,6 +327,21 @@ async def trigger_sync(worktop_id: str):
     return {"status": "sync triggered"}
 
 
+@app.post("/worktops/{worktop_id}/tends-enabled")
+async def set_tends_enabled(worktop_id: str, body: dict):
+    """Toggle whether the daemon auto-spawns tend sessions for this worktop.
+
+    Manual tends (POST /worktops/{id}/sync) bypass this gate and always
+    run. Persists to the DB so the setting survives server restarts.
+    """
+    enabled = bool(body.get("enabled"))
+    updated = await db.update_worktop(worktop_id, tends_enabled=int(enabled))
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Worktop not found")
+    await daemon.notify("worktop_updated", {"id": worktop_id, "tends_enabled": enabled})
+    return await _worktop_dict(updated)
+
+
 @app.delete("/worktops/{worktop_id}")
 async def delete_worktop(worktop_id: str):
     worktop = await db.get_worktop(worktop_id)

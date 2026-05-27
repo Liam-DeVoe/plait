@@ -20,6 +20,7 @@ import {
   resumeSession,
   forkSession,
   fetchXtermState,
+  setTendsEnabled,
   type Session,
 } from "../api";
 import Terminal from "../Terminal";
@@ -211,6 +212,20 @@ export default function WorktopDetailPage() {
           </div>
           <div className="worktop-detail__actions">
             {worktop.pr_url && <PrPill worktop={worktop} size="md" />}
+            <div
+              className={`btn btn--md ${worktop.tends_enabled ? "btn--soft-gray" : "btn--soft-red"}`}
+              onClick={async () => {
+                await setTendsEnabled(worktop.id, !worktop.tends_enabled);
+                refresh();
+              }}
+              title={
+                worktop.tends_enabled
+                  ? "Auto-tends are running. Click to pause."
+                  : "Auto-tends are paused. Click to resume. (Manual 'Tend' still works.)"
+              }
+            >
+              Auto-tend: {worktop.tends_enabled ? "on" : "off"}
+            </div>
             <div
               className="btn btn--md btn--gray"
               onClick={() => openInVSCode(worktop.id)}
