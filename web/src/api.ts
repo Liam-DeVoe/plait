@@ -8,6 +8,7 @@ export interface Worktop {
   pr_url: string | null;
   ci_status: "unknown" | "pending" | "passing" | "failing";
   tend_status: "current" | "running";
+  tends_enabled: boolean;
   status: "open" | "archived";
   archive_reason: "merged" | "closed" | null;
   created_at: string;
@@ -140,6 +141,19 @@ export async function reopenWorktop(id: string): Promise<Worktop> {
 
 export async function triggerSync(id: string): Promise<void> {
   await fetch(`${BASE}/worktops/${id}/sync`, { method: "POST" });
+}
+
+export async function setTendsEnabled(id: string, enabled: boolean): Promise<Worktop> {
+  const res = await fetch(`${BASE}/worktops/${id}/tends-enabled`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to update auto-tend setting");
+  }
+  return res.json();
 }
 
 export async function deleteWorktop(id: string): Promise<void> {

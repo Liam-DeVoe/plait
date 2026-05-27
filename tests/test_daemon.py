@@ -270,6 +270,71 @@ async def test_worktop_conflict_claude_fails(git_env, init_db, mock_claude):
     assert sessions[0].succeeded is False
 
 
+async def test_tends_disabled_skips_claude_on_conflict(git_env, init_db, mock_claude):
+    """When tends_enabled=False, daemon must NOT spawn a tend session even
+    if a real conflict exists. Manual tends (not exercised here) still work."""
+    git_env.create_branch("paused-conflict")
+    git_env.add_commit("README.md", "branch version", "edit on branch")
+    git_env.push("paused-conflict")
+    git_env.checkout("main")
+
+    git_env.add_commit("README.md", "main version", "edit on main")
+    git_env.push("main")
+
+    worktop = await _create_worktop_in_db(git_env, "paused-conflict", "daemon-paused")
+    await db.update_worktop(worktop.id, tends_enabled=0)
+    worktop.tends_enabled = False
+
+    result = await process_worktop(worktop)
+
+    assert result["decision"] == "tends_disabled"
+    assert "tends_disabled" in result["reasons"]
+    mock_claude.assert_not_called()
+    sessions = await db.list_sessions(worktop.id)
+    assert sessions == []
+
+    # Sync status was still derived (we want metadata to stay fresh even
+    # when auto-tends are paused).
+    fetched = await db.get_worktop(worktop.id)
+    assert fetched.sync_status is SyncStatus.behind
+    assert fetched.tends_enabled is False
+
+
+async def test_tends_enabled_still_spawns_claude(git_env, init_db, mock_claude):
+    """Sanity: tends_enabled=True (the default) preserves prior behavior."""
+    git_env.create_branch("enabled-conflict")
+    git_env.add_commit("README.md", "branch version", "edit on branch")
+    git_env.push("enabled-conflict")
+    git_env.checkout("main")
+
+    git_env.add_commit("README.md", "main version", "edit on main")
+    git_env.push("main")
+
+    worktop = await _create_worktop_in_db(git_env, "enabled-conflict", "daemon-enabled")
+    # Default is True, but assert it explicitly so the test is readable.
+    assert worktop.tends_enabled is True
+
+    async def fake_spawn(session_id, cmd, cwd, **kwargs):
+        await git.run(
+            "git",
+            "merge",
+            "origin/main",
+            "--strategy-option=theirs",
+            "--no-edit",
+            cwd=cwd,
+        )
+        return 0
+
+    mock_claude.side_effect = fake_spawn
+
+    await process_worktop(worktop)
+
+    mock_claude.assert_called_once()
+    sessions = await db.list_sessions(worktop.id)
+    assert len(sessions) == 1
+    assert sessions[0].trigger == "tend"
+
+
 async def test_ci_status_update(git_env, init_db, mock_gh):
     """If worktop has a PR, daemon should check and update CI status."""
     git_env.create_branch("ci-branch")

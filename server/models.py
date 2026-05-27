@@ -79,6 +79,9 @@ class Worktop:
     last_activity_at: str | None = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+    # When False, the daemon will not auto-spawn tend sessions for this
+    # worktop. Manual tends (via the API/UI) bypass this gate.
+    tends_enabled: bool = True
 
 
 @dataclass

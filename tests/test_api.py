@@ -116,6 +116,36 @@ async def test_archive_worktop_not_found(client):
     assert resp.status_code == 404
 
 
+async def test_set_tends_enabled_toggles_column(client):
+    create_resp = await _create_worktop_via_api(client)
+    worktop_id = create_resp.json()["id"]
+    # Default is True
+    assert create_resp.json()["tends_enabled"] is True
+
+    c, _, _ = client
+    # Disable
+    resp = await c.post(
+        f"/worktops/{worktop_id}/tends-enabled", json={"enabled": False}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["tends_enabled"] is False
+
+    # Confirm via GET
+    resp = await c.get(f"/worktops/{worktop_id}")
+    assert resp.json()["tends_enabled"] is False
+
+    # Re-enable
+    resp = await c.post(f"/worktops/{worktop_id}/tends-enabled", json={"enabled": True})
+    assert resp.status_code == 200
+    assert resp.json()["tends_enabled"] is True
+
+
+async def test_set_tends_enabled_not_found(client):
+    c, _, _ = client
+    resp = await c.post("/worktops/nonexistent/tends-enabled", json={"enabled": False})
+    assert resp.status_code == 404
+
+
 async def test_delete_worktop(client):
     create_resp = await _create_worktop_via_api(client)
     worktop_id = create_resp.json()["id"]
