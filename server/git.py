@@ -90,7 +90,7 @@ async def upstream_remote(repo_id: str) -> str:
         raise RuntimeError(
             f"Repo {repo_id!r}: upstream {repo.upstream!r} does not match any "
             f"remote in {repo.path}.\nRemotes:\n{remotes_str}\n"
-            f"Either fix `upstream` in config.toml or `git remote add` the "
+            f"Either fix `upstream` on the Repos page or `git remote add` the "
             f"missing remote."
         )
     # If multiple remotes match (e.g. origin and a duplicate), prefer origin.
@@ -469,7 +469,7 @@ async def get_pr_info_from_url(pr_url: str) -> dict:
     if repo_id is None:
         raise RuntimeError(
             f"No configured repo matches upstream {upstream!r}. "
-            f"Add it to config.toml first."
+            f"Add it on the Repos page first."
         )
 
     rc, out, err = await run(

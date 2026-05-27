@@ -61,7 +61,7 @@ class SessionRole(str, Enum):
 class Worktop:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     slate_id: str | None = None
-    repo: str = ""  # repo ID from config.toml
+    repo: str = ""  # repo ID; references repos.id in the DB
     branch: str = ""
     worktree_path: str = ""
     pr_number: int | None = None

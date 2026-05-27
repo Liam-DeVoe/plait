@@ -11,11 +11,7 @@ import {
   type View,
 } from "../api";
 import { OverflowMenu, navigateTo } from "../components/shared";
-import {
-  ViewFilter,
-  useActiveView,
-  useActiveViewRepoIds,
-} from "../components/ViewFilter";
+import { ViewFilter, useActiveView } from "../components/ViewFilter";
 
 export async function slatesLoader() {
   const [slates, views] = await Promise.all([fetchSlates(), fetchViews()]);
@@ -93,17 +89,20 @@ function NewSlateModal({
   onClose: () => void;
   onCreated: (slate: Slate) => void;
 }) {
-  const [viewId, setViewId] = useState<string | null>(defaultViewId);
+  // Every slate must belong to a view. If no defaultViewId is given (e.g.
+  // we're on the "All" tab when the modal opens), seed with the first
+  // view so the user has something selected on first render.
+  const initialId = defaultViewId ?? (views[0]?.id ?? null);
+  const [viewId, setViewId] = useState<string | null>(initialId);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleCreate = async () => {
+    if (!viewId) return;
     setBusy(true);
     setError(null);
     try {
-      const slate = await createSlate(
-        viewId ? { view_id: viewId } : {},
-      );
+      const slate = await createSlate({ view_id: viewId });
       onCreated(slate);
     } catch (e: any) {
       setError(e.message);
@@ -119,53 +118,41 @@ function NewSlateModal({
       <div className="modal__panel" onClick={(e) => e.stopPropagation()}>
         <div className="modal__title">New slate</div>
         {error && <div className="error-banner">{error}</div>}
-        <div className="muted" style={{ marginBottom: 12, fontSize: 13 }}>
-          Pick the set of repos this slate will operate on. The choice is
-          locked in at creation — editing the view later won't change this
-          slate's scope.
-        </div>
-        <div style={{ marginBottom: 16 }}>
-          <label
-            className="form__checkbox-label"
-            style={{ marginBottom: 6, cursor: "pointer" }}
-          >
-            <input
-              type="radio"
-              checked={viewId === null}
-              onChange={() => setViewId(null)}
-            />
-            All repos
-          </label>
-          {views.map((v) => (
-            <label
-              key={v.id}
-              className="form__checkbox-label"
-              style={{ marginBottom: 6, cursor: "pointer" }}
-            >
-              <input
-                type="radio"
-                checked={viewId === v.id}
-                onChange={() => setViewId(v.id)}
-              />
-              {v.name}{" "}
-              <span className="muted" style={{ fontSize: 12 }}>
-                ({v.repo_ids.length} repo{v.repo_ids.length === 1 ? "" : "s"})
-              </span>
-            </label>
-          ))}
-        </div>
+        {views.length === 0 ? (
+          <div className="muted" style={{ marginBottom: 12 }}>
+            No views yet. Create one on the Repos page first.
+          </div>
+        ) : (
+          <div style={{ marginBottom: 16 }}>
+            {views.map((v) => (
+              <label
+                key={v.id}
+                className="form__checkbox-label"
+                style={{ marginBottom: 6, cursor: "pointer" }}
+              >
+                <input
+                  type="radio"
+                  checked={viewId === v.id}
+                  onChange={() => setViewId(v.id)}
+                />
+                {v.name}{" "}
+                <span className="muted" style={{ fontSize: 12 }}>
+                  ({v.repo_ids.length} repo
+                  {v.repo_ids.length === 1 ? "" : "s"})
+                </span>
+              </label>
+            ))}
+          </div>
+        )}
         {repoCount === 0 && (
-          <div
-            className="error-banner"
-            style={{ marginBottom: 12 }}
-          >
+          <div className="error-banner" style={{ marginBottom: 12 }}>
             This view has no repos — pick another or add repos to it first.
           </div>
         )}
         <div className="form__actions">
           <div
-            className={`btn btn--blue${busy || repoCount === 0 ? " btn--disabled" : ""}`}
-            onClick={busy || repoCount === 0 ? undefined : handleCreate}
+            className={`btn btn--blue${busy || !viewId || repoCount === 0 ? " btn--disabled" : ""}`}
+            onClick={busy || !viewId || repoCount === 0 ? undefined : handleCreate}
           >
             {busy ? "Creating..." : "Create"}
           </div>
@@ -187,20 +174,15 @@ export default function SlatesPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const activeView = useActiveView(views);
-  const activeViewRepoIds = useActiveViewRepoIds(views);
 
   const refresh = () => revalidator.revalidate();
 
-  // Filter slates by the active view. A slate is "in" the view if any of
-  // its snapshotted repo_ids appear in the view's repo set. Slates with
-  // empty snapshots (legacy data) match every view — they're effectively
-  // "all repos" slates.
-  const visibleSlates = activeViewRepoIds
-    ? slates.filter(
-        (s) =>
-          s.repo_ids.length === 0 ||
-          s.repo_ids.some((r) => activeViewRepoIds.includes(r)),
-      )
+  // A slate is "in" a view iff its view_id matches — that's the view the
+  // slate was created from. Slates with view_id = null (legacy slates, or
+  // slates created against "All repos" / with an explicit repo_ids list)
+  // only appear under the "All" tab.
+  const visibleSlates = activeView
+    ? slates.filter((s) => s.view_id === activeView.id)
     : slates;
 
   const activeSlates = visibleSlates.filter((s) => !s.is_archived);

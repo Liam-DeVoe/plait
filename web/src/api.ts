@@ -37,7 +37,9 @@ export interface Slate {
   is_archived: boolean;
   created_at: string;
   repo_ids: string[];
-  view_id: string | null;
+  // Every slate belongs to a view. Legacy slates pre-backfill may still
+  // appear with this null at the type level until the migration runs.
+  view_id: string;
   worktops?: Worktop[];
   session?: Session;
 }
@@ -309,11 +311,12 @@ export async function fetchSlate(id: string): Promise<Slate & { worktops: Workto
 }
 
 export interface CreateSlateBody {
-  view_id?: string | null;
+  view_id: string;
+  // Optional override of the view's repo_ids snapshot.
   repo_ids?: string[];
 }
 
-export async function createSlate(body: CreateSlateBody = {}): Promise<Slate> {
+export async function createSlate(body: CreateSlateBody): Promise<Slate> {
   const res = await fetch(`${BASE}/slates`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

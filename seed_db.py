@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import asyncio
 import sys
-import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
+
+import tomllib
 
 from server import db
 from server.models import Repo

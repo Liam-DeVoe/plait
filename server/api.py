@@ -409,6 +409,19 @@ async def delete_view(view_id: str):
     view = await db.get_view(view_id)
     if view is None:
         raise HTTPException(status_code=404, detail="View not found")
+    # `slates.view_id` is required — deleting the view would leave its
+    # slates dangling. Block until the user moves or deletes those slates
+    # first. (Archived slates count too; treat them all the same.)
+    attached = await db.count_slates_in_view(view_id)
+    if attached > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"View {view.name!r} has {attached} slate"
+                f"{'s' if attached != 1 else ''} attached. "
+                "Move or delete them before deleting this view."
+            ),
+        )
     await db.delete_view(view_id)
     await daemon.notify("view_updated", {"id": view_id, "deleted": True})
     return {"status": "deleted"}
@@ -1043,34 +1056,30 @@ def _slate_dict(slate: Slate, worktops: list[Worktop]) -> dict:
 
 
 class CreateSlateRequest(BaseModel):
-    view_id: str | None = None
+    view_id: str
+    # Optional override of the view's repo_ids snapshot. If omitted, the
+    # slate's scope is exactly the view's `repo_ids` at this moment.
     repo_ids: list[str] | None = None
 
 
 @app.post("/slates")
-async def create_slate(req: CreateSlateRequest | None = None):
-    """Create a slate scoped to a set of repos.
+async def create_slate(req: CreateSlateRequest):
+    """Create a slate scoped to a view's repos.
 
-    The scope is resolved (in order of preference): explicit `repo_ids`,
-    the repos in `view_id`, or — if neither is given — every configured
-    repo. Whatever is resolved gets snapshotted onto the slate; the view
-    can be edited or deleted later without affecting this slate.
+    Every slate belongs to exactly one view (`view_id` is required). The
+    slate's `repo_ids` is snapshotted at creation — defaulting to the
+    view's repo set, or to an explicit override if `repo_ids` is given.
+    Later edits to the view don't change the slate's scope.
     """
-    req = req or CreateSlateRequest()
-    known = set(config.get_repos())
+    view = await db.get_view(req.view_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail="View not found")
 
-    view_id: str | None = None
+    known = set(config.get_repos())
     if req.repo_ids is not None:
         repo_ids = list(req.repo_ids)
-        view_id = req.view_id
-    elif req.view_id is not None:
-        view = await db.get_view(req.view_id)
-        if view is None:
-            raise HTTPException(status_code=404, detail="View not found")
-        repo_ids = list(view.repo_ids)
-        view_id = view.id
     else:
-        repo_ids = list(known)
+        repo_ids = list(view.repo_ids)
 
     # Drop any unknown repos so we don't try to create a worktree from
     # config we no longer have. Preserve order otherwise.
@@ -1081,7 +1090,7 @@ async def create_slate(req: CreateSlateRequest | None = None):
             detail="Slate scope is empty — no repos to operate on.",
         )
 
-    slate = Slate(repo_ids=repo_ids, view_id=view_id)
+    slate = Slate(repo_ids=repo_ids, view_id=view.id)
     await db.create_slate(slate)
 
     try:

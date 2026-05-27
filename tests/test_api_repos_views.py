@@ -92,9 +92,7 @@ async def test_create_repo_duplicate_rejected(client, tmp_path):
     from server import db
     from server.models import Repo
 
-    await db.create_repo(
-        Repo(id="dupe", path=tmp_path, kind="local", upstream=None)
-    )
+    await db.create_repo(Repo(id="dupe", path=tmp_path, kind="local", upstream=None))
     resp = await c.post(
         "/repos",
         json={"id": "dupe", "path": str(tmp_path), "kind": "local"},
@@ -108,9 +106,7 @@ async def test_update_repo_path(client, tmp_path):
     from server import db
     from server.models import Repo
 
-    await db.create_repo(
-        Repo(id="r1", path=tmp_path, kind="local", upstream=None)
-    )
+    await db.create_repo(Repo(id="r1", path=tmp_path, kind="local", upstream=None))
     new_path = tmp_path / "moved"
     new_path.mkdir()
     resp = await c.put(f"/repos/r1", json={"path": str(new_path)})
@@ -125,9 +121,7 @@ async def test_delete_repo_cascade(client, mock_pty, tmp_path):
     from server.models import Repo, View, Worktop
 
     # Seed a repo in the DB so the cascade has something to delete.
-    await db.create_repo(
-        Repo(id="cascade", path=tmp_path, kind="local", upstream=None)
-    )
+    await db.create_repo(Repo(id="cascade", path=tmp_path, kind="local", upstream=None))
     # Add a worktop in that repo.
     worktop = Worktop(repo="cascade", branch="b", worktree_path="/tmp/x")
     await db.create_worktop(worktop)
@@ -179,12 +173,8 @@ async def test_create_view(client, tmp_path):
     from server import db
     from server.models import Repo
 
-    await db.create_repo(
-        Repo(id="r-a", path=tmp_path, kind="local", upstream=None)
-    )
-    await db.create_repo(
-        Repo(id="r-b", path=tmp_path, kind="local", upstream=None)
-    )
+    await db.create_repo(Repo(id="r-a", path=tmp_path, kind="local", upstream=None))
+    await db.create_repo(Repo(id="r-b", path=tmp_path, kind="local", upstream=None))
     # Refresh cache so the validate step sees the new repos.
     from server import config
 
@@ -234,7 +224,8 @@ async def test_update_view(client, tmp_path):
     assert resp.json()["name"] == "Renamed"
 
 
-async def test_delete_view(client):
+async def test_delete_view_empty(client):
+    """Deleting a view with no attached slates succeeds."""
     c, _, _ = client
     create = await c.post("/views", json={"name": "Doomed", "repo_ids": []})
     vid = create.json()["id"]
@@ -244,6 +235,37 @@ async def test_delete_view(client):
 
     resp = await c.get("/views")
     assert all(v["id"] != vid for v in resp.json())
+
+
+async def test_delete_view_blocked_when_slates_attached(client, tmp_path):
+    """Deleting a view that has slates attached is blocked with 400."""
+    c, _, _ = client
+    from unittest.mock import patch
+
+    from server import config, db
+    from server.models import Repo
+
+    await db.create_repo(Repo(id="r-keep", path=tmp_path, kind="local", upstream=None))
+    await config.refresh()
+
+    create = await c.post("/views", json={"name": "Anchor", "repo_ids": ["r-keep"]})
+    vid = create.json()["id"]
+
+    async def _noop(*args, **kwargs):
+        return {}
+
+    with patch("server.git.create_slate_worktrees", side_effect=_noop):
+        resp = await c.post("/slates", json={"view_id": vid})
+    assert resp.status_code == 200
+
+    resp = await c.delete(f"/views/{vid}")
+    assert resp.status_code == 400
+    assert "Anchor" in resp.json()["detail"]
+    assert "1 slate" in resp.json()["detail"]
+
+    # And the view should still be there.
+    resp = await c.get("/views")
+    assert any(v["id"] == vid for v in resp.json())
 
 
 # --- Settings ---
@@ -281,12 +303,8 @@ async def test_create_slate_with_view_snapshots_repo_ids(client, tmp_path):
 
     # Seed two extra local repos so the slate has something concrete to
     # snapshot besides the git_env testrepo.
-    await db.create_repo(
-        Repo(id="extra-a", path=tmp_path, kind="local", upstream=None)
-    )
-    await db.create_repo(
-        Repo(id="extra-b", path=tmp_path, kind="local", upstream=None)
-    )
+    await db.create_repo(Repo(id="extra-a", path=tmp_path, kind="local", upstream=None))
+    await db.create_repo(Repo(id="extra-b", path=tmp_path, kind="local", upstream=None))
     from server import config
 
     await config.refresh()
@@ -305,9 +323,7 @@ async def test_create_slate_with_view_snapshots_repo_ids(client, tmp_path):
     async def _noop(*args, **kwargs):
         return {}
 
-    with patch(
-        "server.git.create_slate_worktrees", side_effect=_noop
-    ):
+    with patch("server.git.create_slate_worktrees", side_effect=_noop):
         resp = await c.post("/slates", json={"view_id": view_id})
     assert resp.status_code == 200
     slate_data = resp.json()
@@ -321,39 +337,53 @@ async def test_create_slate_with_view_snapshots_repo_ids(client, tmp_path):
     assert set(refetched.repo_ids) == {"extra-a", "extra-b"}
 
 
-async def test_create_slate_with_explicit_repo_ids(client, tmp_path):
+async def test_create_slate_with_repo_ids_override(client, tmp_path):
+    """Explicit repo_ids overrides the view's snapshot, but view_id is
+    still required and stored on the slate."""
     c, _, _ = client
-    from server import db
+    from server import config, db
     from server.models import Repo
 
-    await db.create_repo(
-        Repo(id="x", path=tmp_path, kind="local", upstream=None)
-    )
-    from server import config
-
+    await db.create_repo(Repo(id="x", path=tmp_path, kind="local", upstream=None))
+    await db.create_repo(Repo(id="y", path=tmp_path, kind="local", upstream=None))
     await config.refresh()
+
+    create_view = await c.post(
+        "/views",
+        json={"name": "wider", "repo_ids": ["x", "y"]},
+    )
+    view_id = create_view.json()["id"]
 
     from unittest.mock import patch
 
     async def _noop(*args, **kwargs):
         return {}
 
-    with patch(
-        "server.git.create_slate_worktrees", side_effect=_noop
-    ):
-        resp = await c.post("/slates", json={"repo_ids": ["x"]})
+    with patch("server.git.create_slate_worktrees", side_effect=_noop):
+        resp = await c.post(
+            "/slates",
+            json={"view_id": view_id, "repo_ids": ["x"]},
+        )
     assert resp.status_code == 200
     assert resp.json()["repo_ids"] == ["x"]
-    # Without an explicit view_id, the slate has no associated view.
-    assert resp.json()["view_id"] is None
+    assert resp.json()["view_id"] == view_id
+
+
+async def test_create_slate_without_view_id_rejected(client):
+    """view_id is required — POST /slates without it must fail."""
+    c, _, _ = client
+    resp = await c.post("/slates", json={})
+    assert resp.status_code == 422  # pydantic validation error
+
+    # Also fail if only repo_ids is given.
+    resp = await c.post("/slates", json={"repo_ids": ["whatever"]})
+    assert resp.status_code == 422
 
 
 async def test_create_slate_empty_scope_rejected(client):
-    """If view_id resolves to no repos AND no explicit repo_ids, fail."""
+    """If view_id resolves to no repos, fail with a clear message."""
     c, _, _ = client
-    create_view = await c.post(
-        "/views", json={"name": "empty", "repo_ids": []}
-    )
+    create_view = await c.post("/views", json={"name": "empty", "repo_ids": []})
     view_id = create_view.json()["id"]
     resp = await c.post("/slates", json={"view_id": view_id})
     assert resp.status_code == 400

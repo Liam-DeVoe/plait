@@ -41,6 +41,28 @@ def _setup_gh_for_pr(
     return pr_url
 
 
+async def _create_slate_via_api(client, *, repo_ids=None):
+    """Create a slate via the API.
+
+    A view is required for slate creation now, so we lazily create one
+    (named "default") with the test repo. Subsequent calls reuse the
+    existing view. Returns the slate response object.
+    """
+    # Reuse the existing "default" view if a previous call already made
+    # one — POST /views rejects duplicate names.
+    existing = (await client.get("/views")).json()
+    view_id = next((v["id"] for v in existing if v["name"] == "default"), None)
+    if view_id is None:
+        from server.config import get_repos
+
+        view_repos = list(get_repos().keys()) if repo_ids is None else list(repo_ids)
+        resp = await client.post(
+            "/views", json={"name": "default", "repo_ids": view_repos}
+        )
+        view_id = resp.json()["id"]
+    return await client.post("/slates", json={"view_id": view_id})
+
+
 async def _create_worktop_via_api(client_tuple, branch="test-branch", pr_number=42):
     """Helper to create a worktop via the API and return the response."""
     client, git_env, mock_gh = client_tuple
@@ -251,9 +273,7 @@ async def test_list_worktops_filter_by_status(client):
 
 async def test_create_slate(client):
     c, git_env, _ = client
-    resp = await c.post(
-        "/slates",
-    )
+    resp = await _create_slate_via_api(c)
     assert resp.status_code == 200
     data = resp.json()
     assert data["session_id"] is not None  # session created inline with PTY
@@ -261,9 +281,7 @@ async def test_create_slate(client):
 
 async def test_list_slates(client):
     c, git_env, _ = client
-    await c.post(
-        "/slates",
-    )
+    await _create_slate_via_api(c)
     resp = await c.get("/slates")
     assert resp.status_code == 200
     data = resp.json()
@@ -274,9 +292,7 @@ async def test_list_slates(client):
 async def test_hook_create_slate_worktop(client):
     """Slate create-worktop hook should create a worktop linked to the slate."""
     c, git_env, _ = client
-    resp = await c.post(
-        "/slates",
-    )
+    resp = await _create_slate_via_api(c)
     slate_id = resp.json()["id"]
 
     resp = await c.post(
@@ -297,9 +313,7 @@ async def test_hook_create_slate_worktop(client):
 async def test_hook_create_slate_worktop_duplicate(client):
     """Creating a duplicate worktop for the same repo in a slate should fail."""
     c, git_env, _ = client
-    resp = await c.post(
-        "/slates",
-    )
+    resp = await _create_slate_via_api(c)
     slate_id = resp.json()["id"]
 
     await c.post(
@@ -315,9 +329,7 @@ async def test_hook_create_slate_worktop_duplicate(client):
 
 async def test_hook_create_slate_worktop_bad_repo(client):
     c, _, _ = client
-    resp = await c.post(
-        "/slates",
-    )
+    resp = await _create_slate_via_api(c)
     slate_id = resp.json()["id"]
 
     resp = await c.post(
@@ -579,7 +591,7 @@ async def test_resume_slate_session_passes_system_prompt(client, mock_pty):
     """Resuming a slate session must re-pass the slate orchestrator system
     prompt, since `claude --resume` does not preserve it."""
     c, _, _ = client
-    resp = await c.post("/slates")
+    resp = await _create_slate_via_api(c)
     slate_id = resp.json()["id"]
     session_id = resp.json()["session_id"]
 

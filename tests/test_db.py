@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from hypothesis import given, settings, strategies as st
-
 from server import db
 from server.models import (
     CIStatus,
@@ -105,7 +104,7 @@ async def test_update_session(init_db):
 
 
 async def test_create_and_get_slate(init_db):
-    slate = Slate()
+    slate = Slate(view_id="test-view")
     await db.create_slate(slate)
 
     fetched = await db.get_slate(slate.id)
@@ -114,15 +113,15 @@ async def test_create_and_get_slate(init_db):
 
 
 async def test_list_slates(init_db):
-    await db.create_slate(Slate())
-    await db.create_slate(Slate())
+    await db.create_slate(Slate(view_id="v"))
+    await db.create_slate(Slate(view_id="v"))
 
     slates = await db.list_slates()
     assert len(slates) == 2
 
 
 async def test_slate_session_id(init_db):
-    slate = Slate(session_id="sess-123")
+    slate = Slate(session_id="sess-123", view_id="v")
     await db.create_slate(slate)
     fetched = await db.get_slate(slate.id)
     assert fetched is not None
@@ -130,7 +129,7 @@ async def test_slate_session_id(init_db):
 
 
 async def test_update_slate(init_db):
-    slate = Slate()
+    slate = Slate(view_id="v")
     await db.create_slate(slate)
 
     updated = await db.update_slate(slate.id, session_id="sess-456")
@@ -153,7 +152,7 @@ async def test_get_session(init_db):
 
 
 async def test_session_with_slate_id(init_db):
-    slate = Slate()
+    slate = Slate(view_id="v")
     await db.create_slate(slate)
     session = Session(slate_id=slate.id, role=SessionRole.daemon, trigger="slate")
     await db.create_session(session)
@@ -165,7 +164,7 @@ async def test_session_with_slate_id(init_db):
 
 
 async def test_list_worktops_by_slate(init_db):
-    slate = Slate()
+    slate = Slate(view_id="v")
     await db.create_slate(slate)
 
     c1 = Worktop(repo="org/a", branch="b1", worktree_path="/tmp/a", slate_id=slate.id)
@@ -223,6 +222,7 @@ def st_session(draw):
 def st_slate(draw):
     return Slate(
         session_id=draw(st.none() | st.text(min_size=1, max_size=36)),
+        view_id=draw(st.text(min_size=1, max_size=36)),
     )
 
 

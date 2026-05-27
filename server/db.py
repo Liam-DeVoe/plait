@@ -50,7 +50,7 @@ CREATE TABLE IF NOT EXISTS slates (
     archived INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     repo_ids TEXT NOT NULL DEFAULT '[]',
-    view_id TEXT
+    view_id TEXT NOT NULL REFERENCES views(id)
 );
 
 CREATE TABLE IF NOT EXISTS daemon_runs (
@@ -629,6 +629,16 @@ async def delete_view(view_id: str) -> None:
     db = await get_db()
     await db.execute("DELETE FROM views WHERE id = ?", (view_id,))
     await db.commit()
+
+
+async def count_slates_in_view(view_id: str) -> int:
+    """Return the number of slates (active + archived) referencing this view."""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT COUNT(*) AS n FROM slates WHERE view_id = ?", (view_id,)
+    )
+    row = await cursor.fetchone()
+    return int(row["n"]) if row else 0
 
 
 async def remove_repo_from_views(repo_id: str) -> None:

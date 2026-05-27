@@ -43,19 +43,33 @@ Do NOT also start the backend (`just server` or `just dev`/`just serve`, which s
 
 ## Configuration
 
-`config.toml` at the project root defines the managed repos and author:
+Plait's configuration — managed repos, the GitHub author, and the
+"views" used to group repos — lives in the SQLite DB (`repos`, `views`,
+`settings` tables) and is edited through the Repos page in the UI. The
+synchronous `server/config.py` module is a thin cache over those
+tables, primed at startup by `await config.refresh()` in the FastAPI
+lifespan and refreshed after each write.
 
-```toml
-author = "github-username"
+Each repo entry needs `path` (local clone) and either `kind = "local"`
+or an `upstream` (GitHub `owner/repo` — where PRs live and `main` is
+authoritative; used for `gh` CLI calls). The `author` setting is used
+to detect PR comment reactions (thumbs-up acknowledgments).
 
-[repos.my-repo]
-path = "/absolute/path/to/local/clone"
-upstream = "owner/repo"
-```
+**Migration from the old `config.toml`.** A one-shot script
+(`seed_db.py`) copies `[repos.*]` + `author` into the DB and drops the
+legacy `repo_order` table. Idempotent — bails if the `repos` table is
+already populated. Run once, then delete `config.toml`.
 
-Each repo entry needs `path` (local clone) and `upstream` (GitHub `owner/repo` — where PRs live and `main` is authoritative; used for `gh` CLI calls). The `author` field is used to detect PR comment reactions (thumbs-up acknowledgments).
+**Views.** Named filters over repos. Every slate belongs to exactly one
+view (`slates.view_id` is required at the application contract). The
+view's `repo_ids` is snapshotted onto the slate at creation, so editing
+or deleting the view later doesn't change the slate's scope. Deleting a
+view that has slates attached is blocked; the user must reassign or
+delete the slates first. The implicit "All" tab on the listing pages
+shows every slate / repo regardless of view; it is not itself a row in
+the `views` table.
 
-**Fork-and-PR workflows.** `upstream` is the *upstream* repo, not the user's fork. For repos cloned with two remotes (e.g. `origin = my-fork`, `upstream = parent-org/repo`), `git.upstream_remote(repo_id)` resolves the local git remote name by URL-matching against `config.upstream`. Plait fetches main and reads `<remote>/<main>` via that remote, while still pushing branches to `origin`. For standard same-repo workflows (single remote == upstream), this resolves to `origin` and behaves the same as before. The validator runs at startup and raises if no remote matches — a missing `git remote add` or a typo'd `upstream` fails loudly instead of silently mis-tracking main.
+**Fork-and-PR workflows.** `upstream` is the *upstream* repo, not the user's fork. For repos cloned with two remotes (e.g. `origin = my-fork`, `upstream = parent-org/repo`), `git.upstream_remote(repo_id)` resolves the local git remote name by URL-matching against the configured `upstream`. Plait fetches main and reads `<remote>/<main>` via that remote, while still pushing branches to `origin`. For standard same-repo workflows (single remote == upstream), this resolves to `origin` and behaves the same as before. The validator runs at startup and raises if no remote matches — a missing `git remote add` or a typo'd `upstream` fails loudly instead of silently mis-tracking main.
 
 ## Architecture
 
