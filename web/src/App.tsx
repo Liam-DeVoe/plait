@@ -10,6 +10,7 @@ import WorktopDetailPage, {
 } from "./pages/WorktopDetailPage";
 import SlatesPage, { slatesLoader } from "./pages/SlatesPage";
 import SlateDetailPage, { slateDetailLoader } from "./pages/SlateDetailPage";
+import ReposPage, { reposLoader } from "./pages/ReposPage";
 import "./App.css";
 
 const router = createBrowserRouter([
@@ -36,6 +37,11 @@ const router = createBrowserRouter([
         path: "/slates/:id",
         element: <SlateDetailPage />,
         loader: slateDetailLoader,
+      },
+      {
+        path: "/repos",
+        element: <ReposPage />,
+        loader: reposLoader,
       },
     ],
   },

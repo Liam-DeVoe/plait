@@ -13,6 +13,50 @@ export function StatusBadge({ status, label }: { status: string; label: string }
   return <span className={`badge badge--${modifier}`}>{label}</span>;
 }
 
+/**
+ * Tend icon: a 270° cycle arrow around a small sprout.
+ *
+ * `filled` toggles the sprout fill — use `true` for active states
+ * (manual Tend button, auto-tend on) and `false` for the auto-tend
+ * off state. The cycle arrow stays stroked either way.
+ */
+export function TendIcon({
+  size = 16,
+  filled = true,
+}: {
+  size?: number;
+  filled?: boolean;
+}) {
+  const leafFill = filled ? "currentColor" : "none";
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M22 12a10 10 0 1 1-3.34-7.46" />
+      <polyline points="22 4 22 9 17 9" />
+      <path d="M12 17v-3" strokeWidth={1.5} />
+      <path
+        d="M12 14c0-1.6 1.1-2.7 2.7-2.7 0 1.6-1.1 2.7-2.7 2.7z"
+        fill={leafFill}
+        strokeWidth={1.2}
+      />
+      <path
+        d="M12 14c0-1.6-1.1-2.7-2.7-2.7 0 1.6 1.1 2.7 2.7 2.7z"
+        fill={leafFill}
+        strokeWidth={1.2}
+      />
+    </svg>
+  );
+}
+
 export type PrState = "open" | "merged" | "closed";
 
 export function prStateOf(worktop: Worktop): PrState | null {

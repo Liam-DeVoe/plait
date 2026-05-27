@@ -19,9 +19,11 @@ from pydantic import BaseModel
 from server import claude, config, daemon, db, git
 from server.models import (
     CIStatus,
+    Repo,
     Session,
     SessionRole,
     Slate,
+    View,
     Worktop,
     WorktopStatus,
 )
@@ -37,17 +39,34 @@ from server.sessions import (
 logger = logging.getLogger(__name__)
 
 
-def _slate_repo_worktrees(slate_id: str) -> dict[str, str]:
+def _slate_repo_worktrees(slate_id: str, repo_ids: list[str]) -> dict[str, str]:
     """Reconstruct the repo_id -> worktree path mapping for a slate."""
     return {
         repo_id: str(git.WORKTREE_ROOT / f"slate-{slate_id}" / repo_id)
-        for repo_id in config.get_repos()
+        for repo_id in repo_ids
     }
+
+
+async def _slate_scope_repo_ids(slate: Slate) -> list[str]:
+    """Return the repo_ids a slate is scoped to.
+
+    The slate stores its own snapshotted scope; pre-views slates (or any
+    slate created with an empty scope) fall back to every configured repo
+    so the legacy "spans every repo" behavior still works for old data.
+    """
+    if slate.repo_ids:
+        return slate.repo_ids
+    return list(config.get_repos().keys())
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
+    # Prime the synchronous config cache from the DB. Everything downstream
+    # (git, claude, daemon) reads repo metadata through `config.get_repo(...)`
+    # without awaiting, so the cache MUST be populated before those modules
+    # run.
+    await config.refresh()
     # Resolve every repo's upstream remote up front so config typos / missing
     # `git remote add` calls fail loudly at startup rather than silently
     # mis-tracking main forever.
@@ -105,29 +124,20 @@ async def websocket_endpoint(ws: WebSocket):
 # --- Repo endpoints ---
 
 
+def _repo_dict(repo: Repo) -> dict:
+    return {
+        "id": repo.id,
+        "path": str(repo.path),
+        "upstream": repo.upstream,
+        "kind": repo.kind,
+        "position": repo.position,
+    }
+
+
 @app.get("/repos")
 async def list_repos():
     repos = config.get_repos()
-    order = await db.get_repo_order()
-    known = set(repos)
-    seen: set[str] = set()
-    ordered_ids: list[str] = []
-    for repo_id in order:
-        if repo_id in known and repo_id not in seen:
-            ordered_ids.append(repo_id)
-            seen.add(repo_id)
-    for repo_id in repos:
-        if repo_id not in seen:
-            ordered_ids.append(repo_id)
-    return [
-        {
-            "id": repos[repo_id].id,
-            "path": str(repos[repo_id].path),
-            "upstream": repos[repo_id].upstream,
-            "kind": repos[repo_id].kind,
-        }
-        for repo_id in ordered_ids
-    ]
+    return [_repo_dict(repos[rid]) for rid in repos]
 
 
 class RepoOrderRequest(BaseModel):
@@ -145,8 +155,305 @@ async def set_repo_order(req: RepoOrderRequest):
         )
     if len(set(req.order)) != len(req.order):
         raise HTTPException(status_code=400, detail="Duplicate repo ids in order")
-    await db.set_repo_order(req.order)
+    await db.set_repo_positions(req.order)
+    await config.refresh()
     return {"status": "ok"}
+
+
+class CreateRepoRequest(BaseModel):
+    id: str
+    path: str
+    kind: str = "remote"
+    upstream: str | None = None
+
+
+@app.post("/repos")
+async def create_repo(req: CreateRepoRequest):
+    rid = req.id.strip()
+    if not rid:
+        raise HTTPException(status_code=400, detail="id is required")
+    if req.kind not in ("remote", "local"):
+        raise HTTPException(status_code=400, detail="kind must be 'remote' or 'local'")
+    if req.kind == "remote" and not req.upstream:
+        raise HTTPException(status_code=400, detail="kind='remote' requires upstream")
+    if req.kind == "local" and req.upstream:
+        raise HTTPException(
+            status_code=400, detail="kind='local' must not have upstream"
+        )
+    existing = await db.get_repo(rid)
+    if existing is not None:
+        raise HTTPException(status_code=400, detail=f"Repo {rid!r} already exists")
+
+    existing_repos = await db.list_repos()
+    position = len(existing_repos)
+    repo = Repo(
+        id=rid,
+        path=Path(req.path),
+        kind=req.kind,
+        upstream=req.upstream,
+        position=position,
+    )
+    await db.create_repo(repo)
+    await config.refresh()
+    # Validate the upstream remote eagerly for remote repos. We don't block
+    # creation on failure (the user may be wiring this up in stages); just
+    # surface the issue in the response.
+    warning: str | None = None
+    if repo.kind == "remote":
+        try:
+            await git.upstream_remote(rid)
+        except Exception as e:  # pragma: no cover - defensive
+            warning = str(e)
+    response = _repo_dict(repo)
+    if warning is not None:
+        response["warning"] = warning
+    return response
+
+
+class UpdateRepoRequest(BaseModel):
+    path: str | None = None
+    upstream: str | None = None
+    kind: str | None = None
+
+
+@app.put("/repos/{repo_id}")
+async def update_repo(repo_id: str, req: UpdateRepoRequest):
+    repo = await db.get_repo(repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
+
+    updates: dict[str, object] = {}
+    new_kind = req.kind if req.kind is not None else repo.kind
+    new_upstream = req.upstream if req.upstream is not None else repo.upstream
+    if new_kind not in ("remote", "local"):
+        raise HTTPException(status_code=400, detail="kind must be 'remote' or 'local'")
+    if new_kind == "remote" and not new_upstream:
+        raise HTTPException(status_code=400, detail="kind='remote' requires upstream")
+    if new_kind == "local" and new_upstream:
+        raise HTTPException(
+            status_code=400, detail="kind='local' must not have upstream"
+        )
+
+    if req.path is not None:
+        updates["path"] = req.path
+    if req.kind is not None:
+        updates["kind"] = req.kind
+    if req.upstream is not None or (req.kind == "local"):
+        # If switching to local, clear any stale upstream value.
+        updates["upstream"] = new_upstream
+
+    if not updates:
+        return _repo_dict(repo)
+
+    updated = await db.update_repo(repo_id, **updates)
+    assert updated is not None
+    # Invalidate per-repo caches that key off path/upstream.
+    git._main_branch_cache.pop(repo_id, None)
+    git._upstream_remote_cache.pop(repo_id, None)
+    await config.refresh()
+    return _repo_dict(updated)
+
+
+@app.delete("/repos/{repo_id}")
+async def delete_repo(repo_id: str):
+    """Delete a repo and cascade to every dependent on-disk + DB record.
+
+    SQL FK cascade isn't enough here: deleting a repo means killing live
+    PTYs, removing git worktrees from disk, and rewriting JSON arrays in
+    `views.repo_ids`. We do this in application code so each side effect
+    runs in the right order.
+    """
+    repo = await db.get_repo(repo_id)
+    if repo is None:
+        raise HTTPException(status_code=404, detail="Repo not found")
+
+    # 1. For every worktop in this repo: kill running sessions, remove
+    #    the on-disk worktree, delete the row.
+    worktops = await db.list_worktops()
+    repo_worktops = [w for w in worktops if w.repo == repo_id]
+    for worktop in repo_worktops:
+        sessions = await db.list_sessions(worktop.id)
+        for session in sessions:
+            if pty_manager.is_alive(session.id):
+                await pty_manager.terminate(session.id)
+        try:
+            await git.remove_worktree(worktop.repo, worktop.worktree_path)
+        except Exception:
+            logger.warning(
+                f"Failed to remove worktree for worktop {worktop.id}; "
+                "deleting DB row anyway."
+            )
+        await db.delete_worktop(worktop.id)
+
+    # 2. Strip the repo from every view's repo_ids array.
+    await db.remove_repo_from_views(repo_id)
+
+    # 3. Drop the repo itself + invalidate caches.
+    await db.delete_repo(repo_id)
+    git._main_branch_cache.pop(repo_id, None)
+    git._upstream_remote_cache.pop(repo_id, None)
+    await config.refresh()
+
+    # Notify clients to revalidate.
+    await daemon.notify("repo_deleted", {"id": repo_id})
+    return {
+        "status": "deleted",
+        "worktops_deleted": len(repo_worktops),
+    }
+
+
+# --- View endpoints ---
+
+
+def _view_dict(view: View) -> dict:
+    return {
+        "id": view.id,
+        "name": view.name,
+        "repo_ids": view.repo_ids,
+        "position": view.position,
+        "created_at": view.created_at,
+    }
+
+
+def _validate_view_repo_ids(repo_ids: list[str]) -> None:
+    known = set(config.get_repos())
+    unknown = [r for r in repo_ids if r not in known]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown repo(s) in view: {', '.join(unknown)}",
+        )
+    if len(set(repo_ids)) != len(repo_ids):
+        raise HTTPException(status_code=400, detail="Duplicate repo ids in view")
+
+
+@app.get("/views")
+async def list_views():
+    views = await db.list_views()
+    return [_view_dict(v) for v in views]
+
+
+class CreateViewRequest(BaseModel):
+    name: str
+    repo_ids: list[str] = []
+
+
+@app.post("/views")
+async def create_view(req: CreateViewRequest):
+    name = req.name.strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    if name.lower() == "all":
+        raise HTTPException(
+            status_code=400,
+            detail="'All' is reserved — it's the implicit default view",
+        )
+    _validate_view_repo_ids(req.repo_ids)
+    existing = await db.list_views()
+    if any(v.name == name for v in existing):
+        raise HTTPException(
+            status_code=400, detail=f"A view named {name!r} already exists"
+        )
+    view = View(name=name, repo_ids=req.repo_ids, position=len(existing))
+    await db.create_view(view)
+    await daemon.notify("view_updated", {"id": view.id})
+    return _view_dict(view)
+
+
+class UpdateViewRequest(BaseModel):
+    name: str | None = None
+    repo_ids: list[str] | None = None
+    position: int | None = None
+
+
+@app.put("/views/{view_id}")
+async def update_view(view_id: str, req: UpdateViewRequest):
+    view = await db.get_view(view_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail="View not found")
+
+    updates: dict[str, object] = {}
+    if req.name is not None:
+        name = req.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="name cannot be empty")
+        if name.lower() == "all":
+            raise HTTPException(
+                status_code=400,
+                detail="'All' is reserved — it's the implicit default view",
+            )
+        if name != view.name:
+            existing = await db.list_views()
+            if any(v.name == name and v.id != view_id for v in existing):
+                raise HTTPException(
+                    status_code=400, detail=f"A view named {name!r} already exists"
+                )
+        updates["name"] = name
+    if req.repo_ids is not None:
+        _validate_view_repo_ids(req.repo_ids)
+        updates["repo_ids"] = req.repo_ids
+    if req.position is not None:
+        updates["position"] = req.position
+
+    if not updates:
+        return _view_dict(view)
+
+    updated = await db.update_view(view_id, **updates)
+    assert updated is not None
+    await daemon.notify("view_updated", {"id": view_id})
+    return _view_dict(updated)
+
+
+@app.delete("/views/{view_id}")
+async def delete_view(view_id: str):
+    view = await db.get_view(view_id)
+    if view is None:
+        raise HTTPException(status_code=404, detail="View not found")
+    await db.delete_view(view_id)
+    await daemon.notify("view_updated", {"id": view_id, "deleted": True})
+    return {"status": "deleted"}
+
+
+class ViewOrderRequest(BaseModel):
+    order: list[str]
+
+
+@app.put("/views/order")
+async def set_view_order(req: ViewOrderRequest):
+    views = await db.list_views()
+    known = {v.id for v in views}
+    unknown = [vid for vid in req.order if vid not in known]
+    if unknown:
+        raise HTTPException(
+            status_code=400, detail=f"Unknown view(s): {', '.join(unknown)}"
+        )
+    if len(set(req.order)) != len(req.order):
+        raise HTTPException(status_code=400, detail="Duplicate view ids in order")
+    for position, view_id in enumerate(req.order):
+        await db.update_view(view_id, position=position)
+    return {"status": "ok"}
+
+
+# --- Settings endpoints ---
+
+
+@app.get("/settings")
+async def get_settings():
+    settings = await db.list_settings()
+    return {"author": settings.get("author", "")}
+
+
+class UpdateSettingsRequest(BaseModel):
+    author: str | None = None
+
+
+@app.put("/settings")
+async def update_settings(req: UpdateSettingsRequest):
+    if req.author is not None:
+        await db.set_setting("author", req.author.strip())
+    await config.refresh()
+    settings = await db.list_settings()
+    return {"author": settings.get("author", "")}
 
 
 # --- Daemon endpoints ---
@@ -735,13 +1042,50 @@ def _slate_dict(slate: Slate, worktops: list[Worktop]) -> dict:
     return d
 
 
+class CreateSlateRequest(BaseModel):
+    view_id: str | None = None
+    repo_ids: list[str] | None = None
+
+
 @app.post("/slates")
-async def create_slate():
-    slate = Slate()
+async def create_slate(req: CreateSlateRequest | None = None):
+    """Create a slate scoped to a set of repos.
+
+    The scope is resolved (in order of preference): explicit `repo_ids`,
+    the repos in `view_id`, or — if neither is given — every configured
+    repo. Whatever is resolved gets snapshotted onto the slate; the view
+    can be edited or deleted later without affecting this slate.
+    """
+    req = req or CreateSlateRequest()
+    known = set(config.get_repos())
+
+    view_id: str | None = None
+    if req.repo_ids is not None:
+        repo_ids = list(req.repo_ids)
+        view_id = req.view_id
+    elif req.view_id is not None:
+        view = await db.get_view(req.view_id)
+        if view is None:
+            raise HTTPException(status_code=404, detail="View not found")
+        repo_ids = list(view.repo_ids)
+        view_id = view.id
+    else:
+        repo_ids = list(known)
+
+    # Drop any unknown repos so we don't try to create a worktree from
+    # config we no longer have. Preserve order otherwise.
+    repo_ids = [r for r in repo_ids if r in known]
+    if not repo_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="Slate scope is empty — no repos to operate on.",
+        )
+
+    slate = Slate(repo_ids=repo_ids, view_id=view_id)
     await db.create_slate(slate)
 
     try:
-        await git.create_slate_worktrees(slate.id)
+        await git.create_slate_worktrees(slate.id, slate.repo_ids)
     except RuntimeError:
         raise HTTPException(status_code=500, detail="Failed to create slate worktrees")
 
@@ -808,13 +1152,18 @@ async def resume_slate_session(slate_id: str, session_id: str):
     if pty_manager.is_alive(session_id):
         raise HTTPException(status_code=400, detail="Session is already alive")
 
+    slate = await db.get_slate(slate_id)
+    if not slate:
+        raise HTTPException(status_code=404, detail="Slate not found")
+    scope_ids = await _slate_scope_repo_ids(slate)
+
     exploration_dir = str(git.WORKTREE_ROOT / f"slate-{slate_id}")
     await db.update_session(session_id, ended_at=None)
     cmd, cwd = resume_cmd(
         session.id,
         exploration_dir,
         claude.slate_system_prompt(
-            slate_id, exploration_dir, _slate_repo_worktrees(slate_id)
+            slate_id, exploration_dir, _slate_repo_worktrees(slate_id, scope_ids)
         ),
     )
     idle_timeout = (
@@ -835,8 +1184,13 @@ async def start_slate_session(slate_id: str, session_id: str):
     if pty_manager.is_alive(session_id):
         raise HTTPException(status_code=400, detail="Session is already alive")
 
+    slate = await db.get_slate(slate_id)
+    if not slate:
+        raise HTTPException(status_code=404, detail="Slate not found")
+    scope_ids = await _slate_scope_repo_ids(slate)
+
     exploration_dir = str(git.WORKTREE_ROOT / f"slate-{slate_id}")
-    repo_worktrees = _slate_repo_worktrees(slate_id)
+    repo_worktrees = _slate_repo_worktrees(slate_id, scope_ids)
     cmd, cwd = user_slate_cmd(session.id, slate_id, exploration_dir, repo_worktrees)
     spawn_session(session.id, cmd, cwd)
 
@@ -875,9 +1229,10 @@ async def delete_slate(slate_id: str):
     if slate.session_id and pty_manager.is_alive(slate.session_id):
         await pty_manager.terminate(slate.session_id)
 
-    # Remove slate exploration worktrees
+    # Remove slate exploration worktrees from the snapshotted scope.
+    scope_ids = await _slate_scope_repo_ids(slate)
     try:
-        await git.remove_slate_worktrees(slate_id)
+        await git.remove_slate_worktrees(slate_id, scope_ids)
     except Exception:
         pass
 

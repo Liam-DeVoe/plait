@@ -1,72 +1,65 @@
+"""Cached, synchronous access to the repo configuration.
+
+The data lives in the SQLite DB (tables `repos`, `settings`). This module
+provides a thread-of-execution-friendly synchronous facade: callers like
+`git.py` and `claude.py` read repo metadata in the middle of doing other
+work without having to plumb async DB calls through every helper.
+
+The cache is primed at server startup via `await refresh()` (in the
+FastAPI lifespan), and explicitly refreshed after every write that
+mutates the underlying tables. Reads are cheap dict lookups; writes go
+through `db.py` and then call `await refresh()`.
+
+The previous incarnation of this module read `config.toml` at module
+import; that file no longer exists. Repos are managed entirely through
+the Repos page in the UI, with a one-shot migration script
+(`scripts/seed_config.py`) handling the initial port from the old TOML.
+"""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
+from server.models import Repo
 
-import tomllib
-
-CONFIG_PATH = Path(__file__).parent.parent / "config.toml"
+_repos_cache: dict[str, Repo] | None = None
+_author_cache: str = ""
 
 
-@dataclass
-class Repo:
-    id: str
-    path: Path
-    kind: str  # "remote" or "local"
-    # The GitHub "owner/repo" where PRs live and `main` is authoritative.
-    # For "fork-and-PR" workflows this is the *upstream* repo, not the user's
-    # fork — the fork is identified at runtime by matching this against the
-    # local clone's git remotes (see `git.upstream_remote`). Plait still
-    # pushes to whatever remote is named `origin` in the local clone.
-    # None for kind == "local".
-    upstream: str | None
+async def refresh() -> None:
+    """Reload caches from the DB. Call at startup and after any write."""
+    global _repos_cache, _author_cache
+    from server import db
+
+    repos = await db.list_repos()
+    _repos_cache = {r.id: r for r in repos}
+    author = await db.get_setting("author")
+    _author_cache = author or ""
 
 
-def _load() -> dict:
-    return tomllib.loads(CONFIG_PATH.read_text())
-
-
-_data: dict | None = None
-
-
-def _get_data() -> dict:
-    global _data
-    if _data is None:
-        _data = _load()
-    return _data
+def _require_cache() -> dict[str, Repo]:
+    if _repos_cache is None:
+        raise RuntimeError(
+            "config cache not initialized; call `await config.refresh()` first "
+            "(this is done automatically in the FastAPI lifespan)"
+        )
+    return _repos_cache
 
 
 def get_repos() -> dict[str, Repo]:
-    data = _get_data()
-    repos = {}
-    for repo_id, info in data.get("repos", {}).items():
-        kind = info.get("kind", "remote")
-        if kind not in ("remote", "local"):
-            raise ValueError(
-                f"Repo {repo_id!r}: kind must be 'remote' or 'local', got {kind!r}"
-            )
-        upstream = info.get("upstream")
-        if kind == "remote" and not upstream:
-            raise ValueError(f"Repo {repo_id!r}: kind='remote' requires upstream")
-        if kind == "local" and upstream:
-            raise ValueError(
-                f"Repo {repo_id!r}: kind='local' must not have upstream "
-                f"(got {upstream!r})"
-            )
-        repos[repo_id] = Repo(
-            id=repo_id,
-            path=Path(info["path"]),
-            kind=kind,
-            upstream=upstream,
-        )
-    return repos
+    """Return all known repos, keyed by ID, in canonical order.
+
+    Order matches the `position` column on the `repos` table.
+    """
+    cache = _require_cache()
+    # Preserve insertion order: list_repos() in db.py returns sorted by
+    # position, so the cache dict already iterates in the right order.
+    return cache
 
 
 def get_repo(repo_id: str) -> Repo:
-    repos = get_repos()
-    if repo_id not in repos:
+    cache = _require_cache()
+    if repo_id not in cache:
         raise KeyError(f"Unknown repo: {repo_id!r}")
-    return repos[repo_id]
+    return cache[repo_id]
 
 
 def is_local(repo_id: str) -> bool:
@@ -82,9 +75,4 @@ def require_upstream(repo_id: str) -> str:
 
 
 def get_author() -> str:
-    return _get_data().get("author", "")
-
-
-def reload() -> None:
-    global _data
-    _data = None
+    return _author_cache

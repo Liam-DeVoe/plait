@@ -4,6 +4,7 @@ import {
   fetchWorktops,
   fetchDaemonRuns,
   fetchRepos,
+  fetchViews,
   triggerDaemonRun,
   createWorktop,
   createLocalWorktop,
@@ -17,14 +18,16 @@ import {
   type DaemonRun,
 } from "../api";
 import { StatusBadge, OverflowMenu, PrPill, timeAgo, navigateTo } from "../components/shared";
+import { ViewFilter, useActiveViewRepoIds } from "../components/ViewFilter";
 
 export async function worktopsLoader() {
-  const [worktops, repos, runs] = await Promise.all([
+  const [worktops, repos, runs, views] = await Promise.all([
     fetchWorktops(),
     fetchRepos(),
     fetchDaemonRuns(10),
+    fetchViews(),
   ]);
-  return { worktops, repos, runs };
+  return { worktops, repos, runs, views };
 }
 
 function arraysEqual(a: string[], b: string[]): boolean {
@@ -378,11 +381,12 @@ function WorktopTable({
 }
 
 export default function WorktopsPage() {
-  const { worktops, repos, runs } = useLoaderData() as Awaited<
+  const { worktops, repos, runs, views } = useLoaderData() as Awaited<
     ReturnType<typeof worktopsLoader>
   >;
   const navigate = useNavigate();
   const revalidator = useRevalidator();
+  const activeViewRepoIds = useActiveViewRepoIds(views);
   const [importOpen, setImportOpen] = useState(false);
   const serverOrder = repos.map((r) => r.id);
   const [order, setOrder] = useState<string[]>(serverOrder);
@@ -432,6 +436,13 @@ export default function WorktopsPage() {
   for (const id of repoIds) {
     if (!seen.has(id)) orderedRepoIds.push(id);
   }
+
+  // Apply the view filter. `null` from the hook means "All", in which case
+  // we keep every repo. Otherwise we keep only the repos in the view (still
+  // honoring the canonical order computed above).
+  const visibleRepoIds = activeViewRepoIds
+    ? orderedRepoIds.filter((id) => activeViewRepoIds.includes(id))
+    : orderedRepoIds;
 
   const handleDragStart = (e: DragEvent<HTMLElement>, repo: string) => {
     setDraggingRepo(repo);
@@ -487,11 +498,24 @@ export default function WorktopsPage() {
 
       {repos.length === 0 ? (
         <div className="empty-state">
-          <div>No repos configured. Add repos to config.toml to get started.</div>
+          <div>
+            No repos configured. Add one on the{" "}
+            <NavLink to="/repos" className="link">
+              Repos
+            </NavLink>{" "}
+            page to get started.
+          </div>
         </div>
       ) : (
-        <div className="worktops-page__groups">
-          {orderedRepoIds.map((repo) => {
+        <>
+          <ViewFilter views={views} />
+          <div className="worktops-page__groups">
+            {visibleRepoIds.length === 0 && (
+              <div className="empty-state">
+                <div>No repos in this view.</div>
+              </div>
+            )}
+            {visibleRepoIds.map((repo) => {
             const repoWorktops = grouped.get(repo) ?? [];
             const isLocal = repoKind.get(repo) === "local";
             const isDragging = draggingRepo === repo;
@@ -552,7 +576,8 @@ export default function WorktopsPage() {
               </div>
             );
           })}
-        </div>
+          </div>
+        </>
       )}
 
       <DaemonLog runs={runs} />

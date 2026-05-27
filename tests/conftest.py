@@ -34,23 +34,23 @@ async def _use_memory_db(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _stub_config():
-    """Stub server.config._data for every test.
+    """Stub the synchronous config caches for every test.
 
-    Without this, any test that touches code calling config._get_data()
-    (e.g. config.get_author(), config.get_repo()) without going through
-    the git_env / git_env_local fixtures falls back to reading the real
-    config.toml on disk — which is brittle (worktrees don't have it,
-    since it's gitignored) and dangerous (tests would silently read the
-    user's real config).
-
-    git_env and git_env_local override this with their own test repos.
+    Without this, any test that touches `config.get_repos()` /
+    `config.get_author()` would raise (the cache is normally primed by
+    `await config.refresh()` in the FastAPI lifespan, which tests don't
+    run). git_env and git_env_local override this with their own test
+    repos.
     """
     import server.config as config_module
 
-    original = config_module._data
-    config_module._data = {"author": "testuser", "repos": {}}
+    original_repos = config_module._repos_cache
+    original_author = config_module._author_cache
+    config_module._repos_cache = {}
+    config_module._author_cache = "testuser"
     yield
-    config_module._data = original
+    config_module._repos_cache = original_repos
+    config_module._author_cache = original_author
 
 
 @pytest.fixture
@@ -137,9 +137,10 @@ def _git_env_template(tmp_path_factory) -> Path:
 @pytest.fixture
 def git_env(tmp_path, _git_env_template) -> GitEnv:
     """Copy the template git environment for this test.
-    Also patches git.WORKTREE_ROOT and the config module to use temp dirs."""
+    Also patches git.WORKTREE_ROOT and the config caches to use temp dirs."""
     import server.config as config_module
     import server.git as git_module
+    from server.models import Repo
 
     repo_id = "testrepo"
 
@@ -166,14 +167,20 @@ def git_env(tmp_path, _git_env_template) -> GitEnv:
     original_worktree_root = git_module.WORKTREE_ROOT
     git_module.WORKTREE_ROOT = worktree_root
 
-    # Patch config to return our test repo
-    original_data = config_module._data
-    config_module._data = {
-        "author": "testuser",
-        "repos": {
-            repo_id: {"path": str(clone), "upstream": "testorg/testrepo"},
-        },
+    # Override the config caches directly. We don't go through the DB
+    # because most tests don't need DB-resident repos — they just need
+    # `config.get_repo(...)` to return the right object synchronously.
+    original_repos = config_module._repos_cache
+    original_author = config_module._author_cache
+    config_module._repos_cache = {
+        repo_id: Repo(
+            id=repo_id,
+            path=clone,
+            kind="remote",
+            upstream="testorg/testrepo",
+        )
     }
+    config_module._author_cache = "testuser"
 
     git_module._main_branch_cache.clear()
     # The test clone's `origin` URL is a local path, which doesn't normalize
@@ -185,7 +192,8 @@ def git_env(tmp_path, _git_env_template) -> GitEnv:
     yield env
 
     git_module.WORKTREE_ROOT = original_worktree_root
-    config_module._data = original_data
+    config_module._repos_cache = original_repos
+    config_module._author_cache = original_author
     git_module._main_branch_cache.clear()
     git_module._upstream_remote_cache.clear()
 
@@ -246,9 +254,10 @@ class LocalGitEnv:
 @pytest.fixture
 def git_env_local(tmp_path, _git_env_local_template) -> LocalGitEnv:
     """Local-only git environment for this test.
-    Patches git.WORKTREE_ROOT and the config module to mark the repo as local."""
+    Patches git.WORKTREE_ROOT and the config caches to mark the repo as local."""
     import server.config as config_module
     import server.git as git_module
+    from server.models import Repo
 
     repo_id = "localrepo"
 
@@ -264,13 +273,17 @@ def git_env_local(tmp_path, _git_env_local_template) -> LocalGitEnv:
     original_worktree_root = git_module.WORKTREE_ROOT
     git_module.WORKTREE_ROOT = worktree_root
 
-    original_data = config_module._data
-    config_module._data = {
-        "author": "testuser",
-        "repos": {
-            repo_id: {"path": str(clone), "kind": "local"},
-        },
+    original_repos = config_module._repos_cache
+    original_author = config_module._author_cache
+    config_module._repos_cache = {
+        repo_id: Repo(
+            id=repo_id,
+            path=clone,
+            kind="local",
+            upstream=None,
+        )
     }
+    config_module._author_cache = "testuser"
 
     git_module._main_branch_cache.clear()
     git_module._upstream_remote_cache.clear()
@@ -278,7 +291,8 @@ def git_env_local(tmp_path, _git_env_local_template) -> LocalGitEnv:
     yield env
 
     git_module.WORKTREE_ROOT = original_worktree_root
-    config_module._data = original_data
+    config_module._repos_cache = original_repos
+    config_module._author_cache = original_author
     git_module._main_branch_cache.clear()
     git_module._upstream_remote_cache.clear()
 

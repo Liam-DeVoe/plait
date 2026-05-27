@@ -208,13 +208,19 @@ async def test_create_worktop_repo_path_missing(client):
     """When the configured repo path doesn't exist on disk, should return 400, not 500."""
     c, git_env, mock_gh = client
 
+    from pathlib import Path
+
     import server.config as config_module
+    from server.models import Repo
 
     # Add a second repo whose path doesn't exist
-    config_module._data["repos"]["ghost"] = {
-        "path": "/nonexistent/path",
-        "upstream": "org/ghost",
-    }
+    assert config_module._repos_cache is not None
+    config_module._repos_cache["ghost"] = Repo(
+        id="ghost",
+        path=Path("/nonexistent/path"),
+        kind="remote",
+        upstream="org/ghost",
+    )
     pr_url = "https://github.com/org/ghost/pull/1"
     mock_gh.set_response(
         "pr view",
@@ -606,11 +612,15 @@ async def test_hook_pr_created_rejected_for_local_repo(client):
     c, git_env, _ = client
     # Add a local repo, then create a worktop in it.
     import server.config as config_module
+    from server.models import Repo
 
-    config_module._data["repos"]["local-r"] = {
-        "path": str(git_env.clone),
-        "kind": "local",
-    }
+    assert config_module._repos_cache is not None
+    config_module._repos_cache["local-r"] = Repo(
+        id="local-r",
+        path=git_env.clone,
+        kind="local",
+        upstream=None,
+    )
     resp = await c.post("/hooks/create-worktop", json={"repo": "local-r"})
     assert resp.status_code == 200
     worktop_id = resp.json()["worktop_id"]
@@ -626,11 +636,15 @@ async def test_hook_pr_created_rejected_for_local_repo(client):
 async def test_hook_ci_failure_expected_rejected_for_local_repo(client):
     c, git_env, _ = client
     import server.config as config_module
+    from server.models import Repo
 
-    config_module._data["repos"]["local-r2"] = {
-        "path": str(git_env.clone),
-        "kind": "local",
-    }
+    assert config_module._repos_cache is not None
+    config_module._repos_cache["local-r2"] = Repo(
+        id="local-r2",
+        path=git_env.clone,
+        kind="local",
+        upstream=None,
+    )
     resp = await c.post("/hooks/create-worktop", json={"repo": "local-r2"})
     assert resp.status_code == 200
     worktop_id = resp.json()["worktop_id"]
