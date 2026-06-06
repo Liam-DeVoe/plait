@@ -1032,3 +1032,31 @@ async def test_mergeable_state_blocked_no_conflict_tend(
 
     mock_claude.assert_not_called()
     assert not any("conflict" in r for r in result["reasons"])
+
+
+async def test_run_once_prunes_stale_review_worktrees(git_env, init_db):
+    """run_once garbage-collects review worktrees past the age cutoff,
+    leaving fresh ones alone."""
+    import os
+    import time
+
+    git_env.create_branch("pr-stale", push=False)
+    git_env.add_commit("r.txt", "x", "x")
+    git_env.run_git("push", "origin", "HEAD:refs/pull/13/head")
+    git_env.checkout("main")
+    wt = Path(
+        await git.create_review_worktree(
+            git_env.repo_id, 13, "pr-stale", str(git_env.remote)
+        )
+    )
+    assert wt.exists()
+
+    # Fresh review survives a run.
+    await daemon.run_once()
+    assert wt.exists()
+
+    # Backdate it past the default max age — the next run sweeps it.
+    old = time.time() - (git.REVIEW_WORKTREE_MAX_AGE_DAYS + 1) * 86400
+    os.utime(wt, (old, old))
+    await daemon.run_once()
+    assert not wt.exists()

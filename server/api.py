@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import subprocess
+import tempfile
 
 logging.basicConfig(level=logging.INFO)
 from contextlib import asynccontextmanager
@@ -520,7 +521,7 @@ async def create_worktop(req: CreateWorktopRequest):
             repo=req.repo,
             worktree_path="",
         )
-        worktop.branch = f"worktop/{worktop.id[:8]}"
+        worktop.branch = f"plait/worktop-{worktop.id[:8]}"
     else:
         raise HTTPException(status_code=400, detail="Either pr_url or repo is required")
 
@@ -544,6 +545,62 @@ async def create_worktop(req: CreateWorktopRequest):
 
     await db.create_worktop(worktop)
     return await _worktop_dict(worktop)
+
+
+class ReviewPRRequest(BaseModel):
+    pr_url: str
+
+
+@app.post("/review-pr")
+async def review_pr(req: ReviewPRRequest):
+    """Check out a PR in a throwaway worktree, open it in VS Code, and prime a
+    Claude session to help review it.
+
+    Called by the "Review locally" browser extension. Reviews are ephemeral:
+    no worktop, no DB record, no daemon involvement — just a worktree on disk
+    and a Claude session in VS Code. The worktree is a branch wired to push
+    back to the PR's head repo (see git.create_review_worktree), so the reviewer
+    can commit and push fixes. Stale review worktrees are garbage-collected by
+    the daemon, off this path.
+    """
+    try:
+        pr_info = await git.get_pr_info_from_url(req.pr_url)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    repo_id = pr_info["repo_id"]
+    pr_number = pr_info["number"]
+
+    try:
+        worktree_path = await git.create_review_worktree(
+            repo_id, pr_number, pr_info["branch"], pr_info["head_url"]
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Make plait's bundled skills/agents (e.g. code-reviewer) available, and
+    # write the review brief to a temp file (kept out of the PR checkout so the
+    # review diff stays clean). The brief contains backticks, `$(...)`, and
+    # apostrophes, so it can't be passed on a command line — instead we launch
+    # claude with a short, shell-safe pointer to its absolute path. Single
+    # quotes (not double) so the arg survives AppleScript's own quoting; the
+    # temp path is alphanumeric, so single-quoting it is safe.
+    claude.install_claude_files(worktree_path)
+    main_branch = await git.main_branch(repo_id)
+    main_ref = await git.main_ref(repo_id)
+    prompt = claude.review_prompt(pr_info["url"], pr_number, main_branch, main_ref)
+    with tempfile.NamedTemporaryFile(
+        mode="w", prefix="plait-review-", suffix=".md", delete=False
+    ) as f:
+        f.write(prompt)
+        brief_path = f.name
+
+    _open_vscode_terminal(
+        worktree_path,
+        f"claude 'Read {brief_path} and follow its instructions.'",
+    )
+
+    return {"status": "opened", "worktree_path": worktree_path}
 
 
 async def _tend_status(worktop_id: str) -> str:
@@ -715,13 +772,24 @@ async def open_session_in_vscode(worktop_id: str, session_id: str):
         if update_kwargs:
             await db.update_session(session_id, **update_kwargs)
 
-    # Open VS Code at the worktree
-    subprocess.Popen(["code", worktop.worktree_path])
+    _open_vscode_terminal(worktop.worktree_path, f"claude --resume {session_id}")
+    return {"status": "opened"}
 
-    # Open a new integrated terminal in VS Code and type the resume command.
-    # Uses AppleScript to wait for VS Code, open a terminal (Ctrl+Shift+`),
-    # and type the command.
-    resume_cmd = f"claude --resume {session_id}"
+
+def _open_vscode_terminal(worktree_path: str, terminal_cmd: str) -> None:
+    """Open VS Code at a worktree and run `terminal_cmd` in an integrated
+    terminal.
+
+    macOS-only. After launching `code`, drives the VS Code UI via AppleScript
+    to focus a terminal (the ⌘; keybinding) and type the command. Both
+    subprocesses are fire-and-forget; if VS Code is slow to launch or the host
+    process lacks Accessibility permission, the keystrokes silently no-op.
+
+    `terminal_cmd` is typed verbatim, so it must not contain a literal double
+    quote — that would close AppleScript's string. Shell single quotes are
+    fine (used to pass an initial prompt arg to `claude`).
+    """
+    subprocess.Popen(["code", worktree_path])
     applescript = f"""delay 3
 tell application "Visual Studio Code" to activate
 delay 0.3
@@ -729,13 +797,11 @@ tell application "System Events"
     tell process "Code"
         keystroke ";" using {{command down}}
         delay 0.3
-        keystroke "{resume_cmd}"
+        keystroke "{terminal_cmd}"
         keystroke return
     end tell
 end tell"""
     subprocess.Popen(["osascript", "-e", applescript])
-
-    return {"status": "opened"}
 
 
 # --- Hook endpoints (called by Claude inside sessions) ---
@@ -1275,7 +1341,7 @@ async def hook_create_worktop(req: CreateWorktopHook):
         raise HTTPException(status_code=400, detail=f"Unknown repo: {req.repo!r}")
 
     worktop = Worktop(repo=req.repo, worktree_path="")
-    worktop.branch = f"worktop/{worktop.id[:8]}"
+    worktop.branch = f"plait/worktop-{worktop.id[:8]}"
 
     try:
         worktop.worktree_path = await git.create_worktree(

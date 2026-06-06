@@ -34,6 +34,8 @@ def _setup_gh_for_pr(
                 "number": pr_number,
                 "url": pr_url,
                 "headRefName": branch,
+                "headRepository": {"name": "testrepo"},
+                "headRepositoryOwner": {"login": "tester"},
             }
         ),
     )
@@ -193,7 +195,7 @@ async def test_create_local_worktop(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["repo"] == git_env.repo_id
-    assert data["branch"].startswith("worktop/")
+    assert data["branch"].startswith("plait/worktop-")
     assert data["pr_number"] is None
     assert data["pr_url"] is None
     assert data["status"] == "open"

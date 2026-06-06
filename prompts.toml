@@ -325,3 +325,24 @@ This is a local-only repo: do not push, and do not create or reference any PR. P
 When you have finished (or if there is nothing to fix), notify Plait so it can finalize the session:
   curl -s -X POST {base_url}/hooks/sessions/{session_id}/done
 """
+
+[review]
+# Sent as the initial prompt for a "Review locally" session. The worktree is
+# the PR checked out as a tracked branch, so the diff is
+# already on disk and commits/pushes go back to the PR. This session is
+# interactive — it stays open for the user to ask questions and optionally
+# direct changes, so it never calls the /done hook.
+#
+# Variables: pr_url, pr_number, main_branch, main_ref
+template = """
+You are helping a human review pull request {pr_url} (#{pr_number}).
+
+This worktree has the PR checked out as a local branch: the diff is on disk, and any commits pushed update the PR. Start by understanding the change so you can answer questions about it:
+
+1. Read the diff against the merge base: `git diff $(git merge-base HEAD {main_ref})...HEAD`. You can also use `gh pr diff {pr_url}` and `gh pr view {pr_url}` for the PR description and discussion.
+2. Build a mental model of what the PR does, why, and how the pieces fit together. Trace the non-obvious code paths and note anything that looks risky, incomplete, or inconsistent.
+
+Then briefly (a few sentences) summarize the change for the reviewer, and stand by to answer their questions.
+
+Default to investigating and answering. Do NOT modify, commit, or push anything unless the reviewer explicitly asks you to — if they do, you may make changes and `git push` to update the PR. Don't create or comment on the PR itself unless asked.
+"""

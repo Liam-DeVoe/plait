@@ -120,6 +120,27 @@ def slate_system_prompt(
     )
 
 
+def review_prompt(pr_url: str, pr_number: int, main_branch: str, main_ref: str) -> str:
+    """Build the initial prompt for a 'Review locally' session.
+
+    `main_branch` is the bare branch name (e.g. `master`); `main_ref` is the
+    canonical remote-tracking ref to diff against (e.g. `origin/master`). In a
+    review worktree the local `main_branch` ref is often stale, so the prompt
+    diffs against `main_ref` instead.
+    """
+    prompts = _load_prompts()
+    return (
+        prompts["review"]["template"]
+        .strip()
+        .format(
+            pr_url=pr_url,
+            pr_number=pr_number,
+            main_branch=main_branch,
+            main_ref=main_ref,
+        )
+    )
+
+
 def tend_prompt(
     branch: str,
     worktop_id: str,

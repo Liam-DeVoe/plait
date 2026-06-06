@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import shutil
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -374,6 +376,156 @@ async def create_worktree(repo_id: str, branch: str, worktop_id: str) -> str:
     return str(worktree_dir)
 
 
+# Review worktrees are ephemeral and untracked (no worktop, no DB row), so
+# they're garbage-collected by age rather than by an explicit lifecycle.
+REVIEW_WORKTREE_MAX_AGE_DAYS = 7
+
+
+def _review_dir_name(repo_id: str, pr_number: int) -> str:
+    return f"review-{repo_id}-{pr_number}"
+
+
+def _parse_review_dir(name: str) -> tuple[str, int]:
+    """Inverse of `_review_dir_name`: "review-<repo_id>-<n>" -> (repo_id, n).
+
+    `repo_id` may itself contain hyphens (e.g. "hegel-core"); the PR number
+    is always the trailing numeric segment, so we split from the right.
+    """
+    if not name.startswith("review-"):
+        raise ValueError(name)
+    repo_id, _, num = name[len("review-") :].rpartition("-")
+    if not repo_id or not num.isdigit():
+        raise ValueError(name)
+    return repo_id, int(num)
+
+
+async def _remove_review_worktree(repo_id: str, worktree_dir: Path) -> None:
+    """Best-effort teardown of a review worktree dir and its git registration."""
+    repo = config.get_repos().get(repo_id)
+    if repo is not None:
+        await run(
+            "git", "worktree", "remove", "--force", str(worktree_dir), cwd=repo.path
+        )
+        await run("git", "worktree", "prune", cwd=repo.path)
+    if worktree_dir.exists():
+        shutil.rmtree(worktree_dir, ignore_errors=True)
+
+
+async def create_review_worktree(
+    repo_id: str, pr_number: int, branch: str, push_url: str
+) -> str:
+    """Create a throwaway worktree with a PR checked out for local review.
+
+    Lands on a deterministic, plait-owned local branch (`plait/review-<repo>-<n>`)
+    wired so `git commit` + `git push` in the worktree update the PR. `branch` is
+    the PR's *head* branch name (where the push lands), kept separate from the
+    local name so we never collide with or clobber a real branch.
+
+    The commits are fetched from the upstream's `refs/pull/<n>/head` (which
+    exists for any open PR, even one raised from a fork we have no remote for),
+    but push/pull are pointed at `push_url` — the head repo's clone URL — because
+    that is where the PR's branch actually lives. This routing makes it work for
+    all three cases: same-repo PRs, your own fork, and a contributor's fork you
+    can push to (maintainer-can-modify). Pushing simply fails if you lack rights.
+
+    The local branch is (re)created with `git worktree add -B`, so it resets to
+    the current head on re-review (discarding any local-only commits there).
+
+    A review is still *not* a worktop: no DB row, the daemon never sees it, and
+    the age sweep garbage-collects it. Lives at a deterministic path
+    (`worktrees/review-<repo_id>-<n>/`). Returns the worktree path.
+    """
+    repo = config.get_repo(repo_id)
+    if repo.kind == "local":
+        raise RuntimeError(f"Repo {repo_id!r} is local-only — PRs live on a remote")
+    if not repo.path.exists():
+        raise RuntimeError(
+            f"Repo path does not exist: {repo.path}. Clone the repo first."
+        )
+    WORKTREE_ROOT.mkdir(parents=True, exist_ok=True)
+    worktree_dir = WORKTREE_ROOT / _review_dir_name(repo_id, pr_number)
+    # Refresh any prior review of this PR so we land on the current head.
+    await _remove_review_worktree(repo_id, worktree_dir)
+
+    local_branch = f"plait/review-{repo_id}-{pr_number}"
+    remote = await upstream_remote(repo_id)
+    # Fetch main too, so the remote-tracking ref the review diffs against
+    # (main_ref, e.g. origin/master) is current rather than whatever the last
+    # daemon fetch left behind — a stale ref silently inflates the review diff.
+    rc, _, err = await run(
+        "git", "fetch", remote, await main_branch(repo_id), cwd=repo.path
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to fetch main from {remote!r}: {err}")
+    rc, _, err = await run(
+        "git", "fetch", remote, f"pull/{pr_number}/head", cwd=repo.path
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to fetch PR #{pr_number} from {remote!r}: {err}")
+    rc, _, err = await run(
+        "git",
+        "worktree",
+        "add",
+        "-B",
+        local_branch,
+        str(worktree_dir),
+        "FETCH_HEAD",
+        cwd=repo.path,
+    )
+    if rc != 0:
+        raise RuntimeError(f"Failed to create review worktree: {err}")
+
+    async def _config(*args: str, cwd: str | Path) -> None:
+        rc, _, err = await run("git", "config", *args, cwd=cwd)
+        if rc != 0:
+            await _remove_review_worktree(repo_id, worktree_dir)
+            raise RuntimeError(f"Failed to configure review worktree: {err}")
+
+    # The local branch name is decoupled from the PR's head branch, so a bare
+    # `git push` only lands on the right ref under `push.default=upstream`. Scope
+    # that to this worktree (via per-worktree config) so it doesn't change the
+    # clone's behavior for every other branch.
+    await _config("extensions.worktreeConfig", "true", cwd=repo.path)
+    await _config("--worktree", "push.default", "upstream", cwd=worktree_dir)
+
+    # Point push/pull at the head repo, onto the PR's actual head branch. A bare
+    # URL works as a remote here (no `git remote add` needed).
+    await _config(f"branch.{local_branch}.remote", push_url, cwd=worktree_dir)
+    await _config(f"branch.{local_branch}.pushRemote", push_url, cwd=worktree_dir)
+    await _config(
+        f"branch.{local_branch}.merge", f"refs/heads/{branch}", cwd=worktree_dir
+    )
+    return str(worktree_dir)
+
+
+async def prune_stale_review_worktrees(
+    max_age_days: float = REVIEW_WORKTREE_MAX_AGE_DAYS,
+) -> None:
+    """Remove review worktrees older than `max_age_days`.
+
+    Reviews leave no DB record, so this age-based sweep is their cleanup
+    story. Called opportunistically when a new review is created — no
+    background task needed. Best-effort; unparseable or unowned dirs are
+    skipped, and individual removal failures are swallowed.
+    """
+    if not WORKTREE_ROOT.exists():
+        return
+    cutoff = time.time() - max_age_days * 86400
+    for child in WORKTREE_ROOT.iterdir():
+        if not child.is_dir() or not child.name.startswith("review-"):
+            continue
+        try:
+            repo_id, _ = _parse_review_dir(child.name)
+        except ValueError:
+            continue
+        try:
+            mtime = child.stat().st_mtime
+        except OSError:
+            continue
+        if mtime < cutoff:
+            await _remove_review_worktree(repo_id, child)
+
+
 async def remove_worktree(repo_id: str, worktree_path: str) -> None:
     repo = config.get_repo(repo_id)
     rc, out, err = await run(
@@ -383,10 +535,17 @@ async def remove_worktree(repo_id: str, worktree_path: str) -> None:
         raise RuntimeError(f"Failed to remove worktree {worktree_path}: {err}")
 
 
+async def is_detached(worktree_path: str) -> bool:
+    """Return True if the worktree is in detached HEAD state (no branch)."""
+    rc, _, _ = await run("git", "symbolic-ref", "HEAD", cwd=worktree_path)
+    return rc != 0
+
+
 async def assert_not_detached(worktree_path: str) -> None:
     """Assert the worktree is on a branch, not in detached HEAD state."""
-    rc, out, err = await run("git", "symbolic-ref", "HEAD", cwd=worktree_path)
-    assert rc == 0, f"Worktree is in detached HEAD state: {worktree_path}"
+    assert not await is_detached(
+        worktree_path
+    ), f"Worktree is in detached HEAD state: {worktree_path}"
 
 
 async def is_behind_main(repo_id: str, worktree_path: str, branch: str) -> bool:
@@ -454,9 +613,35 @@ async def push(worktree_path: str, branch: str) -> tuple[bool, str]:
     return False, err
 
 
+def _clone_url(reference_url: str, owner: str, repo: str) -> str:
+    """Build a GitHub clone URL for `owner/repo`, matching the scheme (SSH vs
+    HTTPS) of `reference_url` so it reuses the user's existing git credentials.
+
+    The PR head may live on a fork we have no remote for, so we synthesize the
+    URL from the API's owner/repo rather than looking up a remote.
+    """
+    repo = repo.removesuffix(".git")
+    if reference_url.startswith("git@") or reference_url.startswith("ssh://"):
+        return f"git@github.com:{owner}/{repo}.git"
+    return f"https://github.com/{owner}/{repo}.git"
+
+
+async def remote_url(repo_id: str, remote: str) -> str:
+    """Return the configured URL of a local git remote."""
+    repo = config.get_repo(repo_id)
+    rc, out, err = await run("git", "remote", "get-url", remote, cwd=repo.path)
+    if rc != 0:
+        raise RuntimeError(f"Failed to read URL of remote {remote!r}: {err}")
+    return out.strip()
+
+
 async def get_pr_info_from_url(pr_url: str) -> dict:
     """Get PR details from a GitHub PR URL using gh CLI.
-    Returns dict with keys: repo_id, number, url, branch."""
+    Returns dict with keys: repo_id, number, url, branch, head_url.
+
+    `head_url` is the clone URL of the PR's head repo (the fork or, for
+    same-repo PRs, the upstream itself), built to match the local clone's
+    remote scheme — it's where commits push back to update the PR."""
 
     # Parse owner/repo from URL
     m = re.match(r"https://github\.com/([^/]+/[^/]+)/pull/\d+", pr_url)
@@ -471,6 +656,13 @@ async def get_pr_info_from_url(pr_url: str) -> dict:
             f"No configured repo matches upstream {upstream!r}. "
             f"Add it on the Repos page first."
         )
+    # We read the local clone's remote below to build head_url, so it must
+    # exist — fail loudly (and as a 400, not a crash) if it doesn't.
+    if not config.get_repo(repo_id).path.exists():
+        raise RuntimeError(
+            f"Repo path does not exist: {config.get_repo(repo_id).path}. "
+            f"Clone the repo first."
+        )
 
     rc, out, err = await run(
         "gh",
@@ -478,7 +670,7 @@ async def get_pr_info_from_url(pr_url: str) -> dict:
         "view",
         pr_url,
         "--json",
-        "number,url,headRefName",
+        "number,url,headRefName,headRepository,headRepositoryOwner",
     )
     if rc != 0:
         raise RuntimeError(f"Failed to fetch PR info from {pr_url}: {err}")
@@ -488,6 +680,12 @@ async def get_pr_info_from_url(pr_url: str) -> dict:
         raise RuntimeError(f"Failed to parse PR info from {pr_url}: {out[:200]}")
     data["repo_id"] = repo_id
     data["branch"] = data.pop("headRefName")
+    reference = await remote_url(repo_id, await upstream_remote(repo_id))
+    data["head_url"] = _clone_url(
+        reference,
+        data["headRepositoryOwner"]["login"],
+        data["headRepository"]["name"],
+    )
     return data
 
 

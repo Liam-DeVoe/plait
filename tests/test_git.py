@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from server import git
 
 
@@ -24,6 +26,114 @@ async def test_create_worktree_existing_branch(git_env):
     wt_path = await git.create_worktree(git_env.repo_id, "existing-branch", "worktop-2")
     assert Path(wt_path).exists()
     assert (Path(wt_path) / "file.txt").read_text() == "content"
+
+
+async def test_create_review_worktree(git_env):
+    """A review worktree is the PR checked out on a deterministic, plait-owned
+    local branch (not detached, and not named after the PR head)."""
+    # Simulate a PR: push a commit to the upstream's pull ref. GitHub
+    # maintains refs/pull/<n>/head; we recreate one by hand.
+    git_env.create_branch("pr-branch", push=False)
+    git_env.add_commit("pr.txt", "from the PR", "pr work")
+    git_env.run_git("push", "origin", "HEAD:refs/pull/42/head")
+    git_env.checkout("main")
+
+    wt_path = await git.create_review_worktree(
+        git_env.repo_id, 42, "pr-branch", str(git_env.remote)
+    )
+    assert Path(wt_path).exists()
+    assert Path(wt_path).name == f"review-{git_env.repo_id}-42"
+    assert (Path(wt_path) / "pr.txt").read_text() == "from the PR"
+    # On a deterministic plait-owned branch, not detached, not the PR head name.
+    assert not await git.is_detached(wt_path)
+    branch = git_env.run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=Path(wt_path))
+    assert branch.strip() == f"plait/review-{git_env.repo_id}-42"
+
+
+async def test_create_review_worktree_push_updates_pr(git_env):
+    """A bare `git push` in the review worktree lands on the PR's head branch,
+    even though the local branch has a different (plait-owned) name."""
+    git_env.create_branch("contrib-branch", push=False)
+    git_env.add_commit("p.txt", "pr", "pr work")
+    git_env.run_git("push", "origin", "HEAD:refs/pull/55/head")
+    # Publish the head branch too, so the push updates an existing ref.
+    git_env.run_git("push", "origin", "HEAD:refs/heads/contrib-branch")
+    git_env.checkout("main")
+
+    wt = Path(
+        await git.create_review_worktree(
+            git_env.repo_id, 55, "contrib-branch", str(git_env.remote)
+        )
+    )
+    # Make a fix and push with a bare `git push` — no push.default set here; the
+    # worktree's own config (push.default=upstream) must route it correctly.
+    (wt / "fix.txt").write_text("maintainer fix")
+    git_env.run_git("add", "fix.txt", cwd=wt)
+    git_env.run_git("commit", "-m", "maintainer fix", cwd=wt)
+    git_env.run_git("push", cwd=wt)
+
+    # The fix landed on the PR's *head* branch (not the plait-owned local name).
+    local_head = git_env.run_git("rev-parse", "HEAD", cwd=wt)
+    remote_head = git_env.run_git(
+        "--git-dir", str(git_env.remote), "rev-parse", "refs/heads/contrib-branch"
+    )
+    assert local_head == remote_head
+    # No branch named after the local plait branch was created on the remote.
+    remote_branches = git_env.run_git("--git-dir", str(git_env.remote), "branch")
+    assert "plait/review" not in remote_branches
+
+
+async def test_create_review_worktree_refreshes(git_env):
+    """Re-reviewing the same PR refreshes the worktree to the latest head."""
+    git_env.create_branch("pr-evolving", push=False)
+    git_env.add_commit("a.txt", "v1", "v1")
+    git_env.run_git("push", "origin", "HEAD:refs/pull/7/head")
+    wt1 = await git.create_review_worktree(
+        git_env.repo_id, 7, "pr-evolving", str(git_env.remote)
+    )
+    assert (Path(wt1) / "a.txt").read_text() == "v1"
+
+    # The PR head moves on (the local branch name is independent of it).
+    git_env.add_commit("a.txt", "v2", "v2")
+    git_env.run_git("push", "-f", "origin", "HEAD:refs/pull/7/head")
+    wt2 = await git.create_review_worktree(
+        git_env.repo_id, 7, "pr-evolving", str(git_env.remote)
+    )
+    assert wt1 == wt2  # deterministic per-PR path
+    assert (Path(wt2) / "a.txt").read_text() == "v2"
+
+
+async def test_prune_stale_review_worktrees(git_env):
+    """Stale review worktrees are garbage-collected by age."""
+    git_env.create_branch("pr-old", push=False)
+    git_env.add_commit("b.txt", "x", "x")
+    git_env.run_git("push", "origin", "HEAD:refs/pull/9/head")
+    git_env.checkout("main")
+    wt = Path(
+        await git.create_review_worktree(
+            git_env.repo_id, 9, "pr-old", str(git_env.remote)
+        )
+    )
+    assert wt.exists()
+
+    # A fresh review survives a 7-day sweep but not a zero-day one.
+    await git.prune_stale_review_worktrees(max_age_days=7)
+    assert wt.exists()
+    await git.prune_stale_review_worktrees(max_age_days=0)
+    assert not wt.exists()
+
+
+async def test_create_review_worktree_rejects_local(git_env_local):
+    """PRs live on a remote — a local-only repo has no upstream to fetch."""
+    with pytest.raises(RuntimeError, match="local-only"):
+        await git.create_review_worktree(
+            git_env_local.repo_id, 1, "some-branch", "https://github.com/x/y.git"
+        )
+
+
+async def test_is_detached(git_env):
+    wt_path = await git.create_worktree(git_env.repo_id, "on-a-branch", "worktop-d")
+    assert not await git.is_detached(wt_path)
 
 
 async def test_remove_worktree(git_env):

@@ -40,7 +40,15 @@ async def test_get_pr_info_parses_url(mock_gh, git_env):
     mock_gh.set_response(
         "pr view",
         0,
-        json.dumps({"number": 42, "url": pr_url, "headRefName": "my-branch"}),
+        json.dumps(
+            {
+                "number": 42,
+                "url": pr_url,
+                "headRefName": "my-branch",
+                "headRepository": {"name": "hypothesis"},
+                "headRepositoryOwner": {"login": "a-contributor"},
+            }
+        ),
     )
 
     info = await get_pr_info_from_url(pr_url)
@@ -48,6 +56,9 @@ async def test_get_pr_info_parses_url(mock_gh, git_env):
     assert info["branch"] == "my-branch"
     assert info["number"] == 42
     assert info["url"] == pr_url
+    # head_url points at the contributor's fork (where the PR branch lives), in
+    # HTTPS form since the test clone's remote is a local path (not SSH).
+    assert info["head_url"] == "https://github.com/a-contributor/hypothesis.git"
 
 
 async def test_get_pr_info_bad_url():

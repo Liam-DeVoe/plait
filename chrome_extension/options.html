@@ -1,0 +1,44 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body {
+        font: 13px/1.5 -apple-system, system-ui, sans-serif;
+        padding: 16px;
+        width: 320px;
+      }
+      label {
+        display: block;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        padding: 6px 8px;
+        font: inherit;
+      }
+      .hint {
+        color: #666;
+        margin: 6px 0 14px;
+      }
+      button {
+        padding: 6px 12px;
+        font: inherit;
+        cursor: pointer;
+      }
+      #status {
+        margin-left: 8px;
+        color: #1a7f37;
+      }
+    </style>
+  </head>
+  <body>
+    <label for="baseUrl">Plait server URL</label>
+    <input id="baseUrl" type="text" placeholder="http://localhost:57381" />
+    <button id="save">Save</button>
+    <span id="status"></span>
+    <script src="options.js"></script>
+  </body>
+</html>
