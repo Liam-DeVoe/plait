@@ -50,10 +50,28 @@ This worktree is managed by Plait (worktop id: {worktop_id}).
 
 Always notify Plait after renaming the branch and after creating the PR.
 
-## Creating new worktops
-If the user asks you to create a new worktop, create one via:
-  curl -s -X POST {base_url}/hooks/create-worktop -H 'Content-Type: application/json' -d '{{"repo": "<repo_id>"}}'
-This returns JSON with a `url` field — share that URL with the user so they can navigate to the new worktop.
+## Delegating work to a new worktop
+
+When the user asks you to do something "in a new worktop" (e.g. "fix this in a
+new worktop"), don't do the work in this session. Instead:
+
+1. Write a self-contained task brief to a temp file. The new session has NO
+   access to this conversation — include everything it needs: the goal,
+   relevant issue/PR links, file paths, key findings or reproduction steps
+   from this session, and what "done" looks like (usually: push and create
+   a PR).
+2. Find the target repo id: `curl -s {base_url}/repos` lists configured repos;
+   match the user's request against each repo's `id`, `upstream`
+   (GitHub owner/repo), or `path`.
+3. Create the worktop:
+   curl -s -X POST {base_url}/hooks/create-worktop -H 'Content-Type: application/json' -d '{{"repo": "<repo_id>"}}'
+   This returns JSON with `worktop_id` and `url`.
+4. Start a session in it, seeded with your brief:
+   curl -s -X POST {base_url}/worktops/<worktop_id>/sessions -H 'Content-Type: application/json' -d '{{"prompt_file": "<path-to-brief>"}}'
+5. Share the returned `url` with the user so they can follow the new session.
+
+If the user asks for an empty worktop with no task, do steps 2-3 only and
+share the `url`.
 
 ## Commits
 
@@ -91,6 +109,29 @@ When I tell you the worktop is done and ready to merge, do this and only this:
 
 If the merge has conflicts, resolve them in the canonical clone, commit the
 merge, and stop — Plait's daemon will pick it up.
+
+## Delegating work to a new worktop
+
+When the user asks you to do something "in a new worktop" (e.g. "fix this in a
+new worktop"), don't do the work in this session. Instead:
+
+1. Write a self-contained task brief to a temp file. The new session has no
+   access to this conversation — include everything it needs: the goal,
+   relevant issue/PR links, file paths, key findings or reproduction steps
+   from this session, and what "done" looks like (usually: push and create
+   a PR; for a local-only repo, just commit).
+2. Find the target repo id: `curl -s {base_url}/repos` lists configured repos;
+   match the user's request against each repo's `id`, `upstream`
+   (GitHub owner/repo), or `path`.
+3. Create the worktop:
+   curl -s -X POST {base_url}/hooks/create-worktop -H 'Content-Type: application/json' -d '{{"repo": "<repo_id>"}}'
+   This returns JSON with `worktop_id` and `url`.
+4. Start a session in it, seeded with your brief:
+   curl -s -X POST {base_url}/worktops/<worktop_id>/sessions -H 'Content-Type: application/json' -d '{{"prompt_file": "<path-to-brief>"}}'
+5. Share the returned `url` with the user so they can follow the new session.
+
+If the user asks for an empty worktop with no task, do steps 2-3 only and
+share the `url`.
 
 ## Commits
 
