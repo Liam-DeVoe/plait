@@ -83,8 +83,9 @@ async def test_create_review_worktree_push_updates_pr(git_env):
     assert "plait/review" not in remote_branches
 
 
-async def test_create_review_worktree_refreshes(git_env):
-    """Re-reviewing the same PR refreshes the worktree to the latest head."""
+async def test_create_review_worktree_persists(git_env):
+    """Re-reviewing the same PR reuses the existing worktree untouched,
+    preserving local commits and edits rather than resetting to the PR head."""
     git_env.create_branch("pr-evolving", push=False)
     git_env.add_commit("a.txt", "v1", "v1")
     git_env.run_git("push", "origin", "HEAD:refs/pull/7/head")
@@ -93,14 +94,19 @@ async def test_create_review_worktree_refreshes(git_env):
     )
     assert (Path(wt1) / "a.txt").read_text() == "v1"
 
-    # The PR head moves on (the local branch name is independent of it).
+    # A local-only edit in the review worktree must survive a re-click.
+    (Path(wt1) / "local.txt").write_text("work in progress")
+
+    # The PR head moves on, but a second review must NOT clobber the worktree.
     git_env.add_commit("a.txt", "v2", "v2")
     git_env.run_git("push", "-f", "origin", "HEAD:refs/pull/7/head")
     wt2 = await git.create_review_worktree(
         git_env.repo_id, 7, "pr-evolving", str(git_env.remote)
     )
     assert wt1 == wt2  # deterministic per-PR path
-    assert (Path(wt2) / "a.txt").read_text() == "v2"
+    # Reused as-is: local edit kept, head still at v1 (not advanced to v2).
+    assert (Path(wt2) / "local.txt").read_text() == "work in progress"
+    assert (Path(wt2) / "a.txt").read_text() == "v1"
 
 
 async def test_prune_stale_review_worktrees(git_env):
