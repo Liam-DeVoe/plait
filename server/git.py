@@ -385,6 +385,17 @@ def _review_dir_name(repo_id: str, pr_number: int) -> str:
     return f"review-{repo_id}-{pr_number}"
 
 
+def existing_review_worktree(repo_id: str, pr_number: int) -> str | None:
+    """Return this PR's review worktree path if it already exists, else None.
+
+    Reviews are persistent and keyed to the PR (see `create_review_worktree`),
+    so a re-click can reuse the on-disk worktree without re-fetching or even
+    hitting `gh`. Callers use this to short-circuit the expensive build path.
+    """
+    worktree_dir = WORKTREE_ROOT / _review_dir_name(repo_id, pr_number)
+    return str(worktree_dir) if worktree_dir.exists() else None
+
+
 def _parse_review_dir(name: str) -> tuple[str, int]:
     """Inverse of `_review_dir_name`: "review-<repo_id>-<n>" -> (repo_id, n).
 
@@ -455,19 +466,25 @@ async def create_review_worktree(
 
     local_branch = f"plait/review-{repo_id}-{pr_number}"
     remote = await upstream_remote(repo_id)
-    # Fetch main too, so the remote-tracking ref the review diffs against
-    # (main_ref, e.g. origin/master) is current rather than whatever the last
-    # daemon fetch left behind — a stale ref silently inflates the review diff.
+    # One fetch, two refspecs — one network round-trip instead of two. The PR
+    # head must come first: `git worktree add ... FETCH_HEAD` below resolves
+    # FETCH_HEAD to its *first* entry, which must be the PR head, not main.
+    # Fetching main too keeps the remote-tracking ref the review diffs against
+    # (main_ref, e.g. origin/master) current — fetching it by name still
+    # opportunistically updates that ref — rather than relying on whatever the
+    # last daemon fetch left behind, which would silently inflate the diff.
     rc, _, err = await run(
-        "git", "fetch", remote, await main_branch(repo_id), cwd=repo.path
+        "git",
+        "fetch",
+        remote,
+        f"pull/{pr_number}/head",
+        await main_branch(repo_id),
+        cwd=repo.path,
     )
     if rc != 0:
-        raise RuntimeError(f"Failed to fetch main from {remote!r}: {err}")
-    rc, _, err = await run(
-        "git", "fetch", remote, f"pull/{pr_number}/head", cwd=repo.path
-    )
-    if rc != 0:
-        raise RuntimeError(f"Failed to fetch PR #{pr_number} from {remote!r}: {err}")
+        raise RuntimeError(
+            f"Failed to fetch PR #{pr_number} and main from {remote!r}: {err}"
+        )
     rc, _, err = await run(
         "git",
         "worktree",
@@ -641,6 +658,27 @@ async def remote_url(repo_id: str, remote: str) -> str:
     return out.strip()
 
 
+def parse_pr_url(pr_url: str) -> tuple[str, int]:
+    """Resolve a GitHub PR URL to (repo_id, pr_number) with no network call.
+
+    Both pieces live in the URL itself, so this is enough to derive the
+    deterministic review-worktree path — letting `review_pr` skip the `gh pr
+    view` round-trip entirely on a re-click. Raises RuntimeError (surfaced as
+    a 400) if the URL is malformed or no configured repo matches its upstream.
+    """
+    m = re.match(r"https://github\.com/([^/]+/[^/]+)/pull/(\d+)", pr_url)
+    if not m:
+        raise RuntimeError(f"Could not parse repo from URL: {pr_url}")
+    upstream = m.group(1)
+    repo_id = _upstream_to_repo_id(upstream)
+    if repo_id is None:
+        raise RuntimeError(
+            f"No configured repo matches upstream {upstream!r}. "
+            f"Add it on the Repos page first."
+        )
+    return repo_id, int(m.group(2))
+
+
 async def get_pr_info_from_url(pr_url: str) -> dict:
     """Get PR details from a GitHub PR URL using gh CLI.
     Returns dict with keys: repo_id, number, url, branch, head_url.
@@ -649,19 +687,7 @@ async def get_pr_info_from_url(pr_url: str) -> dict:
     same-repo PRs, the upstream itself), built to match the local clone's
     remote scheme — it's where commits push back to update the PR."""
 
-    # Parse owner/repo from URL
-    m = re.match(r"https://github\.com/([^/]+/[^/]+)/pull/\d+", pr_url)
-    if not m:
-        raise RuntimeError(f"Could not parse repo from URL: {pr_url}")
-    upstream = m.group(1)
-
-    # Find which config repo matches this upstream
-    repo_id = _upstream_to_repo_id(upstream)
-    if repo_id is None:
-        raise RuntimeError(
-            f"No configured repo matches upstream {upstream!r}. "
-            f"Add it on the Repos page first."
-        )
+    repo_id, _ = parse_pr_url(pr_url)
     # We read the local clone's remote below to build head_url, so it must
     # exist — fail loudly (and as a 400, not a crash) if it doesn't.
     if not config.get_repo(repo_id).path.exists():

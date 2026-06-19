@@ -564,19 +564,22 @@ async def review_pr(req: ReviewPRRequest):
     the daemon, off this path.
     """
     try:
-        pr_info = await git.get_pr_info_from_url(req.pr_url)
+        repo_id, pr_number = git.parse_pr_url(req.pr_url)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    repo_id = pr_info["repo_id"]
-    pr_number = pr_info["number"]
-
-    try:
-        worktree_path = await git.create_review_worktree(
-            repo_id, pr_number, pr_info["branch"], pr_info["head_url"]
-        )
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    # Re-click fast path: the worktree is persistent and keyed to the PR, so if
+    # it already exists we reopen it without `gh pr view` or any fetch — the
+    # branch and head URL are only needed to *build* the worktree the first time.
+    worktree_path = git.existing_review_worktree(repo_id, pr_number)
+    if worktree_path is None:
+        try:
+            pr_info = await git.get_pr_info_from_url(req.pr_url)
+            worktree_path = await git.create_review_worktree(
+                repo_id, pr_number, pr_info["branch"], pr_info["head_url"]
+            )
+        except RuntimeError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     # Make plait's bundled skills/agents (e.g. code-reviewer) available, and
     # write the review brief to a temp file (kept out of the PR checkout so the
@@ -588,7 +591,7 @@ async def review_pr(req: ReviewPRRequest):
     claude.install_claude_files(worktree_path)
     main_branch = await git.main_branch(repo_id)
     main_ref = await git.main_ref(repo_id)
-    prompt = claude.review_prompt(pr_info["url"], pr_number, main_branch, main_ref)
+    prompt = claude.review_prompt(req.pr_url, pr_number, main_branch, main_ref)
     with tempfile.NamedTemporaryFile(
         mode="w", prefix="plait-review-", suffix=".md", delete=False
     ) as f:
@@ -598,6 +601,7 @@ async def review_pr(req: ReviewPRRequest):
     _open_vscode_terminal(
         worktree_path,
         f"claude 'Read {brief_path} and follow its instructions.'",
+        compare_ref=main_ref,
     )
 
     return {"status": "opened", "worktree_path": worktree_path}
@@ -776,21 +780,21 @@ async def open_session_in_vscode(worktop_id: str, session_id: str):
     return {"status": "opened"}
 
 
-def _open_vscode_terminal(worktree_path: str, terminal_cmd: str) -> None:
-    """Open VS Code at a worktree and run `terminal_cmd` in an integrated
-    terminal.
+def _vscode_applescript(terminal_cmd: str, compare_ref: str | None) -> str:
+    """Build the AppleScript that puppets VS Code after `code <path>` launches.
 
-    macOS-only. After launching `code`, drives the VS Code UI via AppleScript
-    to focus a terminal (the ⌘; keybinding) and type the command. Both
-    subprocesses are fire-and-forget; if VS Code is slow to launch or the host
-    process lacks Accessibility permission, the keystrokes silently no-op.
+    Always focuses an integrated terminal (⌘;) and types `terminal_cmd`. When
+    `compare_ref` is given, additionally opens the command palette and drives
+    GitLens' "Compare Working Tree with…" against that ref, so the PR diff is
+    waiting in the Search & Compare view. The ref picker fuzzy-matches, so a
+    fully-qualified ref (e.g. `upstream/main`) lands as the top hit.
 
-    `terminal_cmd` is typed verbatim, so it must not contain a literal double
-    quote — that would close AppleScript's string. Shell single quotes are
-    fine (used to pass an initial prompt arg to `claude`).
+    `terminal_cmd` and `compare_ref` are typed verbatim, so neither may contain
+    a literal double quote — that would close AppleScript's string. Shell single
+    quotes are fine (used to pass an initial prompt arg to `claude`); remote refs
+    like `upstream/main` are safe.
     """
-    subprocess.Popen(["code", worktree_path])
-    applescript = f"""delay 3
+    script = f"""delay 3
 tell application "Visual Studio Code" to activate
 delay 0.3
 tell application "System Events"
@@ -798,10 +802,40 @@ tell application "System Events"
         keystroke ";" using {{command down}}
         delay 0.3
         keystroke "{terminal_cmd}"
+        keystroke return"""
+    if compare_ref is not None:
+        script += f"""
+        delay 0.5
+        keystroke "p" using {{command down, shift down}}
+        delay 0.5
+        keystroke "GitLens: Compare Working Tree with"
+        delay 0.6
         keystroke return
+        delay 1.0
+        keystroke "{compare_ref}"
+        delay 0.6
+        keystroke return"""
+    script += """
     end tell
 end tell"""
-    subprocess.Popen(["osascript", "-e", applescript])
+    return script
+
+
+def _open_vscode_terminal(
+    worktree_path: str, terminal_cmd: str, compare_ref: str | None = None
+) -> None:
+    """Open VS Code at a worktree and run `terminal_cmd` in an integrated
+    terminal; optionally also open a GitLens diff against `compare_ref`.
+
+    macOS-only. After launching `code`, drives the VS Code UI via AppleScript
+    (see `_vscode_applescript`). Both subprocesses are fire-and-forget; if VS
+    Code is slow to launch or the host process lacks Accessibility permission,
+    the keystrokes silently no-op.
+    """
+    subprocess.Popen(["code", worktree_path])
+    subprocess.Popen(
+        ["osascript", "-e", _vscode_applescript(terminal_cmd, compare_ref)]
+    )
 
 
 # --- Hook endpoints (called by Claude inside sessions) ---
