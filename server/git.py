@@ -414,7 +414,7 @@ async def _remove_review_worktree(repo_id: str, worktree_dir: Path) -> None:
 async def create_review_worktree(
     repo_id: str, pr_number: int, branch: str, push_url: str
 ) -> str:
-    """Create a throwaway worktree with a PR checked out for local review.
+    """Create a persistent worktree with a PR checked out for local review.
 
     Lands on a deterministic, plait-owned local branch (`plait/review-<repo>-<n>`)
     wired so `git commit` + `git push` in the worktree update the PR. `branch` is
@@ -428,8 +428,11 @@ async def create_review_worktree(
     all three cases: same-repo PRs, your own fork, and a contributor's fork you
     can push to (maintainer-can-modify). Pushing simply fails if you lack rights.
 
-    The local branch is (re)created with `git worktree add -B`, so it resets to
-    the current head on re-review (discarding any local-only commits there).
+    The worktree is persistent and keyed to the PR: a second "Review locally" on
+    the same PR reuses the existing worktree untouched — preserving local commits
+    and in-progress edits — rather than fetching and resetting to the PR head.
+    The local branch is created with `git worktree add -B` only the first time,
+    which also absorbs a leftover branch from a prior, age-pruned review.
 
     A review is still *not* a worktop: no DB row, the daemon never sees it, and
     the age sweep garbage-collects it. Lives at a deterministic path
@@ -444,8 +447,11 @@ async def create_review_worktree(
         )
     WORKTREE_ROOT.mkdir(parents=True, exist_ok=True)
     worktree_dir = WORKTREE_ROOT / _review_dir_name(repo_id, pr_number)
-    # Refresh any prior review of this PR so we land on the current head.
-    await _remove_review_worktree(repo_id, worktree_dir)
+    # Reviews are persistent: if this PR already has a worktree, reopen it as-is
+    # so local commits and in-progress edits survive a re-click. Build it only
+    # the first time.
+    if worktree_dir.exists():
+        return str(worktree_dir)
 
     local_branch = f"plait/review-{repo_id}-{pr_number}"
     remote = await upstream_remote(repo_id)
