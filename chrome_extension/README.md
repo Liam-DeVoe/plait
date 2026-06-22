@@ -9,10 +9,10 @@ your local plait server to:
 3. open that worktree in VS Code, and
 4. start a Claude session primed to read the diff and answer review questions.
 
-A review is a throwaway, not a worktop: no PR ownership and no daemon
+A review is lightweight, not a worktop: no PR ownership and no daemon
 involvement — just a worktree on disk and a Claude session in VS Code. It leaves
-no DB record; stale review worktrees are pruned by age. Push works for any PR you
-have rights to — same-repo, your own fork, or a contributor's fork with
+no DB record and persists on disk until removed by hand. Push works for any PR
+you have rights to — same-repo, your own fork, or a contributor's fork with
 maintainer-can-modify — and simply fails if you don't.
 
 ## How it fits together
@@ -63,7 +63,6 @@ clone to have a remote whose URL matches that upstream.
   names are copied off a live button at runtime, so deploys that re-hash them
   don't break styling). If GitHub renames the `data-component` attributes,
   update the selectors in `content.js`.
-- Review worktrees are ephemeral and untracked. They live at
-  `worktrees/review-<repo>-<n>/`, re-reviewing a PR refreshes that worktree to
-  the latest head, and plait's daemon prunes any older than a few days on its
-  periodic sweep (and once on startup). The daemon never otherwise touches them.
+- Review worktrees are persistent and untracked. They live at
+  `worktrees/review-<repo>-<n>/`, keyed to the PR so re-reviewing reuses the
+  existing worktree. The daemon never touches them.

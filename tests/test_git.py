@@ -109,26 +109,6 @@ async def test_create_review_worktree_persists(git_env):
     assert (Path(wt2) / "a.txt").read_text() == "v1"
 
 
-async def test_prune_stale_review_worktrees(git_env):
-    """Stale review worktrees are garbage-collected by age."""
-    git_env.create_branch("pr-old", push=False)
-    git_env.add_commit("b.txt", "x", "x")
-    git_env.run_git("push", "origin", "HEAD:refs/pull/9/head")
-    git_env.checkout("main")
-    wt = Path(
-        await git.create_review_worktree(
-            git_env.repo_id, 9, "pr-old", str(git_env.remote)
-        )
-    )
-    assert wt.exists()
-
-    # A fresh review survives a 7-day sweep but not a zero-day one.
-    await git.prune_stale_review_worktrees(max_age_days=7)
-    assert wt.exists()
-    await git.prune_stale_review_worktrees(max_age_days=0)
-    assert not wt.exists()
-
-
 async def test_create_review_worktree_rejects_local(git_env_local):
     """PRs live on a remote — a local-only repo has no upstream to fetch."""
     with pytest.raises(RuntimeError, match="local-only"):

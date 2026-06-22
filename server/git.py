@@ -4,7 +4,6 @@ import asyncio
 import json
 import re
 import shutil
-import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -376,11 +375,6 @@ async def create_worktree(repo_id: str, branch: str, worktop_id: str) -> str:
     return str(worktree_dir)
 
 
-# Review worktrees are ephemeral and untracked (no worktop, no DB row), so
-# they're garbage-collected by age rather than by an explicit lifecycle.
-REVIEW_WORKTREE_MAX_AGE_DAYS = 7
-
-
 def _review_dir_name(repo_id: str, pr_number: int) -> str:
     return f"review-{repo_id}-{pr_number}"
 
@@ -394,20 +388,6 @@ def existing_review_worktree(repo_id: str, pr_number: int) -> str | None:
     """
     worktree_dir = WORKTREE_ROOT / _review_dir_name(repo_id, pr_number)
     return str(worktree_dir) if worktree_dir.exists() else None
-
-
-def _parse_review_dir(name: str) -> tuple[str, int]:
-    """Inverse of `_review_dir_name`: "review-<repo_id>-<n>" -> (repo_id, n).
-
-    `repo_id` may itself contain hyphens (e.g. "hegel-core"); the PR number
-    is always the trailing numeric segment, so we split from the right.
-    """
-    if not name.startswith("review-"):
-        raise ValueError(name)
-    repo_id, _, num = name[len("review-") :].rpartition("-")
-    if not repo_id or not num.isdigit():
-        raise ValueError(name)
-    return repo_id, int(num)
 
 
 async def _remove_review_worktree(repo_id: str, worktree_dir: Path) -> None:
@@ -443,11 +423,12 @@ async def create_review_worktree(
     the same PR reuses the existing worktree untouched — preserving local commits
     and in-progress edits — rather than fetching and resetting to the PR head.
     The local branch is created with `git worktree add -B` only the first time,
-    which also absorbs a leftover branch from a prior, age-pruned review.
+    which also absorbs a leftover branch from a prior review whose worktree was
+    removed.
 
-    A review is still *not* a worktop: no DB row, the daemon never sees it, and
-    the age sweep garbage-collects it. Lives at a deterministic path
-    (`worktrees/review-<repo_id>-<n>/`). Returns the worktree path.
+    A review is still *not* a worktop: no DB row and the daemon never sees it.
+    Lives at a deterministic path (`worktrees/review-<repo_id>-<n>/`). Returns
+    the worktree path.
     """
     repo = config.get_repo(repo_id)
     if repo.kind == "local":
@@ -519,34 +500,6 @@ async def create_review_worktree(
         f"branch.{local_branch}.merge", f"refs/heads/{branch}", cwd=worktree_dir
     )
     return str(worktree_dir)
-
-
-async def prune_stale_review_worktrees(
-    max_age_days: float = REVIEW_WORKTREE_MAX_AGE_DAYS,
-) -> None:
-    """Remove review worktrees older than `max_age_days`.
-
-    Reviews leave no DB record, so this age-based sweep is their cleanup
-    story. Called opportunistically when a new review is created — no
-    background task needed. Best-effort; unparseable or unowned dirs are
-    skipped, and individual removal failures are swallowed.
-    """
-    if not WORKTREE_ROOT.exists():
-        return
-    cutoff = time.time() - max_age_days * 86400
-    for child in WORKTREE_ROOT.iterdir():
-        if not child.is_dir() or not child.name.startswith("review-"):
-            continue
-        try:
-            repo_id, _ = _parse_review_dir(child.name)
-        except ValueError:
-            continue
-        try:
-            mtime = child.stat().st_mtime
-        except OSError:
-            continue
-        if mtime < cutoff:
-            await _remove_review_worktree(repo_id, child)
 
 
 async def remove_worktree(repo_id: str, worktree_path: str) -> None:

@@ -474,14 +474,6 @@ async def run_once() -> None:
         if result is not None:
             results.append(result)
 
-    # Garbage-collect stale review worktrees. These are ephemeral and leave
-    # no DB row, so this age-based sweep — running every tick and once on
-    # startup — is their cleanup story. Cheap when nothing is stale.
-    try:
-        await git.prune_stale_review_worktrees()
-    except Exception:
-        logger.exception("Failed to prune stale review worktrees")
-
     ended_at = datetime.now(timezone.utc).isoformat()
     run_id = str(uuid.uuid4())
     await db.create_daemon_run(run_id, started_at, ended_at, results)
