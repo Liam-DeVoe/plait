@@ -556,12 +556,12 @@ async def review_pr(req: ReviewPRRequest):
     """Check out a PR in a throwaway worktree, open it in VS Code, and prime a
     Claude session to help review it.
 
-    Called by the "Review locally" browser extension. Reviews are ephemeral:
+    Called by the "Review locally" browser extension. Reviews are lightweight:
     no worktop, no DB record, no daemon involvement — just a worktree on disk
     and a Claude session in VS Code. The worktree is a branch wired to push
     back to the PR's head repo (see git.create_review_worktree), so the reviewer
-    can commit and push fixes. Stale review worktrees are garbage-collected by
-    the daemon, off this path.
+    can commit and push fixes. The worktree persists on disk until removed by
+    hand.
     """
     try:
         repo_id, pr_number = git.parse_pr_url(req.pr_url)
