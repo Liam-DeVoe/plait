@@ -52,8 +52,10 @@ lifespan and refreshed after each write.
 
 Each repo entry needs `path` (local clone) and either `kind = "local"`
 or an `upstream` (GitHub `owner/repo` — where PRs live and `main` is
-authoritative; used for `gh` CLI calls). The `author` setting is used
-to detect PR comment reactions (thumbs-up acknowledgments).
+authoritative; used for `gh` CLI calls). The `author` setting
+identifies whose `@claude` mentions on PR comments the tend session
+should act on, and whose thumbs-up reactions are tracked (the reaction
+count is persisted on the worktop but does not trigger tends).
 
 **Migration from the old `config.toml`.** A one-shot script
 (`seed_db.py`) copies `[repos.*]` + `author` into the DB and drops the
@@ -83,8 +85,8 @@ For each active worktop, `daemon.process_worktop()`:
 1. `git.fetch_upstream()` then `git.is_behind_main()` — if behind, merge
 2. `git.merge_from_main()` — if clean, push (only if branch is published); if conflicts, mark conflict status
 3. Auto-archive if PR is merged/closed
-4. Check CI via `git.get_ci_status()` (uses `gh pr checks`), comment count, and reaction count
-5. If anything changed (conflicts, CI failure, new comments/reactions) — spawn a `"tend"` session to fix issues
+4. Check CI via `git.get_ci_status()` (uses `gh pr checks`) and comment count (reaction count is also tracked, but does not trigger tends)
+5. If anything changed (conflicts, CI failure, new comments) — spawn a `"tend"` session to fix issues
 
 Tend sessions are gated by `_in_flight` (prevents duplicate daemon sessions for the same worktop+trigger) and per-worktop locks (prevents concurrent `process_worktop` execution). PR activity has a 5-minute cooldown to let reviewers finish.
 
