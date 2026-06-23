@@ -320,13 +320,18 @@ async def _process_worktop(worktop: Worktop) -> dict:
                         reasons.append(ci_detail)
                     needs_tend = True
 
-                # --- Comment / reaction comparison ---
-                pr_activity_changed = (
-                    pr_data.comment_count != worktop.pr_comment_count
-                    or pr_data.reaction_count != worktop.pr_reaction_count
-                )
+                # --- Reaction tracking ---
+                # The author's thumbs-up reactions are still tracked and
+                # persisted for potential future use, but they no longer
+                # trigger a tend session on their own.
+                if pr_data.reaction_count != worktop.pr_reaction_count:
+                    await db.update_worktop(
+                        worktop.id,
+                        pr_reaction_count=pr_data.reaction_count,
+                    )
 
-                if pr_activity_changed:
+                # --- Comment comparison ---
+                if pr_data.comment_count != worktop.pr_comment_count:
                     elapsed = (
                         (
                             datetime.now(timezone.utc) - pr_data.latest_comment_time
@@ -341,24 +346,14 @@ async def _process_worktop(worktop: Worktop) -> dict:
                             f"{PR_ACTIVITY_COOLDOWN}s cooldown"
                         )
                     else:
-                        if pr_data.comment_count != worktop.pr_comment_count:
-                            reasons.append(
-                                f"comments: {worktop.pr_comment_count}"
-                                f"\u2192{pr_data.comment_count}"
-                            )
-                            await db.update_worktop(
-                                worktop.id,
-                                pr_comment_count=pr_data.comment_count,
-                            )
-                        if pr_data.reaction_count != worktop.pr_reaction_count:
-                            reasons.append(
-                                f"reactions: {worktop.pr_reaction_count}"
-                                f"\u2192{pr_data.reaction_count}"
-                            )
-                            await db.update_worktop(
-                                worktop.id,
-                                pr_reaction_count=pr_data.reaction_count,
-                            )
+                        reasons.append(
+                            f"comments: {worktop.pr_comment_count}"
+                            f"\u2192{pr_data.comment_count}"
+                        )
+                        await db.update_worktop(
+                            worktop.id,
+                            pr_comment_count=pr_data.comment_count,
+                        )
                         needs_tend = True
 
                 # --- Conflict signal from GitHub ---
