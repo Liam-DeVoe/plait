@@ -145,6 +145,61 @@ def fork_cmd(
 
 # --- Spawn mechanics ---
 
+# Claude Code's TUI writes DECSET 2004 (enable bracketed paste) to the
+# terminal when its input handler mounts. Input pasted before that point is
+# parsed as stray escape-key presses and silently dropped, so we use the
+# marker as a readiness gate before delivering the initial prompt.
+TUI_READY_MARKER = b"\x1b[?2004h"
+TUI_READY_TIMEOUT = 15.0
+TUI_READY_POLL_INTERVAL = 0.1
+# Marker appears when the input handler mounts, not when it's fully settled;
+# give the TUI a beat before pasting.
+TUI_READY_SETTLE_DELAY = 0.5
+# Claude needs time to process the paste end marker before accepting Enter.
+SUBMIT_DELAY = 1.0
+
+
+async def _wait_for_tui_ready(session_id: str) -> bool:
+    """Poll the session's raw PTY output until the TUI is ready for input.
+
+    Returns True once TUI_READY_MARKER appears, or after TUI_READY_TIMEOUT
+    as a fallback — the marker is a heuristic based on an implementation
+    detail of Claude Code's TUI, and proceeding after the timeout preserves
+    the old fixed-delay behavior as the worst case.
+
+    Returns False if the session died or was removed while waiting.
+    """
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + TUI_READY_TIMEOUT
+    while True:
+        pty_session = pty_manager.get(session_id)
+        if pty_session is None or pty_session.master_fd == -1:
+            return False
+        if TUI_READY_MARKER in pty_session.output_buffer:
+            return True
+        if loop.time() >= deadline:
+            logger.warning(
+                f"Session {session_id}: TUI readiness marker not seen after "
+                f"{TUI_READY_TIMEOUT}s, pasting initial input anyway"
+            )
+            return True
+        await asyncio.sleep(TUI_READY_POLL_INTERVAL)
+
+
+async def _send_initial_input(session_id: str, initial_input: str) -> None:
+    """Paste the initial prompt into the session's PTY once the TUI is ready."""
+    if not await _wait_for_tui_ready(session_id):
+        return
+    await asyncio.sleep(TUI_READY_SETTLE_DELAY)
+    # Wrap in bracketed paste markers so the terminal treats multi-line
+    # text as a single paste.
+    paste_start = "\x1b[200~"
+    paste_end = "\x1b[201~"
+    pty_manager.write(session_id, f"{paste_start}{initial_input}{paste_end}".encode())
+    # Delay then Enter to submit the pasted text.
+    await asyncio.sleep(SUBMIT_DELAY)
+    pty_manager.write(session_id, b"\r")
+
 
 def spawn_session(
     session_id: str,
@@ -167,22 +222,7 @@ def spawn_session(
     pty_manager.spawn(session_id, cwd=cwd, cmd=cmd)
 
     if initial_input.strip():
-
-        async def _send_initial_input():
-            await asyncio.sleep(1.0)
-            # Wrap in bracketed paste markers so the terminal treats multi-line
-            # text as a single paste.
-            paste_start = "\x1b[200~"
-            paste_end = "\x1b[201~"
-            pty_manager.write(
-                session_id, f"{paste_start}{initial_input}{paste_end}".encode()
-            )
-            # Delay then Enter to submit the pasted text. Claude needs time
-            # to process the paste end marker before accepting Enter.
-            await asyncio.sleep(1.0)
-            pty_manager.write(session_id, b"\r")
-
-        asyncio.create_task(_send_initial_input())
+        asyncio.create_task(_send_initial_input(session_id, initial_input))
 
     return asyncio.create_task(_watch_pty(session_id, idle_timeout=idle_timeout))
 
