@@ -348,11 +348,7 @@ function WorktopTable({
         <div className="muted" style={{ padding: "12px 16px" }}>
           No worktops
         </div>
-      ) : (
-        <div className="muted" style={{ padding: "12px 16px" }}>
-          No open worktops
-        </div>
-      )}
+      ) : null}
       <div className="worktops-page__group-footer">
         <div className="worktops-page__group-footer-left">
           {archivedWorktops.length > 0 && (
