@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -200,6 +201,42 @@ async def test_create_local_worktop(client):
     assert data["pr_url"] is None
     assert data["status"] == "open"
     assert data["worktree_path"]
+
+
+async def test_create_worktop_copies_ignored_files(client):
+    """A repo's copy_globs are copied into the new worktop's worktree."""
+    c, git_env, _ = client
+    from server import config
+
+    git_env.add_commit(".gitignore", "secret.txt\n", "ignore")
+    (git_env.clone / "secret.txt").write_text("shh")
+    config.get_repo(git_env.repo_id).copy_globs = ["secret.txt"]
+
+    resp = await c.post("/worktops", json={"repo": git_env.repo_id})
+    assert resp.status_code == 200
+    wt = Path(resp.json()["worktree_path"])
+    assert (wt / "secret.txt").read_text() == "shh"
+
+
+async def test_create_worktop_copy_globs_drift_rolls_back(client):
+    """copy_globs drift fails worktop creation with a 400 and removes the
+    just-created worktree, so fixing the config and retrying works."""
+    c, git_env, _ = client
+    from server import config, git
+
+    repo = config.get_repo(git_env.repo_id)
+    repo.copy_globs = ["does-not-exist/**"]
+
+    resp = await c.post("/worktops", json={"repo": git_env.repo_id})
+    assert resp.status_code == 400
+    assert "copy_globs drift" in resp.json()["detail"]
+    # The worktree was rolled back.
+    assert list(git.WORKTREE_ROOT.iterdir()) == []
+
+    # Fixing the config makes creation succeed again.
+    repo.copy_globs = []
+    resp = await c.post("/worktops", json={"repo": git_env.repo_id})
+    assert resp.status_code == 200
 
 
 async def test_create_worktop_requires_pr_url_or_repo(client):

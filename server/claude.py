@@ -56,9 +56,15 @@ async def write_worktop_claude_md(
     session in the worktree (plait-spawned or manual) sees them. This
     keeps plait self-contained — no dependency on ~/.claude.
 
+    Also copies the repo's configured gitignored files (`copy_globs`)
+    from the canonical clone, *before* the plait overlay so plait's
+    guardrails win any path collision.
+
     Selects a local-flavored template for local-only repos.
     """
     from server import git
+
+    await git.copy_ignored_files(repo_id, worktree_path)
 
     worktree = Path(worktree_path)
     base_url = f"http://localhost:{PLAIT_PORT}"

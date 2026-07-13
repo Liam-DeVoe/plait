@@ -132,7 +132,20 @@ def _repo_dict(repo: Repo) -> dict:
         "upstream": repo.upstream,
         "kind": repo.kind,
         "position": repo.position,
+        "copy_globs": repo.copy_globs,
     }
+
+
+async def _validate_copy_globs(repo_id: str, path: Path, globs: list[str]) -> None:
+    """400 if any copy glob doesn't resolve to gitignored files right now.
+
+    Validating at save time means a typo'd or stale glob fails when you
+    write the config, not at the next worktop creation.
+    """
+    try:
+        await git.resolve_copy_globs(repo_id, path, globs)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/repos")
@@ -166,6 +179,7 @@ class CreateRepoRequest(BaseModel):
     path: str
     kind: str = "remote"
     upstream: str | None = None
+    copy_globs: list[str] = []
 
 
 @app.post("/repos")
@@ -184,6 +198,7 @@ async def create_repo(req: CreateRepoRequest):
     existing = await db.get_repo(rid)
     if existing is not None:
         raise HTTPException(status_code=400, detail=f"Repo {rid!r} already exists")
+    await _validate_copy_globs(rid, Path(req.path), req.copy_globs)
 
     existing_repos = await db.list_repos()
     position = len(existing_repos)
@@ -193,6 +208,7 @@ async def create_repo(req: CreateRepoRequest):
         kind=req.kind,
         upstream=req.upstream,
         position=position,
+        copy_globs=req.copy_globs,
     )
     await db.create_repo(repo)
     await config.refresh()
@@ -215,6 +231,7 @@ class UpdateRepoRequest(BaseModel):
     path: str | None = None
     upstream: str | None = None
     kind: str | None = None
+    copy_globs: list[str] | None = None
 
 
 @app.put("/repos/{repo_id}")
@@ -235,6 +252,13 @@ async def update_repo(repo_id: str, req: UpdateRepoRequest):
             status_code=400, detail="kind='local' must not have upstream"
         )
 
+    new_path = Path(req.path) if req.path is not None else repo.path
+    new_globs = req.copy_globs if req.copy_globs is not None else repo.copy_globs
+    if req.copy_globs is not None or req.path is not None:
+        # Re-validate whenever the globs change, and also when the path
+        # changes (the same globs may not resolve in the new clone).
+        await _validate_copy_globs(repo_id, new_path, new_globs)
+
     if req.path is not None:
         updates["path"] = req.path
     if req.kind is not None:
@@ -242,6 +266,8 @@ async def update_repo(repo_id: str, req: UpdateRepoRequest):
     if req.upstream is not None or (req.kind == "local"):
         # If switching to local, clear any stale upstream value.
         updates["upstream"] = new_upstream
+    if req.copy_globs is not None:
+        updates["copy_globs"] = req.copy_globs
 
     if not updates:
         return _repo_dict(repo)
@@ -487,6 +513,31 @@ async def trigger_daemon_run():
 # --- Worktop endpoints ---
 
 
+async def _install_worktop_files(worktop: Worktop) -> None:
+    """Install plait's per-worktop files into a freshly created worktree.
+
+    Wraps claude.write_worktop_claude_md so copy_globs drift (a configured
+    glob that no longer resolves to gitignored files) fails the request
+    with a 400 instead of a 500 — and rolls back the just-created worktree
+    (and its branch) so fixing the config and retrying works cleanly.
+    """
+    try:
+        await claude.write_worktop_claude_md(
+            worktop.worktree_path, worktop.id, worktop.repo
+        )
+    except RuntimeError as e:
+        try:
+            await git.remove_worktree(worktop.repo, worktop.worktree_path)
+            repo = config.get_repo(worktop.repo)
+            await git.run("git", "branch", "-D", worktop.branch, cwd=repo.path)
+        except Exception:
+            logger.warning(
+                f"Failed to clean up worktree for worktop {worktop.id} "
+                "after copy_globs error"
+            )
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 class CreateWorktopRequest(BaseModel):
     pr_url: str | None = None
     repo: str | None = None
@@ -532,9 +583,7 @@ async def create_worktop(req: CreateWorktopRequest):
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    await claude.write_worktop_claude_md(
-        worktop.worktree_path, worktop.id, worktop.repo
-    )
+    await _install_worktop_files(worktop)
 
     if worktop.pr_number:
         ci = await git.get_ci_status(worktop.repo, worktop.pr_number)
@@ -588,6 +637,10 @@ async def review_pr(req: ReviewPRRequest):
     # claude with a short, shell-safe pointer to its absolute path. Single
     # quotes (not double) so the arg survives AppleScript's own quoting; the
     # temp path is alphanumeric, so single-quoting it is safe.
+    try:
+        await git.copy_ignored_files(repo_id, worktree_path)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     claude.install_claude_files(worktree_path)
     main_branch = await git.main_branch(repo_id)
     main_ref = await git.main_ref(repo_id)
@@ -1195,8 +1248,10 @@ async def create_slate(req: CreateSlateRequest):
 
     try:
         await git.create_slate_worktrees(slate.id, slate.repo_ids)
-    except RuntimeError:
-        raise HTTPException(status_code=500, detail="Failed to create slate worktrees")
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to create slate worktrees: {e}"
+        )
 
     claude.install_claude_files(str(git.WORKTREE_ROOT / f"slate-{slate.id}"))
 
@@ -1384,9 +1439,7 @@ async def hook_create_worktop(req: CreateWorktopHook):
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    await claude.write_worktop_claude_md(
-        worktop.worktree_path, worktop.id, worktop.repo
-    )
+    await _install_worktop_files(worktop)
 
     await db.create_worktop(worktop)
     await daemon.notify("worktop_updated", {"id": worktop.id, "status": "open"})
@@ -1446,9 +1499,7 @@ async def hook_create_slate_worktop(slate_id: str, req: CreateSlateWorktopHook):
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    await claude.write_worktop_claude_md(
-        worktop.worktree_path, worktop.id, worktop.repo
-    )
+    await _install_worktop_files(worktop)
 
     await db.create_worktop(worktop)
     await daemon.notify("slate_updated", {"id": slate_id})

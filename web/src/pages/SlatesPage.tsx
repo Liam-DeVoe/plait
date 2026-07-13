@@ -120,7 +120,7 @@ function NewSlateModal({
         {error && <div className="error-banner">{error}</div>}
         {views.length === 0 ? (
           <div className="muted" style={{ marginBottom: 12 }}>
-            No views yet. Create one on the Repos page first.
+            No views yet. Create one on the Settings page first.
           </div>
         ) : (
           <div style={{ marginBottom: 16 }}>

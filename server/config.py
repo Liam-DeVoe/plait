@@ -12,7 +12,7 @@ through `db.py` and then call `await refresh()`.
 
 The previous incarnation of this module read `config.toml` at module
 import; that file no longer exists. Repos are managed entirely through
-the Repos page in the UI, with a one-shot migration script
+the Settings page in the UI, with a one-shot migration script
 (`scripts/seed_config.py`) handling the initial port from the old TOML.
 """
 

@@ -17,7 +17,15 @@ import {
   type Settings,
 } from "../api";
 
-export async function reposLoader() {
+/** Parse a textarea's contents into a glob list: one glob per line. */
+function parseGlobs(text: string): string[] {
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+}
+
+export async function settingsLoader() {
   const [repos, views, settings] = await Promise.all([
     fetchRepos(),
     fetchViews(),
@@ -54,7 +62,7 @@ function SettingsPanel({ initial }: { initial: Settings }) {
 
   return (
     <div className="card form">
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>Settings</div>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>General</div>
       {error && <div className="error-banner">{error}</div>}
       <div className="form__row">
         <label
@@ -93,7 +101,12 @@ function RepoRow({
   dragOver,
 }: {
   repo: Repo;
-  onSave: (patch: { path?: string; upstream?: string | null; kind?: "remote" | "local" }) => Promise<void>;
+  onSave: (patch: {
+    path?: string;
+    upstream?: string | null;
+    kind?: "remote" | "local";
+    copy_globs?: string[];
+  }) => Promise<void>;
   onDelete: () => Promise<void>;
   onDragStart: (e: DragEvent<HTMLElement>) => void;
   onDragOver: (e: DragEvent<HTMLTableRowElement>) => void;
@@ -106,6 +119,7 @@ function RepoRow({
   const [path, setPath] = useState(repo.path);
   const [kind, setKind] = useState<"remote" | "local">(repo.kind);
   const [upstream, setUpstream] = useState(repo.upstream ?? "");
+  const [copyGlobs, setCopyGlobs] = useState(repo.copy_globs.join("\n"));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -115,13 +129,15 @@ function RepoRow({
       setPath(repo.path);
       setKind(repo.kind);
       setUpstream(repo.upstream ?? "");
+      setCopyGlobs(repo.copy_globs.join("\n"));
     }
-  }, [repo.id, repo.path, repo.kind, repo.upstream, editing]);
+  }, [repo.id, repo.path, repo.kind, repo.upstream, repo.copy_globs.join("\n"), editing]);
 
   const beginEdit = () => {
     setPath(repo.path);
     setKind(repo.kind);
     setUpstream(repo.upstream ?? "");
+    setCopyGlobs(repo.copy_globs.join("\n"));
     setEditing(true);
     setError(null);
   };
@@ -134,6 +150,7 @@ function RepoRow({
         path,
         kind,
         upstream: kind === "local" ? null : upstream,
+        copy_globs: parseGlobs(copyGlobs),
       });
       setEditing(false);
     } catch (e: any) {
@@ -228,6 +245,24 @@ function RepoRow({
         )}
       </td>
       <td className="table__worktop">
+        {editing ? (
+          <textarea
+            value={copyGlobs}
+            onChange={(e) => setCopyGlobs(e.target.value)}
+            placeholder={".claude/skills/**\none glob per line"}
+            className="form__input form__input--full"
+            style={{ fontFamily: "monospace", fontSize: 12, minHeight: 56 }}
+            title="Gitignored paths to copy into every worktree (one glob per line)"
+          />
+        ) : repo.copy_globs.length > 0 ? (
+          <span style={{ fontFamily: "monospace", fontSize: 12, whiteSpace: "pre-line" }}>
+            {repo.copy_globs.join("\n")}
+          </span>
+        ) : (
+          <span className="muted">—</span>
+        )}
+      </td>
+      <td className="table__worktop">
         <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
           {editing ? (
             <>
@@ -272,6 +307,7 @@ function NewRepoForm({ onCreated }: { onCreated: () => void }) {
   const [path, setPath] = useState("");
   const [kind, setKind] = useState<"remote" | "local">("remote");
   const [upstream, setUpstream] = useState("");
+  const [copyGlobs, setCopyGlobs] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -280,6 +316,7 @@ function NewRepoForm({ onCreated }: { onCreated: () => void }) {
     setPath("");
     setKind("remote");
     setUpstream("");
+    setCopyGlobs("");
     setError(null);
   };
 
@@ -292,6 +329,7 @@ function NewRepoForm({ onCreated }: { onCreated: () => void }) {
         path: path.trim(),
         kind,
         upstream: kind === "local" ? null : upstream.trim(),
+        copy_globs: parseGlobs(copyGlobs),
       });
       reset();
       setOpen(false);
@@ -352,6 +390,13 @@ function NewRepoForm({ onCreated }: { onCreated: () => void }) {
           className="form__input form__input--full"
         />
       )}
+      <textarea
+        placeholder={"gitignored paths to copy into worktrees (one glob per line, optional)"}
+        value={copyGlobs}
+        onChange={(e) => setCopyGlobs(e.target.value)}
+        className="form__input form__input--full"
+        style={{ fontFamily: "monospace", fontSize: 12, minHeight: 56 }}
+      />
       <div className="form__actions">
         <div
           className={`btn btn--blue${busy ? " btn--disabled" : ""}`}
@@ -445,6 +490,9 @@ function ReposSection({ repos }: { repos: Repo[] }) {
                 <th className="table__header-worktop">Kind</th>
                 <th className="table__header-worktop">Path</th>
                 <th className="table__header-worktop">Upstream</th>
+                <th className="table__header-worktop" title="Gitignored paths copied into every worktree">
+                  Copy globs
+                </th>
                 <th className="table__header-worktop"></th>
               </tr>
             </thead>
@@ -739,14 +787,14 @@ function ViewsSection({ views, repos }: { views: View[]; repos: Repo[] }) {
   );
 }
 
-export default function ReposPage() {
+export default function SettingsPage() {
   const { repos, views, settings } = useLoaderData() as Awaited<
-    ReturnType<typeof reposLoader>
+    ReturnType<typeof settingsLoader>
   >;
   return (
     <>
       <div className="page-header">
-        <div className="page-title">Repos</div>
+        <div className="page-title">Settings</div>
       </div>
       <SettingsPanel initial={settings} />
       <ReposSection repos={repos} />

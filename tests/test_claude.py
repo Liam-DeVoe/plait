@@ -67,3 +67,38 @@ def test_tend_prompt_local_repo_omits_upstream_remote():
     )
     # The local template references `main` directly (no remote prefix).
     assert "git merge main" in prompt
+
+
+# --- write_worktop_claude_md + copy_globs layering ---
+
+
+async def test_write_worktop_claude_md_layers_copied_files(git_env):
+    """Copied gitignored files land in the worktree, but plait's own
+    claude_files overlay wins any path collision (guardrails must survive),
+    and a copied CLAUDE.local.md is preserved with plait's block appended."""
+    from pathlib import Path
+
+    from server import config, git
+
+    git_env.add_commit(".gitignore", ".claude/\nCLAUDE.local.md\n", "ignore")
+    claude_dir = git_env.clone / ".claude"
+    claude_dir.mkdir()
+    (claude_dir / "settings.local.json").write_text('{"user_settings": true}')
+    (claude_dir / "my-notes.md").write_text("personal")
+    (git_env.clone / "CLAUDE.local.md").write_text("# my local notes\n")
+    config.get_repo(git_env.repo_id).copy_globs = [".claude/**", "CLAUDE.local.md"]
+
+    wt = Path(await git.create_worktree(git_env.repo_id, "copy-branch", "worktop-copy"))
+    await claude.write_worktop_claude_md(str(wt), "worktop-copy", git_env.repo_id)
+
+    # Non-colliding copied file survives.
+    assert (wt / ".claude" / "my-notes.md").read_text() == "personal"
+    # Colliding settings.local.json is plait's rendered version, not the
+    # user's copy.
+    settings = (wt / ".claude" / "settings.local.json").read_text()
+    assert "user_settings" not in settings
+    assert "{worktree_root}" not in settings
+    # Copied CLAUDE.local.md is preserved, with plait's worktop block after.
+    local_md = (wt / "CLAUDE.local.md").read_text()
+    assert local_md.startswith("# my local notes")
+    assert "worktop-copy" in local_md

@@ -372,3 +372,76 @@ async def test_push(git_env):
     # Push
     success, output = await git.push(wt_path, "push-test")
     assert success
+
+
+# --- copy_globs (gitignored files copied into worktrees) ---
+
+
+def _seed_ignored_files(git_env):
+    """Commit a .gitignore and create gitignored files in the clone."""
+    git_env.add_commit(".gitignore", ".claude/local/\nsecret.txt\n", "add gitignore")
+    local = git_env.clone / ".claude" / "local"
+    local.mkdir(parents=True)
+    (local / "notes.md").write_text("private notes")
+    (local / "sub").mkdir()
+    (local / "sub" / "deep.md").write_text("deep")
+    (git_env.clone / "secret.txt").write_text("shh")
+
+
+async def test_copy_ignored_files_copies_matches(git_env, tmp_path):
+    from server import config
+
+    _seed_ignored_files(git_env)
+    config.get_repo(git_env.repo_id).copy_globs = [".claude/local/**", "secret.txt"]
+
+    dest = tmp_path / "dest"
+    await git.copy_ignored_files(git_env.repo_id, dest)
+
+    assert (dest / ".claude/local/notes.md").read_text() == "private notes"
+    assert (dest / ".claude/local/sub/deep.md").read_text() == "deep"
+    assert (dest / "secret.txt").read_text() == "shh"
+
+
+async def test_copy_ignored_files_noop_without_globs(git_env, tmp_path):
+    _seed_ignored_files(git_env)
+    dest = tmp_path / "dest"
+    await git.copy_ignored_files(git_env.repo_id, dest)
+    assert not dest.exists()
+
+
+async def test_resolve_copy_globs_dead_glob_raises(git_env):
+    _seed_ignored_files(git_env)
+    with pytest.raises(RuntimeError, match="matches no files"):
+        await git.resolve_copy_globs(
+            git_env.repo_id, git_env.clone, ["does-not-exist/**"]
+        )
+
+
+async def test_resolve_copy_globs_tracked_match_raises(git_env):
+    _seed_ignored_files(git_env)
+    with pytest.raises(RuntimeError, match="tracked by git"):
+        await git.resolve_copy_globs(git_env.repo_id, git_env.clone, ["README.md"])
+
+
+async def test_resolve_copy_globs_unignored_match_raises(git_env):
+    _seed_ignored_files(git_env)
+    (git_env.clone / "plain-untracked.txt").write_text("not ignored")
+    with pytest.raises(RuntimeError, match="untracked but not gitignored"):
+        await git.resolve_copy_globs(
+            git_env.repo_id, git_env.clone, ["plain-untracked.txt"]
+        )
+
+
+async def test_create_slate_worktrees_copies_ignored_files(git_env):
+    from server import config
+
+    _seed_ignored_files(git_env)
+    git_env.push("main")  # slate worktrees check out the upstream's main
+    config.get_repo(git_env.repo_id).copy_globs = ["secret.txt"]
+
+    paths = await git.create_slate_worktrees("slate-copy-test", [git_env.repo_id])
+    wt = Path(paths[git_env.repo_id])
+    assert (wt / "secret.txt").read_text() == "shh"
+    # The gitignore is tracked, so the copied file stays invisible to git.
+    out = git_env.run_git("status", "--porcelain", cwd=wt)
+    assert "secret.txt" not in out
