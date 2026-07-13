@@ -638,7 +638,7 @@ async def review_pr(req: ReviewPRRequest):
     # quotes (not double) so the arg survives AppleScript's own quoting; the
     # temp path is alphanumeric, so single-quoting it is safe.
     try:
-        await git.copy_ignored_files(repo_id, worktree_path)
+        await git.copy_local_files(repo_id, worktree_path)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     claude.install_claude_files(worktree_path)

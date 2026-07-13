@@ -69,13 +69,14 @@ def test_tend_prompt_local_repo_omits_upstream_remote():
     assert "git merge main" in prompt
 
 
-# --- write_worktop_claude_md + copy_globs layering ---
+# --- write_worktop_claude_md + local-file layering ---
 
 
 async def test_write_worktop_claude_md_layers_copied_files(git_env):
-    """Copied gitignored files land in the worktree, but plait's own
-    claude_files overlay wins any path collision (guardrails must survive),
-    and a copied CLAUDE.local.md is preserved with plait's block appended."""
+    """The canonical clone's untracked .claude/ files land in the worktree
+    automatically (no copy_globs needed), but plait's own claude_files
+    overlay wins any path collision (guardrails must survive), and a
+    glob-copied CLAUDE.local.md is preserved with plait's block appended."""
     from pathlib import Path
 
     from server import config, git
@@ -86,7 +87,7 @@ async def test_write_worktop_claude_md_layers_copied_files(git_env):
     (claude_dir / "settings.local.json").write_text('{"user_settings": true}')
     (claude_dir / "my-notes.md").write_text("personal")
     (git_env.clone / "CLAUDE.local.md").write_text("# my local notes\n")
-    config.get_repo(git_env.repo_id).copy_globs = [".claude/**", "CLAUDE.local.md"]
+    config.get_repo(git_env.repo_id).copy_globs = ["CLAUDE.local.md"]
 
     wt = Path(await git.create_worktree(git_env.repo_id, "copy-branch", "worktop-copy"))
     await claude.write_worktop_claude_md(str(wt), "worktop-copy", git_env.repo_id)

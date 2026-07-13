@@ -281,12 +281,13 @@ function RepoRow({
                 <textarea
                   value={copyGlobs}
                   onChange={(e) => setCopyGlobs(e.target.value)}
-                  placeholder=".claude/skills/**"
+                  placeholder=".env"
                   className="form__textarea"
                   style={{ fontFamily: "monospace", fontSize: 12, minHeight: 64 }}
                 />
                 <div className="repos-page__edit-hint">
-                  Gitignored paths copied into every worktree — one glob per line.
+                  Gitignored paths copied into every worktree — one glob per
+                  line. Untracked .claude/ files are copied automatically.
                 </div>
               </div>
             </div>

@@ -277,18 +277,32 @@ async def resolve_copy_globs(
     return resolved
 
 
-async def copy_ignored_files(repo_id: str, dest: str | Path) -> None:
-    """Copy the repo's configured gitignored files into a worktree.
+async def copy_local_files(repo_id: str, dest: str | Path) -> None:
+    """Copy the repo's local-only files into a worktree.
 
-    Sources are the repo's `copy_globs` resolved against the canonical
-    clone (see resolve_copy_globs, which errors loudly on drift). Runs
-    *before* plait's own claude_files overlay so plait's guardrails win
-    any path collision.
+    Two sources, both resolved against the canonical clone:
+    - every untracked file under `.claude/` (gitignored or not), so local
+      Claude config follows the repo into every worktree automatically.
+      Tracked `.claude/` files are excluded — those come from the branch
+      checkout and must not be clobbered with the canonical clone's copy.
+    - the repo's configured `copy_globs` (see resolve_copy_globs, which
+      errors loudly on drift)
+
+    Runs *before* plait's own claude_files overlay so plait's guardrails
+    win any path collision.
     """
     repo = config.get_repo(repo_id)
-    files = await resolve_copy_globs(repo_id, repo.path, repo.copy_globs)
+    files = set(await resolve_copy_globs(repo_id, repo.path, repo.copy_globs))
+    # `--others` without `--exclude-standard` lists all untracked files,
+    # including gitignored ones.
+    rc, out, err = await run(
+        "git", "ls-files", "-z", "--others", "--", ".claude", cwd=repo.path
+    )
+    if rc != 0:
+        raise RuntimeError(f"git ls-files failed in {repo_id!r}: {err}")
+    files.update(p for p in out.split("\0") if p)
     dest = Path(dest)
-    for rel in files:
+    for rel in sorted(files):
         target = dest / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(repo.path / rel, target)
@@ -322,7 +336,7 @@ async def create_slate_worktrees(slate_id: str, repo_ids: list[str]) -> dict[str
         )
         if rc != 0:
             raise RuntimeError(f"Failed to create slate worktree for {repo_id}: {err}")
-        await copy_ignored_files(repo_id, wt_dir)
+        await copy_local_files(repo_id, wt_dir)
         return repo_id, str(wt_dir)
 
     pairs = await asyncio.gather(*[_create_one(rid) for rid in repo_ids])
