@@ -172,105 +172,130 @@ function RepoRow({
   };
 
   return (
-    <tr
-      className={`repos-page__row${dragging ? " repos-page__row--dragging" : ""}${dragOver ? " repos-page__row--drag-over" : ""}`}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-    >
-      <td className="table__worktop repos-page__handle-cell">
-        <span
-          className="repos-page__drag-handle"
-          title="Drag to reorder"
-          aria-hidden="true"
-          draggable
-          onDragStart={onDragStart}
-          onDragEnd={onDragEnd}
-        >
-          ⋮⋮
-        </span>
-      </td>
-      <td className="table__worktop">
-        <div style={{ fontWeight: 500 }}>{repo.id}</div>
-        {error && (
-          <div className="error-banner" style={{ marginTop: 8 }}>
-            {error}
-          </div>
-        )}
-      </td>
-      <td className="table__worktop">
-        {editing ? (
-          <select
-            value={kind}
-            onChange={(e) => setKind(e.target.value as "remote" | "local")}
-            className="form__input"
+    <>
+      <tr
+        className={`repos-page__row${dragging ? " repos-page__row--dragging" : ""}${dragOver ? " repos-page__row--drag-over" : ""}${editing ? " repos-page__row--editing" : ""}`}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+      >
+        <td className="table__worktop repos-page__handle-cell">
+          <span
+            className="repos-page__drag-handle"
+            title="Drag to reorder"
+            aria-hidden="true"
+            draggable
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
           >
-            <option value="remote">remote</option>
-            <option value="local">local</option>
-          </select>
-        ) : (
-          repo.kind
-        )}
-      </td>
-      <td className="table__worktop">
-        {editing ? (
-          <input
-            type="text"
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            className="form__input form__input--full"
-          />
-        ) : (
+            ⋮⋮
+          </span>
+        </td>
+        <td className="table__worktop">
+          <div style={{ fontWeight: 500 }}>{repo.id}</div>
+          {!editing && error && (
+            <div className="error-banner" style={{ marginTop: 8 }}>
+              {error}
+            </div>
+          )}
+        </td>
+        <td className="table__worktop">{repo.kind}</td>
+        <td className="table__worktop">
           <span style={{ fontFamily: "monospace", fontSize: 12 }}>{repo.path}</span>
-        )}
-      </td>
-      <td className="table__worktop">
-        {editing ? (
-          kind === "local" ? (
-            <span className="muted">—</span>
+        </td>
+        <td className="table__worktop">
+          {repo.upstream ? (
+            <span style={{ fontFamily: "monospace", fontSize: 12 }}>
+              {repo.upstream}
+            </span>
           ) : (
-            <input
-              type="text"
-              value={upstream}
-              onChange={(e) => setUpstream(e.target.value)}
-              placeholder="owner/repo"
-              className="form__input form__input--full"
-            />
-          )
-        ) : repo.upstream ? (
-          <span style={{ fontFamily: "monospace", fontSize: 12 }}>
-            {repo.upstream}
-          </span>
-        ) : (
-          <span className="muted">—</span>
-        )}
-      </td>
-      <td className="table__worktop">
-        {editing ? (
-          <textarea
-            value={copyGlobs}
-            onChange={(e) => setCopyGlobs(e.target.value)}
-            placeholder={".claude/skills/**\none glob per line"}
-            className="form__input form__input--full"
-            style={{ fontFamily: "monospace", fontSize: 12, minHeight: 56 }}
-            title="Gitignored paths to copy into every worktree (one glob per line)"
-          />
-        ) : repo.copy_globs.length > 0 ? (
-          <span style={{ fontFamily: "monospace", fontSize: 12, whiteSpace: "pre-line" }}>
-            {repo.copy_globs.join("\n")}
-          </span>
-        ) : (
-          <span className="muted">—</span>
-        )}
-      </td>
-      <td className="table__worktop">
-        <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
-          {editing ? (
-            <>
+            <span className="muted">—</span>
+          )}
+        </td>
+        <td className="table__worktop">
+          {repo.copy_globs.length > 0 ? (
+            <span style={{ fontFamily: "monospace", fontSize: 12, whiteSpace: "pre-line" }}>
+              {repo.copy_globs.join("\n")}
+            </span>
+          ) : (
+            <span className="muted">—</span>
+          )}
+        </td>
+        <td className="table__worktop">
+          {!editing && (
+            <div style={{ display: "flex", gap: 6, justifyContent: "flex-end" }}>
+              <div className="btn btn--sm btn--soft-gray" onClick={beginEdit}>
+                Edit
+              </div>
+              <div
+                className={`btn btn--sm btn--soft-red${busy ? " btn--disabled" : ""}`}
+                onClick={busy ? undefined : handleDelete}
+              >
+                Delete
+              </div>
+            </div>
+          )}
+        </td>
+      </tr>
+      {editing && (
+        <tr className="repos-page__edit-row">
+          <td colSpan={7}>
+            {error && (
+              <div className="error-banner" style={{ marginBottom: 12 }}>
+                {error}
+              </div>
+            )}
+            <div className="repos-page__edit-form">
+              <label className="repos-page__edit-label">Kind</label>
+              <div>
+                <select
+                  value={kind}
+                  onChange={(e) => setKind(e.target.value as "remote" | "local")}
+                  className="form__input"
+                >
+                  <option value="remote">remote</option>
+                  <option value="local">local</option>
+                </select>
+              </div>
+              <label className="repos-page__edit-label">Path</label>
+              <input
+                type="text"
+                value={path}
+                onChange={(e) => setPath(e.target.value)}
+                placeholder="/absolute/path/to/local/clone"
+                className="form__input form__input--full"
+              />
+              {kind === "remote" && (
+                <>
+                  <label className="repos-page__edit-label">Upstream</label>
+                  <input
+                    type="text"
+                    value={upstream}
+                    onChange={(e) => setUpstream(e.target.value)}
+                    placeholder="owner/repo"
+                    className="form__input form__input--full"
+                  />
+                </>
+              )}
+              <label className="repos-page__edit-label">Copy globs</label>
+              <div>
+                <textarea
+                  value={copyGlobs}
+                  onChange={(e) => setCopyGlobs(e.target.value)}
+                  placeholder=".claude/skills/**"
+                  className="form__textarea"
+                  style={{ fontFamily: "monospace", fontSize: 12, minHeight: 64 }}
+                />
+                <div className="repos-page__edit-hint">
+                  Gitignored paths copied into every worktree — one glob per line.
+                </div>
+              </div>
+            </div>
+            <div className="form__actions" style={{ marginTop: 12 }}>
               <div
                 className={`btn btn--sm btn--blue${busy ? " btn--disabled" : ""}`}
                 onClick={busy ? undefined : handleSave}
               >
-                {busy ? "..." : "Save"}
+                {busy ? "Saving..." : "Save"}
               </div>
               <div
                 className="btn btn--sm btn--gray"
@@ -281,23 +306,11 @@ function RepoRow({
               >
                 Cancel
               </div>
-            </>
-          ) : (
-            <>
-              <div className="btn btn--sm btn--soft-gray" onClick={beginEdit}>
-                Edit
-              </div>
-              <div
-                className={`btn btn--sm btn--soft-red${busy ? " btn--disabled" : ""}`}
-                onClick={busy ? undefined : handleDelete}
-              >
-                Delete
-              </div>
-            </>
-          )}
-        </div>
-      </td>
-    </tr>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
