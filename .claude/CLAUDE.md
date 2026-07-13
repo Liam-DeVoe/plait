@@ -45,8 +45,8 @@ Do NOT also start the backend (`just server` or `just dev`/`just serve`, which s
 
 Plait's configuration — managed repos, the GitHub author, and the
 "views" used to group repos — lives in the SQLite DB (`repos`, `views`,
-`settings` tables) and is edited through the Repos page in the UI. The
-synchronous `server/config.py` module is a thin cache over those
+`settings` tables) and is edited through the Settings page in the UI.
+The synchronous `server/config.py` module is a thin cache over those
 tables, primed at startup by `await config.refresh()` in the FastAPI
 lifespan and refreshed after each write.
 
@@ -56,6 +56,15 @@ authoritative; used for `gh` CLI calls). The `author` setting
 identifies whose `@claude` mentions on PR comments the tend session
 should act on, and whose thumbs-up reactions are tracked (the reaction
 count is persisted on the worktop but does not trigger tends).
+
+**Copy globs.** Each repo can list `copy_globs` — globs (relative to
+the canonical clone) of *gitignored* files to copy into every worktree
+plait creates for that repo (worktops, review worktrees, and slate
+exploration dirs). The copy runs before plait's `claude_files/` overlay,
+so plait's guardrails win path collisions. Drift fails loudly: a glob
+that matches no files, or matches a file that isn't gitignored, is
+rejected at config-save time and fails (with rollback) at worktree
+creation time. See `git.resolve_copy_globs` / `git.copy_ignored_files`.
 
 **Migration from the old `config.toml`.** A one-shot script
 (`seed_db.py`) copies `[repos.*]` + `author` into the DB and drops the

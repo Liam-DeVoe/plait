@@ -82,7 +82,8 @@ CREATE TABLE IF NOT EXISTS repos (
     kind TEXT NOT NULL CHECK (kind IN ('remote', 'local')),
     upstream TEXT,
     position INTEGER NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    copy_globs TEXT NOT NULL DEFAULT '[]'
 );
 
 CREATE TABLE IF NOT EXISTS views (
@@ -490,6 +491,7 @@ def _row_to_repo(row: aiosqlite.Row) -> Repo:
         upstream=row["upstream"],
         position=row["position"],
         created_at=row["created_at"],
+        copy_globs=json.loads(row["copy_globs"]),
     )
 
 
@@ -510,8 +512,9 @@ async def get_repo(repo_id: str) -> Repo | None:
 async def create_repo(repo: Repo) -> Repo:
     db = await get_db()
     await db.execute(
-        """INSERT INTO repos (id, path, kind, upstream, position, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO repos (id, path, kind, upstream, position, created_at,
+                              copy_globs)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
         (
             repo.id,
             str(repo.path),
@@ -519,6 +522,7 @@ async def create_repo(repo: Repo) -> Repo:
             repo.upstream,
             repo.position,
             repo.created_at,
+            json.dumps(repo.copy_globs),
         ),
     )
     await db.commit()
@@ -532,6 +536,8 @@ async def update_repo(repo_id: str, **kwargs: object) -> Repo | None:
     for key, value in kwargs.items():
         if isinstance(value, Path):
             value = str(value)
+        elif isinstance(value, list):
+            value = json.dumps(value)
         sets.append(f"{key} = ?")
         values.append(value)
     values.append(repo_id)

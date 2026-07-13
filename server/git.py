@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import glob as glob_module
 import json
 import re
 import shutil
@@ -91,7 +92,7 @@ async def upstream_remote(repo_id: str) -> str:
         raise RuntimeError(
             f"Repo {repo_id!r}: upstream {repo.upstream!r} does not match any "
             f"remote in {repo.path}.\nRemotes:\n{remotes_str}\n"
-            f"Either fix `upstream` on the Repos page or `git remote add` the "
+            f"Either fix `upstream` on the Settings page or `git remote add` the "
             f"missing remote."
         )
     # If multiple remotes match (e.g. origin and a duplicate), prefer origin.
@@ -209,6 +210,90 @@ async def branch_ref(repo_id: str, branch: str) -> str:
     return f"origin/{branch}"
 
 
+async def resolve_copy_globs(
+    repo_id: str, repo_path: Path, globs: list[str]
+) -> list[str]:
+    """Resolve copy globs against a repo's canonical clone at `repo_path`.
+
+    Returns the repo-relative paths of the gitignored files the globs match
+    (directories expand to the files inside them). Errors loudly on drift:
+    a glob that matches no files, or one that matches a file that isn't
+    gitignored (tracked, or untracked-but-not-ignored), raises RuntimeError.
+
+    `repo_path` is passed explicitly (rather than read from config) so the
+    repos API can validate globs for a path that isn't saved yet.
+    """
+    if not globs:
+        return []
+    if not repo_path.exists():
+        raise RuntimeError(f"Repo path does not exist: {repo_path}")
+
+    async def _zpaths(*args: str) -> set[str]:
+        rc, out, err = await run("git", *args, cwd=repo_path)
+        if rc != 0:
+            raise RuntimeError(f"git {' '.join(args)} failed in {repo_id!r}: {err}")
+        return {p for p in out.split("\0") if p}
+
+    tracked = await _zpaths("ls-files", "-z")
+    ignored = await _zpaths(
+        "ls-files", "-z", "--others", "--ignored", "--exclude-standard"
+    )
+
+    resolved: list[str] = []
+    for pattern in globs:
+        matches = glob_module.glob(
+            pattern, root_dir=repo_path, recursive=True, include_hidden=True
+        )
+        # Expand matched directories to the files inside them.
+        files: list[str] = []
+        for m in matches:
+            p = repo_path / m
+            if p.is_dir():
+                files.extend(
+                    str(f.relative_to(repo_path))
+                    for f in sorted(p.rglob("*"))
+                    if f.is_file()
+                )
+            else:
+                files.append(m)
+        if not files:
+            raise RuntimeError(
+                f"copy_globs drift in repo {repo_id!r}: {pattern!r} matches "
+                f"no files under {repo_path}"
+            )
+        for f in files:
+            if f in tracked:
+                raise RuntimeError(
+                    f"copy_globs drift in repo {repo_id!r}: {pattern!r} matches "
+                    f"{f!r}, which is tracked by git (copy_globs is for "
+                    "gitignored files only)"
+                )
+            if f not in ignored:
+                raise RuntimeError(
+                    f"copy_globs drift in repo {repo_id!r}: {pattern!r} matches "
+                    f"{f!r}, which is untracked but not gitignored"
+                )
+            resolved.append(f)
+    return resolved
+
+
+async def copy_ignored_files(repo_id: str, dest: str | Path) -> None:
+    """Copy the repo's configured gitignored files into a worktree.
+
+    Sources are the repo's `copy_globs` resolved against the canonical
+    clone (see resolve_copy_globs, which errors loudly on drift). Runs
+    *before* plait's own claude_files overlay so plait's guardrails win
+    any path collision.
+    """
+    repo = config.get_repo(repo_id)
+    files = await resolve_copy_globs(repo_id, repo.path, repo.copy_globs)
+    dest = Path(dest)
+    for rel in files:
+        target = dest / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(repo.path / rel, target)
+
+
 async def create_slate_worktrees(slate_id: str, repo_ids: list[str]) -> dict[str, str]:
     """Create read-only worktrees for the given repos at the upstream's main.
 
@@ -237,6 +322,7 @@ async def create_slate_worktrees(slate_id: str, repo_ids: list[str]) -> dict[str
         )
         if rc != 0:
             raise RuntimeError(f"Failed to create slate worktree for {repo_id}: {err}")
+        await copy_ignored_files(repo_id, wt_dir)
         return repo_id, str(wt_dir)
 
     pairs = await asyncio.gather(*[_create_one(rid) for rid in repo_ids])
@@ -627,7 +713,7 @@ def parse_pr_url(pr_url: str) -> tuple[str, int]:
     if repo_id is None:
         raise RuntimeError(
             f"No configured repo matches upstream {upstream!r}. "
-            f"Add it on the Repos page first."
+            f"Add it on the Settings page first."
         )
     return repo_id, int(m.group(2))
 

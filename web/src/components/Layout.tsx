@@ -53,12 +53,12 @@ export default function Layout() {
               Slates
             </NavLink>
             <NavLink
-              to="/repos"
+              to="/settings"
               className={({ isActive }) =>
                 `layout__nav-link${isActive ? " layout__nav-link--active" : ""}`
               }
             >
-              Repos
+              Settings
             </NavLink>
           </div>
         </div>

@@ -114,6 +114,10 @@ class Repo:
     created_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+    # Globs (relative to `path`) of gitignored files to copy into every
+    # worktree plait creates for this repo. Validated loudly: a glob that
+    # matches nothing, or matches a file that isn't gitignored, is an error.
+    copy_globs: list[str] = field(default_factory=list)
 
 
 @dataclass

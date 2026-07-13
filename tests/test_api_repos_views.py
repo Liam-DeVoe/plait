@@ -114,6 +114,81 @@ async def test_update_repo_path(client, tmp_path):
     assert resp.json()["path"] == str(new_path)
 
 
+async def test_create_repo_with_copy_globs(client):
+    c, git_env, _ = client
+    git_env.add_commit(".gitignore", "secret.txt\n", "ignore")
+    (git_env.clone / "secret.txt").write_text("shh")
+    resp = await c.post(
+        "/repos",
+        json={
+            "id": "copyrepo",
+            "path": str(git_env.clone),
+            "kind": "local",
+            "copy_globs": ["secret.txt"],
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["copy_globs"] == ["secret.txt"]
+    repos = (await c.get("/repos")).json()
+    assert any(
+        r["id"] == "copyrepo" and r["copy_globs"] == ["secret.txt"] for r in repos
+    )
+
+
+async def test_create_repo_rejects_dead_copy_glob(client):
+    c, git_env, _ = client
+    resp = await c.post(
+        "/repos",
+        json={
+            "id": "copyrepo",
+            "path": str(git_env.clone),
+            "kind": "local",
+            "copy_globs": ["does-not-exist/**"],
+        },
+    )
+    assert resp.status_code == 400
+    assert "matches no files" in resp.json()["detail"]
+
+
+async def test_create_repo_rejects_tracked_copy_glob(client):
+    c, git_env, _ = client
+    resp = await c.post(
+        "/repos",
+        json={
+            "id": "copyrepo",
+            "path": str(git_env.clone),
+            "kind": "local",
+            "copy_globs": ["README.md"],
+        },
+    )
+    assert resp.status_code == 400
+    assert "tracked by git" in resp.json()["detail"]
+
+
+async def test_update_repo_copy_globs_validated(client):
+    """Updating copy_globs re-validates against the clone; a dead glob is a
+    400 at save time, a valid one persists."""
+    c, git_env, _ = client
+    from server import db
+    from server.models import Repo
+
+    git_env.add_commit(".gitignore", "secret.txt\n", "ignore")
+    (git_env.clone / "secret.txt").write_text("shh")
+    await db.create_repo(
+        Repo(id="copyrepo", path=git_env.clone, kind="local", upstream=None)
+    )
+
+    resp = await c.put("/repos/copyrepo", json={"copy_globs": ["nope*"]})
+    assert resp.status_code == 400
+    assert "matches no files" in resp.json()["detail"]
+
+    resp = await c.put("/repos/copyrepo", json={"copy_globs": ["secret.txt"]})
+    assert resp.status_code == 200
+    assert resp.json()["copy_globs"] == ["secret.txt"]
+    refetched = await db.get_repo("copyrepo")
+    assert refetched.copy_globs == ["secret.txt"]
+
+
 async def test_delete_repo_cascade(client, mock_pty, tmp_path):
     """Deleting a repo deletes its worktops and removes it from views."""
     c, git_env, _ = client
