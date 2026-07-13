@@ -374,7 +374,7 @@ async def test_push(git_env):
     assert success
 
 
-# --- copy_globs (gitignored files copied into worktrees) ---
+# --- copy_local_files (untracked .claude/ + copy_globs copied into worktrees) ---
 
 
 def _seed_ignored_files(git_env):
@@ -388,24 +388,51 @@ def _seed_ignored_files(git_env):
     (git_env.clone / "secret.txt").write_text("shh")
 
 
-async def test_copy_ignored_files_copies_matches(git_env, tmp_path):
+async def test_copy_local_files_copies_glob_matches(git_env, tmp_path):
     from server import config
 
     _seed_ignored_files(git_env)
-    config.get_repo(git_env.repo_id).copy_globs = [".claude/local/**", "secret.txt"]
+    config.get_repo(git_env.repo_id).copy_globs = ["secret.txt"]
 
     dest = tmp_path / "dest"
-    await git.copy_ignored_files(git_env.repo_id, dest)
+    await git.copy_local_files(git_env.repo_id, dest)
 
-    assert (dest / ".claude/local/notes.md").read_text() == "private notes"
-    assert (dest / ".claude/local/sub/deep.md").read_text() == "deep"
     assert (dest / "secret.txt").read_text() == "shh"
 
 
-async def test_copy_ignored_files_noop_without_globs(git_env, tmp_path):
+async def test_copy_local_files_copies_untracked_claude_dir(git_env, tmp_path):
+    """All untracked .claude/ files are copied automatically — gitignored
+    or plain-untracked — with no copy_globs configuration needed."""
     _seed_ignored_files(git_env)
+    # Plain-untracked (not gitignored) file under .claude/.
+    (git_env.clone / ".claude" / "settings.local.json").write_text("{}")
+
     dest = tmp_path / "dest"
-    await git.copy_ignored_files(git_env.repo_id, dest)
+    await git.copy_local_files(git_env.repo_id, dest)
+
+    assert (dest / ".claude/local/notes.md").read_text() == "private notes"
+    assert (dest / ".claude/local/sub/deep.md").read_text() == "deep"
+    assert (dest / ".claude/settings.local.json").read_text() == "{}"
+    # Files outside .claude/ need an explicit copy_glob.
+    assert not (dest / "secret.txt").exists()
+
+
+async def test_copy_local_files_skips_tracked_claude_files(git_env, tmp_path):
+    """Tracked .claude/ files come from the branch checkout, not the
+    canonical clone — they must not be copied (and thus clobbered)."""
+    _seed_ignored_files(git_env)
+    git_env.add_commit(".claude/CLAUDE.md", "tracked config", "add claude md")
+
+    dest = tmp_path / "dest"
+    await git.copy_local_files(git_env.repo_id, dest)
+
+    assert (dest / ".claude/local/notes.md").exists()
+    assert not (dest / ".claude/CLAUDE.md").exists()
+
+
+async def test_copy_local_files_noop_without_claude_or_globs(git_env, tmp_path):
+    dest = tmp_path / "dest"
+    await git.copy_local_files(git_env.repo_id, dest)
     assert not dest.exists()
 
 

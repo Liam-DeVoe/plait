@@ -57,14 +57,24 @@ identifies whose `@claude` mentions on PR comments the tend session
 should act on, and whose thumbs-up reactions are tracked (the reaction
 count is persisted on the worktop but does not trigger tends).
 
-**Copy globs.** Each repo can list `copy_globs` — globs (relative to
-the canonical clone) of *gitignored* files to copy into every worktree
-plait creates for that repo (worktops, review worktrees, and slate
-exploration dirs). The copy runs before plait's `claude_files/` overlay,
-so plait's guardrails win path collisions. Drift fails loudly: a glob
-that matches no files, or matches a file that isn't gitignored, is
-rejected at config-save time and fails (with rollback) at worktree
-creation time. See `git.resolve_copy_globs` / `git.copy_ignored_files`.
+**Local files copied into worktrees.** Every worktree plait creates
+(worktops, review worktrees, and slate exploration dirs) receives the
+repo's local-only files from the canonical clone, via
+`git.copy_local_files`:
+
+- **`.claude/`, automatically.** Every *untracked* file under the
+  canonical clone's `.claude/` (gitignored or not) is copied, so local
+  Claude config follows the repo with zero configuration. Tracked
+  `.claude/` files are skipped — those come from the branch checkout.
+- **`copy_globs`, opt-in.** Each repo can list globs (relative to the
+  canonical clone) of *gitignored* files to copy — for local files
+  outside `.claude/` (e.g. `.env`). Drift fails loudly: a glob that
+  matches no files, or matches a file that isn't gitignored, is
+  rejected at config-save time and fails (with rollback) at worktree
+  creation time. See `git.resolve_copy_globs`.
+
+The copy runs before plait's `claude_files/` overlay, so plait's
+guardrails win path collisions.
 
 **Migration from the old `config.toml`.** A one-shot script
 (`seed_db.py`) copies `[repos.*]` + `author` into the DB and drops the
