@@ -78,104 +78,40 @@ function SlateRow({
   );
 }
 
-function NewSlateModal({
-  views,
-  defaultViewId,
-  onClose,
-  onCreated,
-}: {
-  views: View[];
-  defaultViewId: string | null;
-  onClose: () => void;
-  onCreated: (slate: Slate) => void;
-}) {
-  // Every slate must belong to a view. If no defaultViewId is given (e.g.
-  // we're on the "All" tab when the modal opens), seed with the first
-  // view so the user has something selected on first render.
-  const initialId = defaultViewId ?? (views[0]?.id ?? null);
-  const [viewId, setViewId] = useState<string | null>(initialId);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const handleCreate = async () => {
-    if (!viewId) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const slate = await createSlate({ view_id: viewId });
-      onCreated(slate);
-    } catch (e: any) {
-      setError(e.message);
-      setBusy(false);
-    }
-  };
-
-  const selected = viewId ? views.find((v) => v.id === viewId) : null;
-  const repoCount = selected ? selected.repo_ids.length : null;
-
-  return (
-    <div className="modal__backdrop" onClick={onClose}>
-      <div className="modal__panel" onClick={(e) => e.stopPropagation()}>
-        <div className="modal__title">New slate</div>
-        {error && <div className="error-banner">{error}</div>}
-        {views.length === 0 ? (
-          <div className="muted" style={{ marginBottom: 12 }}>
-            No views yet. Create one on the Settings page first.
-          </div>
-        ) : (
-          <div style={{ marginBottom: 16 }}>
-            {views.map((v) => (
-              <label
-                key={v.id}
-                className="form__checkbox-label"
-                style={{ marginBottom: 6, cursor: "pointer" }}
-              >
-                <input
-                  type="radio"
-                  checked={viewId === v.id}
-                  onChange={() => setViewId(v.id)}
-                />
-                {v.name}{" "}
-                <span className="muted" style={{ fontSize: 12 }}>
-                  ({v.repo_ids.length} repo
-                  {v.repo_ids.length === 1 ? "" : "s"})
-                </span>
-              </label>
-            ))}
-          </div>
-        )}
-        {repoCount === 0 && (
-          <div className="error-banner" style={{ marginBottom: 12 }}>
-            This view has no repos — pick another or add repos to it first.
-          </div>
-        )}
-        <div className="form__actions">
-          <div
-            className={`btn btn--blue${busy || !viewId || repoCount === 0 ? " btn--disabled" : ""}`}
-            onClick={busy || !viewId || repoCount === 0 ? undefined : handleCreate}
-          >
-            {busy ? "Creating..." : "Create"}
-          </div>
-          <div className="btn btn--gray" onClick={onClose}>
-            Cancel
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function SlatesPage() {
   const { slates, views } = useLoaderData() as Awaited<
     ReturnType<typeof slatesLoader>
   >;
   const navigate = useNavigate();
   const revalidator = useRevalidator();
-  const [modalOpen, setModalOpen] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const activeView = useActiveView(views);
 
   const refresh = () => revalidator.revalidate();
+
+  // Every slate belongs to a view, so creation is only possible when a
+  // view tab (not "All") is selected — and only if that view has repos.
+  const disabledReason = !activeView
+    ? "Select a view tab to create a slate in it"
+    : activeView.repo_ids.length === 0
+      ? "This view has no repos — add repos to it on the Settings page first"
+      : null;
+  const canCreate = !disabledReason && !creating;
+
+  const handleCreate = async () => {
+    if (!activeView) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const slate = await createSlate({ view_id: activeView.id });
+      navigate(`/slates/${slate.id}`);
+    } catch (e: any) {
+      setCreateError(e.message);
+      setCreating(false);
+    }
+  };
 
   // A slate is "in" a view iff its view_id matches — that's the view the
   // slate was created from. Slates with view_id = null (legacy slates, or
@@ -192,24 +128,21 @@ export default function SlatesPage() {
     <>
       <div className="page-header">
         <div className="page-title">Slates</div>
-        <div
-          className="btn btn--blue"
-          onClick={() => setModalOpen(true)}
-        >
-          New Slate
+        {/* title lives on the wrapper: .btn--disabled sets pointer-events:
+            none, which would swallow the tooltip on the button itself */}
+        <div title={disabledReason ?? undefined}>
+          <div
+            className={`btn btn--blue${canCreate ? "" : " btn--disabled"}`}
+            onClick={canCreate ? handleCreate : undefined}
+          >
+            {creating ? "Creating..." : "New Slate"}
+          </div>
         </div>
       </div>
 
       <ViewFilter views={views} />
 
-      {modalOpen && (
-        <NewSlateModal
-          views={views}
-          defaultViewId={activeView ? activeView.id : null}
-          onClose={() => setModalOpen(false)}
-          onCreated={(slate) => navigate(`/slates/${slate.id}`)}
-        />
-      )}
+      {createError && <div className="error-banner">{createError}</div>}
 
       {visibleSlates.length === 0 ? (
         <div className="empty-state">
