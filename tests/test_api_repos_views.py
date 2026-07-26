@@ -189,6 +189,24 @@ async def test_update_repo_copy_globs_validated(client):
     assert refetched.copy_globs == ["secret.txt"]
 
 
+async def test_repo_metr_flag_roundtrips(client, tmp_path):
+    c, _, _ = client
+    from server import db
+
+    resp = await c.post(
+        "/repos",
+        json={"id": "study", "path": str(tmp_path), "kind": "local", "metr": True},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["metr"] is True
+
+    resp = await c.put("/repos/study", json={"metr": False})
+    assert resp.status_code == 200
+    assert resp.json()["metr"] is False
+    refetched = await db.get_repo("study")
+    assert refetched.metr is False
+
+
 async def test_delete_repo_cascade(client, mock_pty, tmp_path):
     """Deleting a repo deletes its worktops and removes it from views."""
     c, git_env, _ = client

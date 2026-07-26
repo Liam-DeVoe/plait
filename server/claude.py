@@ -11,6 +11,7 @@ PLAIT_PORT = 57381
 PLAIT_ROOT = Path(__file__).parent.parent
 PROMPTS_PATH = PLAIT_ROOT / "prompts.toml"
 CLAUDE_FILES_SRC = PLAIT_ROOT / "claude_files"
+METR_CLAUDE_FILES_SRC = PLAIT_ROOT / "claude_files_metr"
 
 
 def install_claude_files(worktree_path: str | Path) -> None:
@@ -40,6 +41,34 @@ def install_claude_files(worktree_path: str | Path) -> None:
         settings.write_text(
             settings.read_text().replace("{worktree_root}", str(worktree))
         )
+
+
+def install_metr_claude_files(
+    worktree_path: str | Path, worktop_id: str, repo_id: str
+) -> None:
+    """Install the /metr-reinstall skill into a metr repo's worktop.
+
+    Worktrees of metr repos are created with the study content stripped
+    (see server/metr.py); this skill is how a worktree opts back in. It
+    lives in `claude_files_metr/` — separate from `claude_files/` so it
+    only ever reaches worktrees of metr-flagged repos — and is rendered
+    with the worktop id, plait's base URL, and the canonical clone path
+    so the skill can copy the study files back and call the
+    tends-enabled hook without any discovery work.
+    """
+    worktree = Path(worktree_path).resolve()
+    claude_dir = worktree / ".claude"
+    shutil.copytree(METR_CLAUDE_FILES_SRC, claude_dir, dirs_exist_ok=True)
+    skill = claude_dir / "skills" / "metr-reinstall" / "SKILL.md"
+    text = skill.read_text()
+    substitutions = {
+        "{worktop_id}": worktop_id,
+        "{base_url}": f"http://localhost:{PLAIT_PORT}",
+        "{repo_path}": str(config.get_repo(repo_id).path),
+    }
+    for placeholder, value in substitutions.items():
+        text = text.replace(placeholder, value)
+    skill.write_text(text)
 
 
 def _load_prompts() -> dict:
@@ -98,6 +127,8 @@ async def write_worktop_claude_md(
         f.write(f"\n{content}\n")
 
     install_claude_files(worktree_path)
+    if config.get_repo(repo_id).metr:
+        install_metr_claude_files(worktree_path, worktop_id, repo_id)
 
 
 def plait_system_prompt() -> str:

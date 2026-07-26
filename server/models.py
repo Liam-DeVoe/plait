@@ -118,6 +118,11 @@ class Repo:
     # worktree plait creates for this repo. Validated loudly: a glob that
     # matches nothing, or matches a file that isn't gitignored, is an error.
     copy_globs: list[str] = field(default_factory=list)
+    # True if the canonical clone participates in a METR study (ccmetr
+    # tooling installed in its .claude/). Worktrees plait creates for a
+    # metr repo have the study content stripped (see server/metr.py) and
+    # get a /metr-reinstall skill to opt back in per-worktree.
+    metr: bool = False
 
 
 @dataclass

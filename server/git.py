@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from server import config
+from server import config, metr
 from server.models import MergeableState
 
 WORKTREE_ROOT = Path(__file__).parent.parent / "worktrees"
@@ -289,6 +289,11 @@ async def copy_local_files(repo_id: str, dest: str | Path) -> None:
     - the repo's configured `copy_globs` (see resolve_copy_globs, which
       errors loudly on drift)
 
+    For metr repos, METR study content is stripped: ccmetr tooling and
+    /metr-* skills are skipped, and the study's keys are filtered out of
+    the two settings files the METR installer merged into (see
+    server/metr.py). Worktrees opt back in via /metr-reinstall.
+
     Runs *before* plait's own claude_files overlay so plait's guardrails
     win any path collision.
     """
@@ -302,9 +307,17 @@ async def copy_local_files(repo_id: str, dest: str | Path) -> None:
     if rc != 0:
         raise RuntimeError(f"git ls-files failed in {repo_id!r}: {err}")
     files.update(p for p in out.split("\0") if p)
+    if repo.metr:
+        files = {f for f in files if not metr.is_metr_path(f)}
     dest = Path(dest)
     for rel in sorted(files):
         target = dest / rel
+        if repo.metr and rel in metr.SETTINGS_FILES:
+            filtered = metr.strip_settings((repo.path / rel).read_text())
+            if filtered is not None:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(filtered)
+            continue
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(repo.path / rel, target)
 
