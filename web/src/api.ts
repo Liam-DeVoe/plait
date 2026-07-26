@@ -80,6 +80,7 @@ export interface Repo {
   kind: "remote" | "local";
   position: number;
   copy_globs: string[];
+  metr: boolean;
 }
 
 const BASE = "/api";
@@ -116,6 +117,7 @@ export interface CreateRepoBody {
   kind: "remote" | "local";
   upstream?: string | null;
   copy_globs?: string[];
+  metr?: boolean;
 }
 
 export async function createRepo(body: CreateRepoBody): Promise<Repo & { warning?: string }> {
@@ -136,6 +138,7 @@ export interface UpdateRepoBody {
   upstream?: string | null;
   kind?: "remote" | "local";
   copy_globs?: string[];
+  metr?: boolean;
 }
 
 export async function updateRepo(id: string, body: UpdateRepoBody): Promise<Repo> {

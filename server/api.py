@@ -133,6 +133,7 @@ def _repo_dict(repo: Repo) -> dict:
         "kind": repo.kind,
         "position": repo.position,
         "copy_globs": repo.copy_globs,
+        "metr": repo.metr,
     }
 
 
@@ -180,6 +181,7 @@ class CreateRepoRequest(BaseModel):
     kind: str = "remote"
     upstream: str | None = None
     copy_globs: list[str] = []
+    metr: bool = False
 
 
 @app.post("/repos")
@@ -209,6 +211,7 @@ async def create_repo(req: CreateRepoRequest):
         upstream=req.upstream,
         position=position,
         copy_globs=req.copy_globs,
+        metr=req.metr,
     )
     await db.create_repo(repo)
     await config.refresh()
@@ -232,6 +235,7 @@ class UpdateRepoRequest(BaseModel):
     upstream: str | None = None
     kind: str | None = None
     copy_globs: list[str] | None = None
+    metr: bool | None = None
 
 
 @app.put("/repos/{repo_id}")
@@ -268,6 +272,8 @@ async def update_repo(repo_id: str, req: UpdateRepoRequest):
         updates["upstream"] = new_upstream
     if req.copy_globs is not None:
         updates["copy_globs"] = req.copy_globs
+    if req.metr is not None:
+        updates["metr"] = int(req.metr)
 
     if not updates:
         return _repo_dict(repo)

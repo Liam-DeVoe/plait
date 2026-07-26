@@ -76,6 +76,19 @@ repo's local-only files from the canonical clone, via
 The copy runs before plait's `claude_files/` overlay, so plait's
 guardrails win path collisions.
 
+**METR study repos.** A repo flagged `metr` (Settings checkbox) has
+METR's ccmetr study tooling installed in its canonical clone's
+`.claude/` — hooks and env settings that route every Claude session
+through the study gateway. Worktrees plait creates for such a repo are
+stripped of the study content (`server/metr.py` knows its shape: the
+`ccmetr/` tooling, `/metr-*` skills, and study keys inside the two
+settings files, which are filtered key-by-key so non-study content
+survives). Worktops of metr repos get a `/metr-repopulate` skill
+(from `claude_files_metr/`, rendered by
+`claude.install_metr_claude_files`) that copies the study content back
+from the canonical clone and disables auto-tends for the worktop, so
+plait automation never runs through the study gateway.
+
 **Migration from the old `config.toml`.** A one-shot script
 (`seed_db.py`) copies `[repos.*]` + `author` into the DB and drops the
 legacy `repo_order` table. Idempotent — bails if the `repos` table is

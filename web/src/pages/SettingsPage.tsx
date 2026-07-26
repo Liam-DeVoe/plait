@@ -106,6 +106,7 @@ function RepoRow({
     upstream?: string | null;
     kind?: "remote" | "local";
     copy_globs?: string[];
+    metr?: boolean;
   }) => Promise<void>;
   onDelete: () => Promise<void>;
   onDragStart: (e: DragEvent<HTMLElement>) => void;
@@ -120,6 +121,7 @@ function RepoRow({
   const [kind, setKind] = useState<"remote" | "local">(repo.kind);
   const [upstream, setUpstream] = useState(repo.upstream ?? "");
   const [copyGlobs, setCopyGlobs] = useState(repo.copy_globs.join("\n"));
+  const [metr, setMetr] = useState(repo.metr);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -130,14 +132,16 @@ function RepoRow({
       setKind(repo.kind);
       setUpstream(repo.upstream ?? "");
       setCopyGlobs(repo.copy_globs.join("\n"));
+      setMetr(repo.metr);
     }
-  }, [repo.id, repo.path, repo.kind, repo.upstream, repo.copy_globs.join("\n"), editing]);
+  }, [repo.id, repo.path, repo.kind, repo.upstream, repo.copy_globs.join("\n"), repo.metr, editing]);
 
   const beginEdit = () => {
     setPath(repo.path);
     setKind(repo.kind);
     setUpstream(repo.upstream ?? "");
     setCopyGlobs(repo.copy_globs.join("\n"));
+    setMetr(repo.metr);
     setEditing(true);
     setError(null);
   };
@@ -151,6 +155,7 @@ function RepoRow({
         kind,
         upstream: kind === "local" ? null : upstream,
         copy_globs: parseGlobs(copyGlobs),
+        metr,
       });
       setEditing(false);
     } catch (e: any) {
@@ -191,7 +196,18 @@ function RepoRow({
           </span>
         </td>
         <td className="table__worktop">
-          <div style={{ fontWeight: 500 }}>{repo.id}</div>
+          <div style={{ fontWeight: 500 }}>
+            {repo.id}
+            {repo.metr && (
+              <span
+                className="muted"
+                title="Canonical clone is a METR study participant; study content is stripped from new worktrees (opt back in with /metr-repopulate)"
+                style={{ marginLeft: 8, fontSize: 11, fontWeight: 400 }}
+              >
+                METR
+              </span>
+            )}
+          </div>
           {!editing && error && (
             <div className="error-banner" style={{ marginTop: 8 }}>
               {error}
@@ -290,6 +306,30 @@ function RepoRow({
                   line. Untracked .claude/ files are copied automatically.
                 </div>
               </div>
+              <label className="repos-page__edit-label">METR study</label>
+              <div>
+                <label
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    fontSize: 13,
+                    cursor: "pointer",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={metr}
+                    onChange={(e) => setMetr(e.target.checked)}
+                  />
+                  Canonical clone is a METR study participant
+                </label>
+                <div className="repos-page__edit-hint">
+                  Study content (ccmetr tooling, /metr-* skills, gateway
+                  settings) is stripped from new worktrees. Opt a worktree
+                  back in with /metr-repopulate.
+                </div>
+              </div>
             </div>
             <div className="form__actions" style={{ marginTop: 12 }}>
               <div
@@ -322,6 +362,7 @@ function NewRepoForm({ onCreated }: { onCreated: () => void }) {
   const [kind, setKind] = useState<"remote" | "local">("remote");
   const [upstream, setUpstream] = useState("");
   const [copyGlobs, setCopyGlobs] = useState("");
+  const [metr, setMetr] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -331,6 +372,7 @@ function NewRepoForm({ onCreated }: { onCreated: () => void }) {
     setKind("remote");
     setUpstream("");
     setCopyGlobs("");
+    setMetr(false);
     setError(null);
   };
 
@@ -344,6 +386,7 @@ function NewRepoForm({ onCreated }: { onCreated: () => void }) {
         kind,
         upstream: kind === "local" ? null : upstream.trim(),
         copy_globs: parseGlobs(copyGlobs),
+        metr,
       });
       reset();
       setOpen(false);
@@ -411,6 +454,16 @@ function NewRepoForm({ onCreated }: { onCreated: () => void }) {
         className="form__input form__input--full"
         style={{ fontFamily: "monospace", fontSize: 12, minHeight: 56 }}
       />
+      <label
+        style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, cursor: "pointer" }}
+      >
+        <input
+          type="checkbox"
+          checked={metr}
+          onChange={(e) => setMetr(e.target.checked)}
+        />
+        METR study participant (study content stripped from worktrees)
+      </label>
       <div className="form__actions">
         <div
           className={`btn btn--blue${busy ? " btn--disabled" : ""}`}

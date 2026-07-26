@@ -83,7 +83,8 @@ CREATE TABLE IF NOT EXISTS repos (
     upstream TEXT,
     position INTEGER NOT NULL,
     created_at TEXT NOT NULL,
-    copy_globs TEXT NOT NULL DEFAULT '[]'
+    copy_globs TEXT NOT NULL DEFAULT '[]',
+    metr INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS views (
@@ -492,6 +493,7 @@ def _row_to_repo(row: aiosqlite.Row) -> Repo:
         position=row["position"],
         created_at=row["created_at"],
         copy_globs=json.loads(row["copy_globs"]),
+        metr=bool(row["metr"]),
     )
 
 
@@ -513,8 +515,8 @@ async def create_repo(repo: Repo) -> Repo:
     db = await get_db()
     await db.execute(
         """INSERT INTO repos (id, path, kind, upstream, position, created_at,
-                              copy_globs)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                              copy_globs, metr)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             repo.id,
             str(repo.path),
@@ -523,6 +525,7 @@ async def create_repo(repo: Repo) -> Repo:
             repo.position,
             repo.created_at,
             json.dumps(repo.copy_globs),
+            int(repo.metr),
         ),
     )
     await db.commit()
