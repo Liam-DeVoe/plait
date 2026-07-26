@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from hypothesis import given, settings, strategies as st
-
 from server import db
 from server.models import (
     CIStatus,

@@ -62,10 +62,11 @@ count is persisted on the worktop but does not trigger tends).
 repo's local-only files from the canonical clone, via
 `git.copy_local_files`:
 
-- **`.claude/`, automatically.** Every *untracked* file under the
-  canonical clone's `.claude/` (gitignored or not) is copied, so local
-  Claude config follows the repo with zero configuration. Tracked
-  `.claude/` files are skipped — those come from the branch checkout.
+- **`.claude/` and `.vscode/`, automatically.** Every *untracked* file
+  under the canonical clone's `.claude/` and `.vscode/` (gitignored or
+  not) is copied, so local Claude and editor config follows the repo with
+  zero configuration. Tracked files under those dirs are skipped — those
+  come from the branch checkout.
 - **`copy_globs`, opt-in.** Each repo can list globs (relative to the
   canonical clone) of *gitignored* files to copy — for local files
   outside `.claude/` (e.g. `.env`). Drift fails loudly: a glob that

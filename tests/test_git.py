@@ -401,11 +401,13 @@ async def test_copy_local_files_copies_glob_matches(git_env, tmp_path):
 
 
 async def test_copy_local_files_copies_untracked_claude_dir(git_env, tmp_path):
-    """All untracked .claude/ files are copied automatically — gitignored
-    or plain-untracked — with no copy_globs configuration needed."""
+    """All untracked .claude/ and .vscode/ files are copied automatically —
+    gitignored or plain-untracked — with no copy_globs configuration needed."""
     _seed_ignored_files(git_env)
     # Plain-untracked (not gitignored) file under .claude/.
     (git_env.clone / ".claude" / "settings.local.json").write_text("{}")
+    (git_env.clone / ".vscode").mkdir()
+    (git_env.clone / ".vscode" / "settings.json").write_text('{"a": 1}')
 
     dest = tmp_path / "dest"
     await git.copy_local_files(git_env.repo_id, dest)
@@ -413,7 +415,8 @@ async def test_copy_local_files_copies_untracked_claude_dir(git_env, tmp_path):
     assert (dest / ".claude/local/notes.md").read_text() == "private notes"
     assert (dest / ".claude/local/sub/deep.md").read_text() == "deep"
     assert (dest / ".claude/settings.local.json").read_text() == "{}"
-    # Files outside .claude/ need an explicit copy_glob.
+    assert (dest / ".vscode/settings.json").read_text() == '{"a": 1}'
+    # Files outside .claude/ and .vscode/ need an explicit copy_glob.
     assert not (dest / "secret.txt").exists()
 
 

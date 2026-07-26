@@ -281,10 +281,11 @@ async def copy_local_files(repo_id: str, dest: str | Path) -> None:
     """Copy the repo's local-only files into a worktree.
 
     Two sources, both resolved against the canonical clone:
-    - every untracked file under `.claude/` (gitignored or not), so local
-      Claude config follows the repo into every worktree automatically.
-      Tracked `.claude/` files are excluded — those come from the branch
-      checkout and must not be clobbered with the canonical clone's copy.
+    - every untracked file under `.claude/` and `.vscode/` (gitignored or
+      not), so local Claude and editor config follows the repo into every
+      worktree automatically. Tracked files under those dirs are excluded —
+      those come from the branch checkout and must not be clobbered with
+      the canonical clone's copy.
     - the repo's configured `copy_globs` (see resolve_copy_globs, which
       errors loudly on drift)
 
@@ -296,7 +297,7 @@ async def copy_local_files(repo_id: str, dest: str | Path) -> None:
     # `--others` without `--exclude-standard` lists all untracked files,
     # including gitignored ones.
     rc, out, err = await run(
-        "git", "ls-files", "-z", "--others", "--", ".claude", cwd=repo.path
+        "git", "ls-files", "-z", "--others", "--", ".claude", ".vscode", cwd=repo.path
     )
     if rc != 0:
         raise RuntimeError(f"git ls-files failed in {repo_id!r}: {err}")
