@@ -17,7 +17,7 @@ metr-free:
   files the METR installer merged into, preserving everything else in
   them (e.g. the user's own permissions).
 
-Opting a worktree back into the study is done by the /metr-repopulate
+Opting a worktree back into the study is done by the /metr-reinstall
 skill (see claude.install_metr_claude_files), which copies the content
 back from the canonical clone and disables auto-tends for the worktop.
 

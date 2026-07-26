@@ -46,7 +46,7 @@ def install_claude_files(worktree_path: str | Path) -> None:
 def install_metr_claude_files(
     worktree_path: str | Path, worktop_id: str, repo_id: str
 ) -> None:
-    """Install the /metr-repopulate skill into a metr repo's worktop.
+    """Install the /metr-reinstall skill into a metr repo's worktop.
 
     Worktrees of metr repos are created with the study content stripped
     (see server/metr.py); this skill is how a worktree opts back in. It
@@ -59,7 +59,7 @@ def install_metr_claude_files(
     worktree = Path(worktree_path).resolve()
     claude_dir = worktree / ".claude"
     shutil.copytree(METR_CLAUDE_FILES_SRC, claude_dir, dirs_exist_ok=True)
-    skill = claude_dir / "skills" / "metr-repopulate" / "SKILL.md"
+    skill = claude_dir / "skills" / "metr-reinstall" / "SKILL.md"
     text = skill.read_text()
     substitutions = {
         "{worktop_id}": worktop_id,

@@ -1,8 +1,8 @@
-"""METR study stripping and the /metr-repopulate opt-in skill.
+"""METR study stripping and the /metr-reinstall opt-in skill.
 
 A repo flagged `metr` has METR's ccmetr study tooling in its canonical
 clone's .claude/. Worktrees plait creates for it must come up metr-free
-(no study hooks, no gateway routing), with a /metr-repopulate skill to
+(no study hooks, no gateway routing), with a /metr-reinstall skill to
 opt back in per-worktree.
 """
 
@@ -163,17 +163,17 @@ async def test_copy_local_files_copies_study_content_for_non_metr_repo(
     assert "statusLine" in settings
 
 
-# --- /metr-repopulate skill install ---
+# --- /metr-reinstall skill install ---
 
 
-async def test_metr_repo_worktop_gets_repopulate_skill(git_env):
+async def test_metr_repo_worktop_gets_reinstall_skill(git_env):
     _seed_study_clone(git_env)
     config.get_repo(git_env.repo_id).metr = True
 
     wt = Path(await git.create_worktree(git_env.repo_id, "metr-branch", "wt-metr"))
     await claude.write_worktop_claude_md(str(wt), "wt-metr", git_env.repo_id)
 
-    skill = wt / ".claude" / "skills" / "metr-repopulate" / "SKILL.md"
+    skill = wt / ".claude" / "skills" / "metr-reinstall" / "SKILL.md"
     text = skill.read_text()
     # Placeholders are rendered: the worktop id, plait's URL, and the
     # canonical clone path all appear literally.
@@ -187,8 +187,8 @@ async def test_metr_repo_worktop_gets_repopulate_skill(git_env):
     assert '{"enabled": false}' in text
 
 
-async def test_non_metr_repo_worktop_has_no_repopulate_skill(git_env):
+async def test_non_metr_repo_worktop_has_no_reinstall_skill(git_env):
     wt = Path(await git.create_worktree(git_env.repo_id, "plain-branch", "wt-plain"))
     await claude.write_worktop_claude_md(str(wt), "wt-plain", git_env.repo_id)
 
-    assert not (wt / ".claude" / "skills" / "metr-repopulate").exists()
+    assert not (wt / ".claude" / "skills" / "metr-reinstall").exists()

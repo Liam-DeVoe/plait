@@ -291,7 +291,7 @@ async def copy_local_files(repo_id: str, dest: str | Path) -> None:
     For metr repos, METR study content is stripped: ccmetr tooling and
     /metr-* skills are skipped, and the study's keys are filtered out of
     the two settings files the METR installer merged into (see
-    server/metr.py). Worktrees opt back in via /metr-repopulate.
+    server/metr.py). Worktrees opt back in via /metr-reinstall.
 
     Runs *before* plait's own claude_files overlay so plait's guardrails
     win any path collision.

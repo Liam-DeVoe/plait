@@ -121,7 +121,7 @@ class Repo:
     # True if the canonical clone participates in a METR study (ccmetr
     # tooling installed in its .claude/). Worktrees plait creates for a
     # metr repo have the study content stripped (see server/metr.py) and
-    # get a /metr-repopulate skill to opt back in per-worktree.
+    # get a /metr-reinstall skill to opt back in per-worktree.
     metr: bool = False
 
 

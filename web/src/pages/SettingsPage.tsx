@@ -201,7 +201,7 @@ function RepoRow({
             {repo.metr && (
               <span
                 className="muted"
-                title="Canonical clone is a METR study participant; study content is stripped from new worktrees (opt back in with /metr-repopulate)"
+                title="Canonical clone is a METR study participant; study content is stripped from new worktrees (opt back in with /metr-reinstall)"
                 style={{ marginLeft: 8, fontSize: 11, fontWeight: 400 }}
               >
                 METR
@@ -327,7 +327,7 @@ function RepoRow({
                 <div className="repos-page__edit-hint">
                   Study content (ccmetr tooling, /metr-* skills, gateway
                   settings) is stripped from new worktrees. Opt a worktree
-                  back in with /metr-repopulate.
+                  back in with /metr-reinstall.
                 </div>
               </div>
             </div>

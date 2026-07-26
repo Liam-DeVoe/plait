@@ -83,7 +83,7 @@ through the study gateway. Worktrees plait creates for such a repo are
 stripped of the study content (`server/metr.py` knows its shape: the
 `ccmetr/` tooling, `/metr-*` skills, and study keys inside the two
 settings files, which are filtered key-by-key so non-study content
-survives). Worktops of metr repos get a `/metr-repopulate` skill
+survives). Worktops of metr repos get a `/metr-reinstall` skill
 (from `claude_files_metr/`, rendered by
 `claude.install_metr_claude_files`) that copies the study content back
 from the canonical clone and disables auto-tends for the worktop, so

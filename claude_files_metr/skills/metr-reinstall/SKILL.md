@@ -1,5 +1,5 @@
 ---
-name: metr-repopulate
+name: metr-reinstall
 description: Opt this worktree into the METR study. Copies the study tooling back from the canonical clone and disables plait's automatic tend sessions.
 disable-model-invocation: true
 ---
