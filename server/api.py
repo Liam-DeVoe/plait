@@ -648,6 +648,10 @@ async def review_pr(req: ReviewPRRequest):
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     claude.install_claude_files(worktree_path)
+    # copy_local_files stripped the study content from metr repos; give the
+    # reviewer the opt-back-in skill. No worktop id — reviews have no tends.
+    if config.get_repo(repo_id).metr:
+        claude.install_metr_claude_files(worktree_path, None, repo_id)
     main_branch = await git.main_branch(repo_id)
     main_ref = await git.main_ref(repo_id)
     prompt = claude.review_prompt(req.pr_url, pr_number, main_branch, main_ref)

@@ -128,9 +128,7 @@ def _seed_study_clone(git_env):
     (claude_dir / "settings.local.json.bak").write_text("{}")
 
 
-async def test_copy_local_files_strips_study_content_for_metr_repo(
-    git_env, tmp_path
-):
+async def test_copy_local_files_strips_study_content_for_metr_repo(git_env, tmp_path):
     _seed_study_clone(git_env)
     config.get_repo(git_env.repo_id).metr = True
 
@@ -185,6 +183,30 @@ async def test_metr_repo_worktop_gets_reinstall_skill(git_env):
     assert "{repo_path}" not in text
     # The JSON braces in the curl example survive the substitution.
     assert '{"enabled": false}' in text
+    # The worktop-only marker itself is rendered away.
+    assert "worktop-only" not in text
+
+
+async def test_metr_repo_review_worktree_gets_reinstall_skill(git_env, tmp_path):
+    _seed_study_clone(git_env)
+    config.get_repo(git_env.repo_id).metr = True
+
+    # Mirror the /review-pr path: copy (stripped) local files, then install
+    # the skill with no worktop id.
+    wt = tmp_path / "review"
+    await git.copy_local_files(git_env.repo_id, wt)
+    claude.install_metr_claude_files(wt, None, git_env.repo_id)
+
+    skill = wt / ".claude" / "skills" / "metr-reinstall" / "SKILL.md"
+    text = skill.read_text()
+    assert str(git_env.clone) in text
+    # No worktop: the tends step is dropped entirely, placeholders and all.
+    assert "tends-enabled" not in text
+    assert "{worktop_id}" not in text
+    assert "{base_url}" not in text
+    assert "worktop-only" not in text
+    # The steps that remain are intact.
+    assert "restart Claude Code" in text
 
 
 async def test_non_metr_repo_worktop_has_no_reinstall_skill(git_env):
