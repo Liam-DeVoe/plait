@@ -48,6 +48,44 @@ async def test_create_review_worktree(git_env):
     assert not await git.is_detached(wt_path)
     branch = git_env.run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=Path(wt_path))
     assert branch.strip() == f"plait/review-{git_env.repo_id}-42"
+    # The temporary fetch ref is cleaned up after the checkout.
+    assert git_env.run_git("for-each-ref", "refs/plait/").strip() == ""
+
+
+async def test_create_review_worktree_survives_concurrent_fetch(git_env, monkeypatch):
+    """A bare `git fetch` in the canonical clone (the daemon runs one per poll)
+    landing between the review's fetch and its `worktree add` must not change
+    what gets checked out. Regression test: the PR head used to be passed via
+    FETCH_HEAD, which a concurrent fetch rewrites clone-wide — a review once
+    checked out an ancient unrelated branch this way."""
+    # An unrelated branch that sorts first, so the racing bare fetch puts it on
+    # FETCH_HEAD's first line.
+    git_env.create_branch("aaa-unrelated")
+    git_env.add_commit("unrelated.txt", "junk", "unrelated work")
+    git_env.push("aaa-unrelated")
+    git_env.checkout("main")
+    git_env.create_branch("pr-branch-9", push=False)
+    git_env.add_commit("pr.txt", "from the PR", "pr work")
+    git_env.run_git("push", "origin", "HEAD:refs/pull/9/head")
+    git_env.checkout("main")
+
+    real_run = git.run
+
+    async def racing_run(*args, **kwargs):
+        result = await real_run(*args, **kwargs)
+        if any("pull/9/head" in str(a) for a in args):
+            # Simulate the daemon fetching right after the review's fetch.
+            await real_run("git", "fetch", "origin", cwd=kwargs["cwd"])
+        return result
+
+    monkeypatch.setattr(git, "run", racing_run)
+    wt = Path(
+        await git.create_review_worktree(
+            git_env.repo_id, 9, "pr-branch-9", str(git_env.remote)
+        )
+    )
+    assert (wt / "pr.txt").read_text() == "from the PR"
+    assert not (wt / "unrelated.txt").exists()
 
 
 async def test_create_review_worktree_push_updates_pr(git_env):
