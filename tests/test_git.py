@@ -433,6 +433,23 @@ async def test_copy_local_files_skips_tracked_claude_files(git_env, tmp_path):
     assert not (dest / ".claude/CLAUDE.md").exists()
 
 
+async def test_copy_local_files_skips_nested_git_worktrees(git_env, tmp_path):
+    """A nested git repo/worktree under .claude/ (e.g. Claude Code's
+    .claude/worktrees/) is listed by `git ls-files --others` as a bare
+    "dir/" entry — it must be skipped, not copied."""
+    _seed_ignored_files(git_env)
+    nested = git_env.clone / ".claude" / "worktrees" / "some-worktree"
+    nested.mkdir(parents=True)
+    git_env.run_git("init", cwd=nested)
+    (nested / "file.txt").write_text("nested content")
+
+    dest = tmp_path / "dest"
+    await git.copy_local_files(git_env.repo_id, dest)
+
+    assert (dest / ".claude/local/notes.md").exists()
+    assert not (dest / ".claude/worktrees").exists()
+
+
 async def test_copy_local_files_noop_without_claude_or_globs(git_env, tmp_path):
     dest = tmp_path / "dest"
     await git.copy_local_files(git_env.repo_id, dest)

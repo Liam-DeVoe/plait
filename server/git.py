@@ -306,7 +306,10 @@ async def copy_local_files(repo_id: str, dest: str | Path) -> None:
     )
     if rc != 0:
         raise RuntimeError(f"git ls-files failed in {repo_id!r}: {err}")
-    files.update(p for p in out.split("\0") if p)
+    # A directory containing its own .git (a nested repo or worktree, e.g.
+    # Claude Code worktrees under .claude/worktrees/) is listed as a single
+    # "dir/" entry rather than recursed into — skip those.
+    files.update(p for p in out.split("\0") if p and not p.endswith("/"))
     if repo.metr:
         files = {f for f in files if not metr.is_metr_path(f)}
     dest = Path(dest)

@@ -85,9 +85,7 @@ def strip_settings(text: str) -> str | None:
             if not isinstance(matchers, list):
                 continue
             for matcher in matchers:
-                if isinstance(matcher, dict) and isinstance(
-                    matcher.get("hooks"), list
-                ):
+                if isinstance(matcher, dict) and isinstance(matcher.get("hooks"), list):
                     matcher["hooks"] = [
                         h for h in matcher["hooks"] if not _is_ccmetr_command(h)
                     ]

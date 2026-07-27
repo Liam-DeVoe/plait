@@ -322,13 +322,7 @@ function RepoRow({
                     checked={metr}
                     onChange={(e) => setMetr(e.target.checked)}
                   />
-                  Canonical clone is a METR study participant
                 </label>
-                <div className="repos-page__edit-hint">
-                  Study content (ccmetr tooling, /metr-* skills, gateway
-                  settings) is stripped from new worktrees. Opt a worktree
-                  back in with /metr-reinstall.
-                </div>
               </div>
             </div>
             <div className="form__actions" style={{ marginTop: 12 }}>
