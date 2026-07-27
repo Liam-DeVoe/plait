@@ -565,17 +565,21 @@ async def create_review_worktree(
     local_branch = f"plait/review-{repo_id}-{pr_number}"
     remote = await upstream_remote(repo_id)
     # One fetch, two refspecs — one network round-trip instead of two. The PR
-    # head must come first: `git worktree add ... FETCH_HEAD` below resolves
-    # FETCH_HEAD to its *first* entry, which must be the PR head, not main.
+    # head lands in an explicit temporary ref, NOT FETCH_HEAD: FETCH_HEAD is a
+    # single file shared clone-wide, and a concurrent daemon `git fetch` in the
+    # same clone rewrites it — passing it to `worktree add` below once checked
+    # out an ancient unrelated branch. Forced (`+`) because the ref can linger
+    # from a crashed prior review of a PR whose head was since rewritten.
     # Fetching main too keeps the remote-tracking ref the review diffs against
     # (main_ref, e.g. origin/master) current — fetching it by name still
     # opportunistically updates that ref — rather than relying on whatever the
     # last daemon fetch left behind, which would silently inflate the diff.
+    pr_ref = f"refs/plait/review-{repo_id}-{pr_number}"
     rc, _, err = await run(
         "git",
         "fetch",
         remote,
-        f"pull/{pr_number}/head",
+        f"+pull/{pr_number}/head:{pr_ref}",
         await main_branch(repo_id),
         cwd=repo.path,
     )
@@ -590,9 +594,12 @@ async def create_review_worktree(
         "-B",
         local_branch,
         str(worktree_dir),
-        "FETCH_HEAD",
+        pr_ref,
         cwd=repo.path,
     )
+    # The temp ref has done its job (on success the local branch now holds the
+    # commit) — drop it either way so refs/plait/ doesn't accumulate.
+    await run("git", "update-ref", "-d", pr_ref, cwd=repo.path)
     if rc != 0:
         raise RuntimeError(f"Failed to create review worktree: {err}")
 
