@@ -1,6 +1,6 @@
 ---
 name: metr-reinstall
-description: Opt this worktree into the METR study. Copies the study tooling back from the canonical clone and disables plait's automatic tend sessions.
+description: Opt this worktree into the METR study by copying the study tooling back from the canonical clone.
 disable-model-invocation: true
 ---
 
@@ -27,15 +27,16 @@ worktree back in. Do the following:
    `settings.local.json` (from the METR_AUTH_TOKEN stash in the user's
    `~/.claude/settings.json`).
 
-4. Disable plait's automatic tend sessions for this worktop, so plait's
+4. Tell the user to restart Claude Code in this worktree to load the study
+   settings. Also note: this session and any earlier sessions in this
+   worktree never went through the study gateway, so they won't appear in
+   the study's transcripts.
+
+<!-- worktop-only -->
+5. Disable plait's automatic tend sessions for this worktop, so plait's
    background automation doesn't run through the study gateway:
    ```
    curl -s -X POST {base_url}/worktops/{worktop_id}/tends-enabled \
      -H 'Content-Type: application/json' -d '{"enabled": false}'
    ```
    (Manual tends triggered from the plait UI still work.)
-
-5. Tell the user to restart Claude Code in this worktree to load the study
-   settings. Also note: this session and any earlier sessions in this
-   worktree never went through the study gateway, so they won't appear in
-   the study's transcripts.

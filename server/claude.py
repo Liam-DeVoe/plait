@@ -12,6 +12,9 @@ PLAIT_ROOT = Path(__file__).parent.parent
 PROMPTS_PATH = PLAIT_ROOT / "prompts.toml"
 CLAUDE_FILES_SRC = PLAIT_ROOT / "claude_files"
 METR_CLAUDE_FILES_SRC = PLAIT_ROOT / "claude_files_metr"
+# Marks the start of the /metr-reinstall skill's worktop-only tail; dropped
+# when rendering the skill for a review worktree.
+_WORKTOP_ONLY_MARKER = "<!-- worktop-only -->"
 
 
 def install_claude_files(worktree_path: str | Path) -> None:
@@ -44,9 +47,9 @@ def install_claude_files(worktree_path: str | Path) -> None:
 
 
 def install_metr_claude_files(
-    worktree_path: str | Path, worktop_id: str, repo_id: str
+    worktree_path: str | Path, worktop_id: str | None, repo_id: str
 ) -> None:
-    """Install the /metr-reinstall skill into a metr repo's worktop.
+    """Install the /metr-reinstall skill into a metr repo's worktree.
 
     Worktrees of metr repos are created with the study content stripped
     (see server/metr.py); this skill is how a worktree opts back in. It
@@ -55,19 +58,23 @@ def install_metr_claude_files(
     with the worktop id, plait's base URL, and the canonical clone path
     so the skill can copy the study files back and call the
     tends-enabled hook without any discovery work.
+
+    Review worktrees aren't worktops — no id, no daemon, no tends to
+    disable. They pass worktop_id=None, which drops the skill's
+    worktop-only step instead of rendering it.
     """
     worktree = Path(worktree_path).resolve()
     claude_dir = worktree / ".claude"
     shutil.copytree(METR_CLAUDE_FILES_SRC, claude_dir, dirs_exist_ok=True)
     skill = claude_dir / "skills" / "metr-reinstall" / "SKILL.md"
     text = skill.read_text()
-    substitutions = {
-        "{worktop_id}": worktop_id,
-        "{base_url}": f"http://localhost:{PLAIT_PORT}",
-        "{repo_path}": str(config.get_repo(repo_id).path),
-    }
-    for placeholder, value in substitutions.items():
-        text = text.replace(placeholder, value)
+    if worktop_id is None:
+        text = text.split(_WORKTOP_ONLY_MARKER)[0].rstrip() + "\n"
+    else:
+        text = text.replace(f"{_WORKTOP_ONLY_MARKER}\n", "")
+        text = text.replace("{worktop_id}", worktop_id)
+        text = text.replace("{base_url}", f"http://localhost:{PLAIT_PORT}")
+    text = text.replace("{repo_path}", str(config.get_repo(repo_id).path))
     skill.write_text(text)
 
 

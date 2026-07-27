@@ -84,11 +84,12 @@ through the study gateway. Worktrees plait creates for such a repo are
 stripped of the study content (`server/metr.py` knows its shape: the
 `ccmetr/` tooling, `/metr-*` skills, and study keys inside the two
 settings files, which are filtered key-by-key so non-study content
-survives). Worktops of metr repos get a `/metr-reinstall` skill
-(from `claude_files_metr/`, rendered by
+survives). Worktops and review worktrees of metr repos get a
+`/metr-reinstall` skill (from `claude_files_metr/`, rendered by
 `claude.install_metr_claude_files`) that copies the study content back
-from the canonical clone and disables auto-tends for the worktop, so
-plait automation never runs through the study gateway.
+from the canonical clone; the worktop rendering also disables
+auto-tends for the worktop, so plait automation never runs through the
+study gateway (review worktrees have no tends, so that step is dropped).
 
 **Migration from the old `config.toml`.** A one-shot script
 (`seed_db.py`) copies `[repos.*]` + `author` into the DB and drops the
