@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from httpx import ASGITransport, AsyncClient
-
-from pathlib import Path
 
 from server import db, git, naming
 from server.api import app
@@ -77,6 +77,21 @@ async def test_signal_from_transcript(git_env, init_db):
     assert "please refactor the retry logic" in signal
 
 
+async def test_tend_transcripts_excluded(git_env, init_db):
+    """Daemon (tend) session transcripts are noise, not naming signal."""
+    worktop = await _create_worktop_in_db(git_env, "naming-tend", "naming-tend")
+    await db.create_session(
+        Session(
+            worktop_id=worktop.id,
+            role=SessionRole.daemon,
+            trigger="tend",
+            transcript="fixing CI failure in unrelated job",
+        )
+    )
+
+    assert await gather_signal(worktop) is None
+
+
 async def test_signal_without_worktree_uses_transcripts(init_db):
     """Archived worktops (no worktree on disk) are named from transcripts."""
     worktop = Worktop(repo="gone", branch="b", worktree_path="/nonexistent")
@@ -89,12 +104,16 @@ async def test_signal_without_worktree_uses_transcripts(init_db):
     assert "fix the flaky CI job" in signal
 
 
-async def test_transcript_truncated(git_env, init_db):
+async def test_long_transcript_sliced_to_head_and_tail(git_env, init_db):
     worktop = await _create_worktop_in_db(git_env, "naming-4", "naming-4")
-    await db.create_session(Session(worktop_id=worktop.id, transcript="x" * 100_000))
+    transcript = "H" * 50_000 + "T" * 50_000
+    await db.create_session(Session(worktop_id=worktop.id, transcript=transcript))
 
     signal = await gather_signal(worktop)
-    assert len(signal) < naming.TRANSCRIPT_HEAD_CHARS + 1000
+    budget = naming.TRANSCRIPT_HEAD_CHARS + naming.TRANSCRIPT_TAIL_CHARS
+    assert len(signal) < budget + 1000
+    assert "H" * naming.TRANSCRIPT_HEAD_CHARS in signal
+    assert "T" * naming.TRANSCRIPT_TAIL_CHARS in signal
 
 
 # --- maybe_name_worktop ---

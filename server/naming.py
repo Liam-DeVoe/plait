@@ -19,15 +19,18 @@ import tempfile
 from pathlib import Path
 
 from server import db, git
-from server.models import Worktop
+from server.models import SessionRole, Worktop
 
 logger = logging.getLogger(__name__)
 
 MODEL = "haiku"
 CLAUDE_TIMEOUT = 120  # seconds
-# Per-session cap on transcript characters fed to the naming model. The
-# start of a session (the task prompt) is the strongest signal.
-TRANSCRIPT_HEAD_CHARS = 4000
+# Per-session transcript slices fed to the naming model. The head holds
+# the task prompt (diluted by TUI chrome, hence the generous size); the
+# tail holds Claude's final summary of what was actually done — often
+# the best description of the work.
+TRANSCRIPT_HEAD_CHARS = 10_000
+TRANSCRIPT_TAIL_CHARS = 10_000
 # Reject model output longer than this as garbage.
 NAME_MAX_CHARS = 80
 
@@ -36,8 +39,22 @@ You are naming a unit of development work for display in a dashboard.
 Below is activity from a git worktree: commits (if any) and the start of
 each Claude session transcript (if any).
 
-Respond with ONLY a short title (3-8 words) describing the work — no
-quotes, no trailing punctuation, no explanation.
+Respond with ONLY the title — no quotes, no trailing punctuation, no
+explanation.
+
+Titles are terse noun phrases, 2-5 words:
+- telegraphic: drop filler verbs ("Implement", "Rewrite") and articles
+- abbreviate where natural: "auth", "dev", "docs", "+" for "and"
+- never include the repo/project name — it's shown next to the title
+- sentence case, but keep code identifiers verbatim (e.g. one_of)
+
+Examples of good titles:
+- Auto-name worktops
+- METR auth + session setup
+- Add anchor support to docs
+- one_of swarm testing
+- Strategy inversion
+- gtest integration + conformance tests
 
 {signal}
 """
@@ -71,13 +88,24 @@ async def gather_signal(worktop: Worktop) -> str | None:
         except Exception:
             logger.exception(f"Failed to gather git signal for worktop {worktop.id}")
 
-    sessions = await db.list_sessions(worktop.id)
+    # User sessions only: tend transcripts (role=daemon) are CI/merge
+    # noise that drowns out the actual task. Slate-spawned task sessions
+    # are role=user, so their task briefs are kept.
+    sessions = [
+        s for s in await db.list_sessions(worktop.id) if s.role is SessionRole.user
+    ]
     for i, session in enumerate(sessions):
         transcript = session.transcript.strip()
-        if transcript:
+        if not transcript:
+            continue
+        if len(transcript) <= TRANSCRIPT_HEAD_CHARS + TRANSCRIPT_TAIL_CHARS:
+            parts.append(f"## Session {i + 1} transcript\n{transcript}")
+        else:
             parts.append(
-                f"## Session {i + 1} transcript (truncated)\n"
-                f"{transcript[:TRANSCRIPT_HEAD_CHARS]}"
+                f"## Session {i + 1} transcript (middle elided)\n"
+                f"{transcript[:TRANSCRIPT_HEAD_CHARS]}\n"
+                f"[...]\n"
+                f"{transcript[-TRANSCRIPT_TAIL_CHARS:]}"
             )
 
     if not parts:
