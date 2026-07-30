@@ -12,6 +12,11 @@ from server.models import Session, SessionRole, Worktop
 from server.naming import _sanitize, gather_signal, maybe_name_worktop
 
 
+def _padded(text: str) -> str:
+    """Pad a transcript past the minimum-signal threshold."""
+    return text + "\n" + "x" * naming.MIN_TRANSCRIPT_SIGNAL_CHARS
+
+
 async def _create_worktop_in_db(git_env, branch: str, worktop_id: str) -> Worktop:
     wt_path = await git.create_worktree(git_env.repo_id, branch, worktop_id)
     worktop = Worktop(
@@ -69,12 +74,27 @@ async def test_signal_from_transcript(git_env, init_db):
         Session(
             worktop_id=worktop.id,
             role=SessionRole.user,
-            transcript="please refactor the retry logic",
+            transcript=_padded("please refactor the retry logic"),
         )
     )
 
     signal = await gather_signal(worktop)
     assert "please refactor the retry logic" in signal
+
+
+async def test_short_transcript_not_signal(git_env, init_db):
+    """Sub-threshold transcripts (failed resumes, bare TUI banners) are
+    contentless — naming from them confabulates."""
+    worktop = await _create_worktop_in_db(git_env, "naming-short", "naming-short")
+    await db.create_session(
+        Session(
+            worktop_id=worktop.id,
+            role=SessionRole.user,
+            transcript="No conversation found with session ID: 1f9e43fc",
+        )
+    )
+
+    assert await gather_signal(worktop) is None
 
 
 async def test_tend_transcripts_excluded(git_env, init_db):
@@ -85,7 +105,7 @@ async def test_tend_transcripts_excluded(git_env, init_db):
             worktop_id=worktop.id,
             role=SessionRole.daemon,
             trigger="tend",
-            transcript="fixing CI failure in unrelated job",
+            transcript=_padded("fixing CI failure in unrelated job"),
         )
     )
 
@@ -97,7 +117,7 @@ async def test_signal_without_worktree_uses_transcripts(init_db):
     worktop = Worktop(repo="gone", branch="b", worktree_path="/nonexistent")
     await db.create_worktop(worktop)
     await db.create_session(
-        Session(worktop_id=worktop.id, transcript="fix the flaky CI job")
+        Session(worktop_id=worktop.id, transcript=_padded("fix the flaky CI job"))
     )
 
     signal = await gather_signal(worktop)
@@ -152,6 +172,19 @@ async def test_model_failure_leaves_unnamed(git_env, init_db, mock_namer):
     worktop = await _create_worktop_in_db(git_env, "naming-8", "naming-8")
     git_env.add_commit("f.py", "x", "add feature", cwd=Path(worktop.worktree_path))
     mock_namer.return_value = None  # claude call failed
+
+    assert await maybe_name_worktop(worktop) is None
+    fetched = await db.get_worktop(worktop.id)
+    assert fetched.name is None
+
+
+@pytest.mark.parametrize("declined", ["UNKNOWN", "unknown", "Unknown."])
+async def test_unknown_output_leaves_unnamed(git_env, init_db, mock_namer, declined):
+    """UNKNOWN is the model's escape hatch for signal with no discernible
+    task; the worktop stays unnamed and is retried next tick."""
+    worktop = await _create_worktop_in_db(git_env, "naming-unk", "naming-unk")
+    git_env.add_commit("f.py", "x", "add feature", cwd=Path(worktop.worktree_path))
+    mock_namer.return_value = declined
 
     assert await maybe_name_worktop(worktop) is None
     fetched = await db.get_worktop(worktop.id)
