@@ -141,6 +141,11 @@ export default function SlateDetailPage() {
               <td className="table__worktop">
                 <div className="slate-detail__worktop-repo">
                   {worktop.repo}
+                  {worktop.name && (
+                    <span className="slate-detail__worktop-name">
+                      {" — "}{worktop.name}
+                    </span>
+                  )}
                 </div>
                 <div className="slate-detail__worktop-branch">
                   {worktop.branch}

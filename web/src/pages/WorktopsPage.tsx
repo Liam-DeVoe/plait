@@ -60,6 +60,11 @@ function WorktopRow({
       onClick={(e) => navigateTo(e, `/worktops/${worktop.id}`, navigate)}
     >
       <td className="table__worktop">
+        <div
+          className={`worktop-row__name${worktop.name ? "" : " worktop-row__name--untitled"}`}
+        >
+          {worktop.name ?? "untitled"}
+        </div>
         <div className="worktop-row__branch">{worktop.branch}</div>
       </td>
       <td className="table__worktop">

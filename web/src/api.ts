@@ -2,6 +2,7 @@ export interface Worktop {
   id: string;
   slate_id: string | null;
   repo: string;
+  name: string | null;
   branch: string;
   worktree_path: string;
   pr_number: number | null;
@@ -290,6 +291,19 @@ export async function setTendsEnabled(id: string, enabled: boolean): Promise<Wor
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.detail || "Failed to update auto-tend setting");
+  }
+  return res.json();
+}
+
+export async function renameWorktop(id: string, name: string | null): Promise<Worktop> {
+  const res = await fetch(`${BASE}/worktops/${id}/name`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.detail || "Failed to rename worktop");
   }
   return res.json();
 }

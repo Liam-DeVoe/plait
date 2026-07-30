@@ -386,6 +386,24 @@ def mock_claude():
         yield mock
 
 
+# --- Mock naming model ---
+
+
+@pytest.fixture(autouse=True)
+def mock_namer():
+    """Mock the headless claude call used for auto-naming worktops.
+
+    Defaults to returning None (no name produced), so the daemon's naming
+    pass is a no-op in existing tests. Naming tests set
+    `mock.return_value = "Some name"`.
+    """
+    import server.naming as naming_module
+
+    mock = AsyncMock(return_value=None)
+    with patch.object(naming_module, "_run_claude", mock):
+        yield mock
+
+
 # --- Mock PTY manager ---
 
 

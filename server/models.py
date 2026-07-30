@@ -62,6 +62,10 @@ class Worktop:
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     slate_id: str | None = None
     repo: str = ""  # repo ID; references repos.id in the DB
+    # Display name shown in the UI. None means unnamed; the daemon
+    # auto-names unnamed worktops (see server/naming.py) and the user can
+    # rename or clear it via the API. Independent of `branch`.
+    name: str | None = None
     branch: str = ""
     worktree_path: str = ""
     pr_number: int | None = None

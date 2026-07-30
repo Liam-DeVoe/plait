@@ -493,9 +493,21 @@
   border-left: 2px solid #f87171;
 }
 
-.worktop-row__branch {
+.worktop-row__name {
   font-weight: 500;
   color: #111827;
+}
+
+.worktop-row__name--untitled {
+  font-weight: 400;
+  font-style: italic;
+  color: #858d97;
+}
+
+.worktop-row__branch {
+  font-size: 13px;
+  line-height: 18px;
+  color: #6b7280;
 }
 
 .worktop-row__no-pr {
@@ -633,9 +645,36 @@
   margin-bottom: 8px;
 }
 
-.worktop-detail__title-branch {
-  color: #858d97;
+.worktop-detail__title-name {
+  color: #374151;
   font-weight: 400;
+  cursor: pointer;
+}
+
+.worktop-detail__title-name:hover {
+  text-decoration: underline dotted;
+}
+
+.worktop-detail__title-name--untitled {
+  color: #858d97;
+  font-style: italic;
+}
+
+.worktop-detail__name-input {
+  font: inherit;
+  font-weight: 400;
+  color: #374151;
+  border: 1px solid #d0d7de;
+  border-radius: 6px;
+  padding: 0 6px;
+  min-width: 320px;
+}
+
+.worktop-detail__branch {
+  color: #858d97;
+  font-size: 13px;
+  line-height: 18px;
+  margin-bottom: 8px;
 }
 
 .worktop-detail__badges {
@@ -959,6 +998,11 @@
 .slate-detail__worktop-repo {
   font-weight: 500;
   color: #111827;
+}
+
+.slate-detail__worktop-name {
+  font-weight: 400;
+  color: #374151;
 }
 
 .slate-detail__worktop-branch {

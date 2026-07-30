@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS worktops (
     id TEXT PRIMARY KEY,
     slate_id TEXT,
     repo TEXT NOT NULL,
+    name TEXT,
     branch TEXT NOT NULL,
     worktree_path TEXT NOT NULL,
     pr_number INTEGER,
@@ -159,16 +160,17 @@ async def init_db() -> None:
 async def create_worktop(worktop: Worktop) -> Worktop:
     db = await get_db()
     await db.execute(
-        """INSERT INTO worktops (id, slate_id, repo, branch, worktree_path,
+        """INSERT INTO worktops (id, slate_id, repo, name, branch, worktree_path,
            pr_number, pr_url, ci_status, ci_failure_expected_sha,
            pr_comment_count, pr_reaction_count,
            sync_status, status, created_at, archived_at, archive_reason,
            last_activity_at, tends_enabled)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             worktop.id,
             worktop.slate_id,
             worktop.repo,
+            worktop.name,
             worktop.branch,
             worktop.worktree_path,
             worktop.pr_number,
@@ -240,6 +242,7 @@ def _row_to_worktop(row: aiosqlite.Row) -> Worktop:
         id=row["id"],
         slate_id=row["slate_id"],
         repo=row["repo"],
+        name=row["name"],
         branch=row["branch"],
         worktree_path=row["worktree_path"],
         pr_number=row["pr_number"],

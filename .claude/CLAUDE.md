@@ -116,6 +116,7 @@ The FastAPI app (`server/api.py`) starts the daemon and a WebSocket broadcaster 
 ### Daemon Processing Pipeline
 
 For each active worktop, `daemon.process_worktop()`:
+0. Auto-name the worktop if it has no display name yet (`server/naming.py`): gathers signal (commits vs main, session transcripts) and asks haiku via a headless `claude -p` call for a short title. Skipped when there's no signal; not gated on `tends_enabled`. The user can rename (or clear, to re-trigger naming) via `PUT /worktops/{id}/name`.
 1. `git.fetch_upstream()` then `git.is_behind_main()` — if behind, merge
 2. `git.merge_from_main()` — if clean, push (only if branch is published); if conflicts, mark conflict status
 3. Auto-archive if PR is merged/closed
