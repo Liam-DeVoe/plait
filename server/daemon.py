@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from server import config, db, git
+from server import config, db, git, naming
 from server.models import (
     CIStatus,
     MergeableState,
@@ -195,6 +195,18 @@ async def _process_worktop(worktop: Worktop) -> dict:
     outcome = None
 
     try:
+        # --- Auto-name unnamed worktops ---
+        # Runs first (before archive checks) so a worktop being archived
+        # this tick still gets a name. Best-effort: failures just retry
+        # next tick. Deliberately not gated on tends_enabled — naming is
+        # metadata, not a tend session.
+        try:
+            new_name = await naming.maybe_name_worktop(worktop)
+            if new_name:
+                await notify("worktop_updated", {"id": worktop.id, "name": new_name})
+        except Exception:
+            logger.exception(f"Auto-naming failed for worktop {worktop.id}")
+
         # --- Local-only repos: detect merge into local main and archive ---
         # Done first so a worktree that Claude has switched to main doesn't
         # trip up the assert-not-detached / behind-main checks below.

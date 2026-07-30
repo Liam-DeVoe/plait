@@ -17,6 +17,7 @@ import {
   openSessionInVSCode,
   createInteractiveSession,
   deleteSession,
+  renameWorktop,
   resumeSession,
   forkSession,
   fetchXtermState,
@@ -121,15 +122,30 @@ export default function WorktopDetailPage() {
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     (location.state as any)?.autoFocusSessionId ?? null,
   );
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
 
   const refresh = () => revalidator.revalidate();
 
   useEffect(() => {
-    document.title = `${worktop.branch} | Plait`;
+    document.title = `${worktop.name ?? worktop.branch} | Plait`;
     return () => {
       document.title = "Plait";
     };
-  }, [worktop.branch]);
+  }, [worktop.name, worktop.branch]);
+
+  const startRename = () => {
+    setNameDraft(worktop.name ?? "");
+    setEditingName(true);
+  };
+
+  const saveRename = async () => {
+    setEditingName(false);
+    const trimmed = nameDraft.trim();
+    if (trimmed === (worktop.name ?? "")) return;
+    await renameWorktop(worktop.id, trimmed || null);
+    refresh();
+  };
 
   const handleLaunchSession = async () => {
     setLaunching(true);
@@ -186,10 +202,30 @@ export default function WorktopDetailPage() {
           <div>
             <div className="worktop-detail__title">
               {worktop.repo}{" "}
-              <span className="worktop-detail__title-branch">
-                / {worktop.branch}
-              </span>
+              {editingName ? (
+                <input
+                  className="worktop-detail__name-input"
+                  value={nameDraft}
+                  autoFocus
+                  placeholder="untitled"
+                  onChange={(e) => setNameDraft(e.target.value)}
+                  onBlur={saveRename}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveRename();
+                    if (e.key === "Escape") setEditingName(false);
+                  }}
+                />
+              ) : (
+                <span
+                  className={`worktop-detail__title-name${worktop.name ? "" : " worktop-detail__title-name--untitled"}`}
+                  onClick={startRename}
+                  title="Click to rename. Clear the name to let the daemon pick a new one."
+                >
+                  / {worktop.name ?? "untitled"}
+                </span>
+              )}
             </div>
+            <div className="worktop-detail__branch">{worktop.branch}</div>
             <div className="worktop-detail__badges">
               {worktop.status === "archived" && (
                 <StatusBadge

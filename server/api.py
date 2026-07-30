@@ -786,6 +786,25 @@ async def set_tends_enabled(worktop_id: str, body: dict):
     return await _worktop_dict(updated)
 
 
+class RenameWorktopRequest(BaseModel):
+    name: str | None
+
+
+@app.put("/worktops/{worktop_id}/name")
+async def rename_worktop(worktop_id: str, req: RenameWorktopRequest):
+    """Set or clear the worktop's display name.
+
+    Clearing (null or blank) marks the worktop unnamed, so the daemon
+    auto-names it again on its next tick.
+    """
+    name = req.name.strip() if req.name else None
+    updated = await db.update_worktop(worktop_id, name=name or None)
+    if updated is None:
+        raise HTTPException(status_code=404, detail="Worktop not found")
+    await daemon.notify("worktop_updated", {"id": worktop_id, "name": updated.name})
+    return await _worktop_dict(updated)
+
+
 @app.delete("/worktops/{worktop_id}")
 async def delete_worktop(worktop_id: str):
     worktop = await db.get_worktop(worktop_id)
