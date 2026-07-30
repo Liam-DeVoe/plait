@@ -33,6 +33,14 @@ TRANSCRIPT_HEAD_CHARS = 10_000
 TRANSCRIPT_TAIL_CHARS = 10_000
 # Reject model output longer than this as garbage.
 NAME_MAX_CHARS = 80
+# A session transcript shorter than this contributes no naming signal.
+# Contentless transcripts — failed resumes ("No conversation found..."),
+# bare TUI banners, banner + warning chrome — top out around 2.2k chars
+# in practice, while any session with a submitted prompt passes 3k by
+# its first tool call. Biased high because the costs are asymmetric: an
+# unnamed worktop just retries next tick, but a name confabulated from
+# junk sticks forever.
+MIN_TRANSCRIPT_SIGNAL_CHARS = 3000
 
 PROMPT = """\
 You are naming a unit of development work for display in a dashboard.
@@ -41,6 +49,10 @@ each Claude session transcript (if any).
 
 Respond with ONLY the title — no quotes, no trailing punctuation, no
 explanation.
+
+If the activity shows no discernible task — only terminal chrome,
+banners, or error messages — respond with exactly UNKNOWN instead of
+guessing.
 
 Titles are terse noun phrases, 2-5 words:
 - telegraphic: drop filler verbs ("Implement", "Rewrite") and articles
@@ -96,7 +108,9 @@ async def gather_signal(worktop: Worktop) -> str | None:
     ]
     for i, session in enumerate(sessions):
         transcript = session.transcript.strip()
-        if not transcript:
+        if len(transcript) < MIN_TRANSCRIPT_SIGNAL_CHARS:
+            # Too short to describe any real work: failed resumes, bare
+            # TUI banners, etc. Naming from these confabulates.
             continue
         if len(transcript) <= TRANSCRIPT_HEAD_CHARS + TRANSCRIPT_TAIL_CHARS:
             parts.append(f"## Session {i + 1} transcript\n{transcript}")
@@ -174,6 +188,11 @@ async def maybe_name_worktop(worktop: Worktop) -> str | None:
     name = _sanitize(raw)
     if name is None:
         logger.warning(f"Naming model returned unusable output: {raw[:200]!r}")
+        return None
+    if name.upper() == "UNKNOWN":
+        # The model saw no discernible task in the signal. Leave the
+        # worktop unnamed; it's retried next tick as activity accrues.
+        logger.info(f"Naming model declined to name worktop {worktop.id}")
         return None
 
     await db.update_worktop(worktop.id, name=name)
