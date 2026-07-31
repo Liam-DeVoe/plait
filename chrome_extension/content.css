@@ -1,3 +1,18 @@
 .plait-review-btn {
   margin-right: 8px;
 }
+
+/* The knot icon carries plait's brand blue; the label stays GitHub-native.
+   GitHub exposes its theme on <html data-color-mode>: "light"/"dark" are
+   forced, "auto" follows the OS. Lighten the blue on dark backgrounds. */
+.plait-review-btn .plait-knot {
+  color: #5b7fc7;
+}
+html[data-color-mode="dark"] .plait-review-btn .plait-knot {
+  color: #8fb0e8;
+}
+@media (prefers-color-scheme: dark) {
+  html[data-color-mode="auto"] .plait-review-btn .plait-knot {
+    color: #8fb0e8;
+  }
+}
