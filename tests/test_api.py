@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -717,3 +718,118 @@ async def test_resume_alive_session_fails(client, mock_pty):
     # Session is alive (mock default), so resume should fail
     resp = await c.post(f"/worktops/{worktop_id}/sessions/{session_id}/resume")
     assert resp.status_code == 400
+
+
+# --- /open-issue ---
+
+
+def _issue_url(git_env, number=7):
+    from server.config import get_repo
+
+    upstream = get_repo(git_env.repo_id).upstream
+    return f"https://github.com/{upstream}/issues/{number}"
+
+
+@pytest.fixture
+def mock_spawn_session():
+    """Patch spawn_session in server.api to inspect the seeded prompt."""
+    import server.api as api_module
+
+    with patch.object(api_module, "spawn_session") as mock:
+        yield mock
+
+
+async def test_open_issue_creates_worktop(client, mock_spawn_session):
+    """First click on an issue creates a worktop and seeds an investigate session."""
+    c, git_env, _ = client
+    issue_url = _issue_url(git_env)
+
+    resp = await c.post("/open-issue", json={"issue_url": issue_url})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["created"] is True
+    assert f"/worktops/{data['worktop_id']}" in data["url"]
+
+    resp = await c.get(f"/worktops/{data['worktop_id']}")
+    assert resp.status_code == 200
+    worktop = resp.json()
+    assert worktop["repo"] == git_env.repo_id
+    assert worktop["issue_url"] == issue_url
+    assert worktop["branch"].startswith("plait/worktop-")
+
+    mock_spawn_session.assert_called_once()
+    assert (
+        mock_spawn_session.call_args.kwargs["initial_input"]
+        == f"investigate {issue_url}"
+    )
+
+    # The session is recorded on the worktop
+    resp = await c.get(f"/worktops/{data['worktop_id']}/sessions")
+    sessions = resp.json()
+    assert len(sessions) == 1
+    assert sessions[0]["role"] == "user"
+
+
+async def test_open_issue_reuses_open_worktop(client, mock_spawn_session):
+    """A second click on the same issue returns the existing open worktop."""
+    c, git_env, _ = client
+    issue_url = _issue_url(git_env)
+
+    first = (await c.post("/open-issue", json={"issue_url": issue_url})).json()
+    second_resp = await c.post("/open-issue", json={"issue_url": issue_url})
+    assert second_resp.status_code == 200
+    second = second_resp.json()
+    assert second["created"] is False
+    assert second["worktop_id"] == first["worktop_id"]
+    # No second worktop, no second session
+    assert mock_spawn_session.call_count == 1
+    resp = await c.get("/worktops")
+    assert len(resp.json()) == 1
+
+
+async def test_open_issue_url_canonicalized(client, mock_spawn_session):
+    """Fragments and query strings on the clicked URL key to the same worktop."""
+    c, git_env, _ = client
+    issue_url = _issue_url(git_env)
+
+    first = (await c.post("/open-issue", json={"issue_url": issue_url})).json()
+    second = (
+        await c.post("/open-issue", json={"issue_url": f"{issue_url}#issuecomment-123"})
+    ).json()
+    assert second["created"] is False
+    assert second["worktop_id"] == first["worktop_id"]
+
+
+async def test_open_issue_archived_worktop_starts_fresh(client, mock_spawn_session):
+    """An archived worktop for the issue doesn't match; a new one is created."""
+    c, git_env, _ = client
+    issue_url = _issue_url(git_env)
+
+    first = (await c.post("/open-issue", json={"issue_url": issue_url})).json()
+    await c.post(f"/worktops/{first['worktop_id']}/archive")
+
+    second_resp = await c.post("/open-issue", json={"issue_url": issue_url})
+    assert second_resp.status_code == 200
+    second = second_resp.json()
+    assert second["created"] is True
+    assert second["worktop_id"] != first["worktop_id"]
+
+
+async def test_open_issue_unregistered_repo(client, mock_spawn_session):
+    c, _, _ = client
+    resp = await c.post(
+        "/open-issue",
+        json={"issue_url": "https://github.com/unknown/repo/issues/1"},
+    )
+    assert resp.status_code == 400
+    assert "No configured repo" in resp.json()["detail"]
+    assert not mock_spawn_session.called
+
+
+async def test_open_issue_malformed_url(client, mock_spawn_session):
+    c, _, _ = client
+    resp = await c.post(
+        "/open-issue", json={"issue_url": "https://github.com/not-an-issue"}
+    )
+    assert resp.status_code == 400
+    assert not mock_spawn_session.called

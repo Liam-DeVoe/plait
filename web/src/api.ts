@@ -7,6 +7,7 @@ export interface Worktop {
   worktree_path: string;
   pr_number: number | null;
   pr_url: string | null;
+  issue_url: string | null;
   ci_status: "unknown" | "pending" | "passing" | "failing";
   tend_status: "current" | "running";
   tends_enabled: boolean;
