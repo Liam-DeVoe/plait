@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS worktops (
     worktree_path TEXT NOT NULL,
     pr_number INTEGER,
     pr_url TEXT,
+    issue_url TEXT,
     ci_status TEXT NOT NULL DEFAULT 'unknown',
     ci_failure_expected_sha TEXT,
     pr_comment_count INTEGER NOT NULL DEFAULT 0,
@@ -161,11 +162,11 @@ async def create_worktop(worktop: Worktop) -> Worktop:
     db = await get_db()
     await db.execute(
         """INSERT INTO worktops (id, slate_id, repo, name, branch, worktree_path,
-           pr_number, pr_url, ci_status, ci_failure_expected_sha,
+           pr_number, pr_url, issue_url, ci_status, ci_failure_expected_sha,
            pr_comment_count, pr_reaction_count,
            sync_status, status, created_at, archived_at, archive_reason,
            last_activity_at, tends_enabled)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             worktop.id,
             worktop.slate_id,
@@ -175,6 +176,7 @@ async def create_worktop(worktop: Worktop) -> Worktop:
             worktop.worktree_path,
             worktop.pr_number,
             worktop.pr_url,
+            worktop.issue_url,
             worktop.ci_status.value,
             worktop.ci_failure_expected_sha,
             worktop.pr_comment_count,
@@ -208,6 +210,23 @@ async def list_worktops(status: WorktopStatus | None = None) -> list[Worktop]:
 async def get_worktop(worktop_id: str) -> Worktop | None:
     db = await get_db()
     cursor = await db.execute("SELECT * FROM worktops WHERE id = ?", (worktop_id,))
+    row = await cursor.fetchone()
+    return _row_to_worktop(row) if row else None
+
+
+async def get_open_worktop_by_issue(issue_url: str) -> Worktop | None:
+    """The open worktop tracking a GitHub issue, if any.
+
+    Archived worktops never match: an archived worktop means that round of
+    work is done, and a new click on the issue should start fresh. Newest
+    first in the (unlikely) case of several open worktops on one issue.
+    """
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT * FROM worktops WHERE issue_url = ? AND status = 'open'
+           ORDER BY created_at DESC""",
+        (issue_url,),
+    )
     row = await cursor.fetchone()
     return _row_to_worktop(row) if row else None
 
@@ -247,6 +266,7 @@ def _row_to_worktop(row: aiosqlite.Row) -> Worktop:
         worktree_path=row["worktree_path"],
         pr_number=row["pr_number"],
         pr_url=row["pr_url"],
+        issue_url=row["issue_url"],
         ci_status=CIStatus(row["ci_status"]),
         ci_failure_expected_sha=row["ci_failure_expected_sha"],
         pr_comment_count=row["pr_comment_count"],

@@ -756,6 +756,25 @@ def parse_pr_url(pr_url: str) -> tuple[str, int]:
     return repo_id, int(m.group(2))
 
 
+def parse_issue_url(issue_url: str) -> tuple[str, int]:
+    """Resolve a GitHub issue URL to (repo_id, issue_number) with no network call.
+
+    Raises RuntimeError (surfaced as a 400) if the URL is malformed or no
+    configured repo matches its upstream.
+    """
+    m = re.match(r"https://github\.com/([^/]+/[^/]+)/issues/(\d+)", issue_url)
+    if not m:
+        raise RuntimeError(f"Could not parse repo from URL: {issue_url}")
+    upstream = m.group(1)
+    repo_id = _upstream_to_repo_id(upstream)
+    if repo_id is None:
+        raise RuntimeError(
+            f"No configured repo matches upstream {upstream!r}. "
+            f"Add it on the Settings page first."
+        )
+    return repo_id, int(m.group(2))
+
+
 async def get_pr_info_from_url(pr_url: str) -> dict:
     """Get PR details from a GitHub PR URL using gh CLI.
     Returns dict with keys: repo_id, number, url, branch, head_url.

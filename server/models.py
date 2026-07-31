@@ -70,6 +70,10 @@ class Worktop:
     worktree_path: str = ""
     pr_number: int | None = None
     pr_url: str | None = None
+    # GitHub issue this worktop was opened from (via the browser extension's
+    # "Open in plait" button). Used to route later clicks on the same issue
+    # back to this worktop while it is open.
+    issue_url: str | None = None
     ci_status: CIStatus = CIStatus.unknown
     ci_failure_expected_sha: str | None = None
     pr_comment_count: int = 0

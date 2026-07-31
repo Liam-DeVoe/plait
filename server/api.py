@@ -670,6 +670,65 @@ async def review_pr(req: ReviewPRRequest):
     return {"status": "opened", "worktree_path": worktree_path}
 
 
+class OpenIssueRequest(BaseModel):
+    issue_url: str
+
+
+@app.post("/open-issue")
+async def open_issue(req: OpenIssueRequest):
+    """Open (or create) the worktop for a GitHub issue.
+
+    Called by the "Open in plait" browser extension button on issue pages.
+    Unlike /review-pr — which makes an ephemeral, daemon-invisible worktree —
+    this creates a full worktop: DB record, daemon tends, the works. If an
+    open worktop already tracks the issue, return it; otherwise create one
+    and seed a session investigating the issue. Archived worktops never
+    match — a click after the fix merged means a fresh round of work.
+    """
+    try:
+        repo_id, issue_number = git.parse_issue_url(req.issue_url)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # Rebuild the URL from the configured upstream so lookups are exact:
+    # trailing fragments (#issuecomment-...) and owner/repo casing in the
+    # clicked URL all key to the same worktop.
+    upstream = config.get_repo(repo_id).upstream
+    issue_url = f"https://github.com/{upstream}/issues/{issue_number}"
+
+    existing = await db.get_open_worktop_by_issue(issue_url)
+    if existing:
+        return {
+            "worktop_id": existing.id,
+            "url": f"http://localhost:5173/worktops/{existing.id}",
+            "created": False,
+        }
+
+    worktop = Worktop(repo=repo_id, issue_url=issue_url)
+    worktop.branch = f"plait/worktop-{worktop.id[:8]}"
+    try:
+        worktop.worktree_path = await git.create_worktree(
+            repo_id, worktop.branch, worktop.id
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    await _install_worktop_files(worktop)
+    await db.create_worktop(worktop)
+
+    session = Session(worktop_id=worktop.id, role=SessionRole.user)
+    await db.create_session(session)
+    cmd, cwd = user_worktop_cmd(session.id, worktop)
+    spawn_session(session.id, cmd, cwd, initial_input=f"investigate {issue_url}")
+
+    await daemon.notify("worktop_updated", {"id": worktop.id, "status": "open"})
+    return {
+        "worktop_id": worktop.id,
+        "url": f"http://localhost:5173/worktops/{worktop.id}",
+        "created": True,
+    }
+
+
 async def _tend_status(worktop_id: str) -> str:
     """Derive tend status from sessions: 'running' if a tend session is active."""
     sessions = await db.list_sessions(worktop_id)
