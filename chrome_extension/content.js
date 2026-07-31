@@ -7,6 +7,13 @@
 // place, so a one-shot injection on load is not enough. We re-run injection
 // on a debounced MutationObserver and guard against duplicates by element id.
 //
+// Because Chrome only injects content scripts at document load — never on
+// pushState/popstate — the manifest matches all of github.com, not just
+// PR/issue URLs. Otherwise a soft navigation (link click or back/forward)
+// from a non-matching page into a PR or issue would land in a document this
+// script was never injected into, and no button would appear. currentPage()
+// gates everything, so on unrelated pages the script idles at near-zero cost.
+//
 // The visible markup is content-hashed (prc-* / *-module__* class names churn
 // on every GitHub deploy), so we anchor on the *stable* data-component
 // attributes Primer emits (PH_Actions, Button, buttonContent, text) and copy
@@ -169,6 +176,15 @@ async function onClick(e, page) {
 
 function inject() {
   const page = currentPage();
+
+  // A soft navigation away from a PR/issue can leave the old header — and
+  // our button — in the DOM. Remove any button that isn't this page's.
+  for (const { buttonId } of Object.values(PAGES)) {
+    if (buttonId !== page?.buttonId) {
+      document.getElementById(buttonId)?.remove();
+    }
+  }
+
   if (!page) return;
   if (document.getElementById(page.buttonId)) return;
 
@@ -195,6 +211,9 @@ function inject() {
 }
 
 // Debounce: the React app mutates the DOM constantly, so coalesce bursts.
+// Observe documentElement, not body: GitHub's Turbo-style navigations can
+// replace the <body> element wholesale, which would leave an observer bound
+// to the old body deaf to everything after. documentElement survives.
 let scheduled = false;
 const observer = new MutationObserver(() => {
   if (scheduled) return;
@@ -204,6 +223,6 @@ const observer = new MutationObserver(() => {
     inject();
   });
 });
-observer.observe(document.body, { childList: true, subtree: true });
+observer.observe(document.documentElement, { childList: true, subtree: true });
 
 inject();

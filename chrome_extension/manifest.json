@@ -30,10 +30,7 @@
   },
   "content_scripts": [
     {
-      "matches": [
-        "https://github.com/*/*/pull/*",
-        "https://github.com/*/*/issues/*"
-      ],
+      "matches": ["https://github.com/*"],
       "js": ["content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"
